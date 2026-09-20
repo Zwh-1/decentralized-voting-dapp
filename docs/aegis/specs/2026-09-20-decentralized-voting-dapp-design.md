@@ -241,7 +241,7 @@ require(ok, "refund failed");
 
 ---
 
-## 6. 链下索引器设计（`indexer/`）
+## 6. 链下索引器设计（现位于 `web/src/lib/indexer/`）
 
 ### 6.1 MySQL schema
 

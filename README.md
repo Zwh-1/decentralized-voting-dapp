@@ -7,6 +7,10 @@
 
 > 这是一个**教学与作品集项目**，不是生产级投票系统。它的重点不在于"能投票"，而在于把链上状态、链下投影、前端展示之间的**一致性**做成可测量、可证伪的东西。请先读[设计取舍与已知局限](#设计取舍与已知局限)。
 
+![投票界面](docs/screenshots/ballot.png)
+
+> 截图取自**未连接钱包**状态（无头 Chrome 渲染，没有注入钱包扩展）。顶部是链上与索引两侧的实时一致性比对，下面每位候选人卡片显示票数。连接钱包后才会出现投票、退款与钱包地址这些交互控件——它们全部依赖钱包签名，因此在这个静态截图中必然缺席，而不是坏了。
+
 ---
 
 ## 目录
@@ -180,6 +184,23 @@ pnpm web:dev
 ---
 
 ## 验证与复现
+
+### 冷克隆可复现性
+
+下列 7 项已在一个**全新 `git clone`**（无 `.env`、无 `node_modules`、无本地链、无数据库）中逐项跑通，全部退出码为 0：
+
+```bash
+git clone <repo> && cd decentralized-voting-dapp
+pnpm install --frozen-lockfile   # 53.8s
+pnpm run typecheck
+pnpm test                        # 合约 49 + 索引器 36，0 失败
+pnpm coverage                    # Voting.sol 100.00 / 100.00
+pnpm export-abi && git diff --exit-code -- web/src/lib/contracts
+pnpm run build:web
+pnpm run format:check
+```
+
+这组命令**不需要**链、数据库、IPFS 网关或任何凭证。需要外部依赖的 M-5（gas）与 M-6（一致性）在下面的小节里单独说明。
 
 ### 全部测试与覆盖率
 
