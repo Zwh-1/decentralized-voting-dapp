@@ -490,8 +490,55 @@ allowBuilds:
 
 原规格 pin 的 `0.8.37` 可用（M0 编译实测：`Compiled 2 Solidity files with solc 0.8.37`），无需回退到模板默认的 0.8.34。
 
+### 校正 7：Hardhat 3.17.0 的 invariant 运行器不调用任何 target，M-4 因此改用可自证的方案
+
+**这是本项目最重要的一次实测校正。** 原规格把 M-4 的 1000 轮证据寄托在 `test.solidity.invariant.runs: 1000` 上。实测结论是：**运行器会求值 `invariant_*` 函数，但不会调用任何目标合约函数**，因此任何依赖 ghost 计数器的不变量都会以零计数通过——即"1000 轮 0 反例"是一份空转的假证据。
+
+判定过程（全部为实测，非推断）：
+
+1. 按官方约定写了 `invariant_*` 函数并按 Foundry 惯例部署了独立 handler 合约，输出显示 `(runs: 1000)` 且全部通过；
+2. **负向对照**：注释掉 `Voting.vote` 中的 `hasVoted[msg.sender] = true`（该变异经确认会让 3 个普通测试失败），invariant **仍然全部通过**——证明没有任何一次投票被尝试过；
+3. 为排除"handler 定义在 `.t.sol` 测试文件里所以不被选为目标"的可能，把 handler 移到普通源文件 `test/VotingHandler.sol`（有 artifact），结果不变；
+4. 为排除 target 选择机制的问题，尝试 `targetContract(address(handler))`、以及把驱动函数直接放在测试合约自身（官方示例的形态），结果均不变；
+5. **决定性探测**：写入一个必假的不变量 `assertEq(1, 2)`，它**失败**了——证明运行器确实在求值不变量，问题只在于 target 集合为空；
+6. 查 `@nomicfoundation/edr@0.20.0` 的 `InvariantConfigArgs` 类型定义，其中**不存在任何 target/contract 相关字段**（仅 `runs`/`depth`/`failOnRevert`/`callOverride`/`dictionaryWeight`/`includeStorage`/`includePushBytes`/`failurePersistDir`/`timeout`），与观测一致。
+
+**处理**：删除 `VotingInvariant.t.sol` 与 `test/VotingHandler.sol`。一份静默空转的测试比没有测试更危险，因为它会伪装成证据。
+
+**替代方案**（`contracts/contracts/VotingProperties.t.sol`）：确定性伪随机驱动 **1000 轮**投票（40 名选民 × 3 名候选人，序列由 `keccak256(seed, round)` 生成，完全可复现），在**每一轮之后**断言全部不变量，并额外断言"这 1000 轮确实产生了工作"（`accepted + rejected == 1000`、`accepted == 40`、`marked == accepted`）。
+
+**该替代方案同样经过负向对照**：注入同一个 `hasVoted` 变异后，它以 `votes can never exceed the whitelist size: 41 > 40` 失败。因此 M-4 的证据是可证伪的，而不是空转的。
+
+**面试价值**：这条记录本身就是"你怎么知道测试真的在测东西"的答案——先证明测试能失败，再报告它通过了。
+
+### 校正 8：重入对照从三组扩展为四组
+
+原规格 §5.5 断言"CEI 单独就足以阻止该重入，`nonReentrant` 属纵深防御"，并只计划了两个对照（脆弱合约 + 生产合约）。但生产合约中 `nonReentrant` 会先于 CEI 生效，导致**守卫的贡献不可观测**——该断言无法被证明。
+
+因此扩展为四组合约矩阵，每一层都被独立验证：
+
+| 变体 | CEI | 守卫 | 攻击结果 | 断言 |
+|---|---|---|---|---|
+| `VulnerableRefund` | ✗ | ✗ | 攻击成功 | 攻击者取回 3×STAKE，合约余额归零 |
+| `CEIOnlyRefund` | ✓ | ✗ | 攻击失败 | 攻击者只取回 1×STAKE，受害者余额完好 |
+| `GuardOnlyRefund` | ✗ | ✓ | 攻击失败 | 攻击者只取回 1×STAKE，且重入尝试被记录 |
+| `Voting`（生产） | ✓ | ✓ | 攻击失败 | 攻击者只取回 1×STAKE，账目一致 |
+
+四个变体全部为测试夹具（`contracts/contracts/test/`），通过 `coverage.skipFiles` 排除在覆盖率分母之外，绝不进入部署路径。
+
+## 15. M1 实测结果
+
+| 指标 | 结果 |
+|---|---|
+| M-1 覆盖率 | `contracts/Voting.sol` 行覆盖率 **100.00%**，语句覆盖率 **100.00%** |
+| M-2 授权拦截 | 非白名单、重复投票、阶段错误（4 种）、质押金额错误、未知候选人、零地址、非管理员 → 全部 revert，无例外 |
+| M-3 重入对照 | 四组矩阵全部按预期（见校正 8） |
+| M-4 不变量 | 1000 轮确定性投票序列 + 256 轮 fuzz，0 反例；且经变异测试证明可失败（见校正 7） |
+| M-5 Gas | `vote` 中位 **109,256**（min 109,256 / avg 119,250 / max 143,456）；`refund` **37,920**；部署 **1,249,757**；运行时代码 5,298 字节 |
+| 测试总数 | Solidity 41 个 + TypeScript(viem) 8 个 = **49 个，全部通过** |
+
 ### 遗留的复现风险
 
 - **GitHub 连通性**：`forge-std` 的 git 依赖在弱网下可能安装失败（校正 3）。
 - **工具链版本漂移**：`hardhat`, `viem`, `@nomicfoundation/*` 均以精确版本固定；任一升级需重跑 M-1 … M-6。
-- **`test.solidity.invariant.runs` 设为 1000**：M-4 的 1000 轮证据来自该配置，属实测运行时间与证据强度的折中（每次运行最多 100 次调用）。
+- **Hardhat invariant 测试不可用**：若未来版本修复了 target 调用，应考虑用真正的 invariant 测试替换 `VotingProperties.t.sol` 的 1000 轮序列（保留后者作为确定性回归）。升级 Hardhat 后必须重跑校正 7 中的必假不变量探测。

@@ -42,9 +42,16 @@ export default defineConfig({
 
   test: {
     solidity: {
-      // M-4 evidence: 1000 invariant runs, each exploring up to 100 calls.
+      // M-4 evidence: fuzz tests run 256 cases each.
+      //
+      // There is deliberately no `invariant` block here. Hardhat 3.17.0
+      // evaluates `invariant_*` functions but never invokes a target contract,
+      // so any invariant reading a ghost counter passes vacuously. The 1000
+      // round evidence for M-4 comes from
+      // contracts/contracts/VotingProperties.t.sol instead, which is validated
+      // by a mutation-based negative control. See the design spec's correction
+      // log for the full experiment.
       fuzz: { runs: 256 },
-      invariant: { runs: 1000, depth: 100 },
     },
   },
 

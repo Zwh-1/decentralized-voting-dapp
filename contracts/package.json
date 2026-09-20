@@ -4,9 +4,6 @@
   "private": true,
   "type": "module",
   "description": "Voting smart contracts: Hardhat 3 + Solidity 0.8.x + OpenZeppelin 5",
-  "exports": {
-    "./deployment": "./src/deployment.ts"
-  },
   "scripts": {
     "build": "hardhat build",
     "clean": "hardhat clean",

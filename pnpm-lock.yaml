@@ -45,6 +45,12 @@ importers:
         specifier: 2.56.8
         version: 2.56.8(typescript@6.0.3)(zod@3.25.76)
 
+  packages/shared:
+    devDependencies:
+      typescript:
+        specifier: ~6.0.3
+        version: 6.0.3
+
 packages:
 
   '@actions/core@3.0.1':
