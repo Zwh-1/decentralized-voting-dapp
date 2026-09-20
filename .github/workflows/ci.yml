@@ -159,6 +159,12 @@ jobs:
       # No confirmation window here: the job compares the whole chain against
       # the whole index, so lag must not be excused.
       CONFIRMATIONS: "0"
+      # Smaller than the chain on purpose. The default of 2000 is larger than the
+      # 406-block seeded chain, so every drain would finish in a single chunk and
+      # the chunk loop in `drain.ts` would never iterate — the boundary handling
+      # between chunks was asserted only by unit tests over a fake chain. At 7 the
+      # drain runs 58 rounds, so the loop and its boundaries are exercised for real.
+      CHUNK_BLOCKS: "7"
 
     steps:
       - uses: actions/checkout@v4

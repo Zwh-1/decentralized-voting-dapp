@@ -27,12 +27,70 @@ import {
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
 
+/**
+ * The three labels in the 合约状态 panel that describe the tally read.
+ *
+ * Pure so the "unknown is not zero" rule can be tested without a browser. Every
+ * one of these used to collapse three states into two:
+ *
+ * - the source fell through to `"链上直读"` for a query that had failed, so the
+ *   panel claimed a direct chain read while the chain was unreachable;
+ * - the total used `?? 0`, announcing "0 votes" when nothing had been read;
+ * - the candidate count used `list.length`, announcing "0 candidates" likewise.
+ *
+ * "We could not find out" is a different claim from "the answer is zero", and the
+ * page must not answer the second when it means the first.
+ */
+export function tallyLabels(query: {
+  isPending: boolean;
+  isError: boolean;
+  source?: "chain" | "index";
+  total?: number;
+  candidateCount: number;
+}): { source: string; total: string; candidates: string } {
+  if (query.isError) {
+    return { source: "读取失败", total: "—", candidates: "—" };
+  }
+
+  if (query.isPending || query.source === undefined) {
+    return { source: "读取中…", total: "—", candidates: "—" };
+  }
+
+  return {
+    source: query.source === "index" ? "MySQL 索引" : "链上直读",
+    total: String(query.total ?? 0),
+    candidates: String(query.candidateCount),
+  };
+}
+
+/**
+ * A single on-chain read has three outcomes, and the UI needs all three.
+ *
+ * `hasData` is checked first because a successful read of `0` is still a real
+ * answer: `stakeOf` legitimately returns 0 for an address that never voted, and
+ * that must stay distinguishable from a read that never completed.
+ */
+export function readStatus(hasData: boolean, isError: boolean): "ready" | "loading" | "failed" {
+  if (hasData) {
+    return "ready";
+  }
+  return isError ? "failed" : "loading";
+}
+
 export interface BallotProps {
   /** Prefetched on the server so the first paint already has real data. */
   initialTally: TallyResponse | null;
   initialResults: ResultsResponse | null;
   initialHealth: HealthResponse | null;
-  /** Set when the server could not read the chain at all. */
+  /**
+   * Which of the server's three reads failed, and why, or null when all three
+   * succeeded.
+   *
+   * Per-read rather than one flag for the whole page: the reads fail
+   * independently, and a single string let a failed comparison read as if the
+   * chain itself had been unreadable while the tally beside it came from a
+   * successful read.
+   */
   initialError: string | null;
 }
 
@@ -131,6 +189,15 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
 
   const myCandidateId = votedFor.data === undefined ? undefined : Number(votedFor.data);
   const myStake = stakeOf.data ?? 0n;
+  // `?? 0n` above is only safe for arithmetic. Reporting the stake is a different
+  // question: a failed `stakeOf` read used to fall through to "没有可取回的押金。",
+  // a confident claim about the user's money derived from a request that never
+  // completed. `sweepUnclaimed()` hands an unclaimed stake to the owner once the
+  // grace period passes, so telling someone they have nothing to reclaim when the
+  // balance is merely unknown can cost them the stake.
+  const phaseStatus = readStatus(phase.data !== undefined, phase.isError);
+  const stakeStatus = readStatus(stakeOf.data !== undefined, stakeOf.isError);
+  const whitelistStatus = readStatus(whitelisted.data !== undefined, whitelisted.isError);
   const hasVotedValue = hasVoted.data === true;
   const isWhitelistedValue = whitelisted.data === true;
 
@@ -145,28 +212,38 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
     ? `当前链（${chainId}）没有已登记的合约地址，无法取回押金。`
     : !isConnected
       ? "请先连接钱包。"
-      : currentPhase === undefined
-        ? "正在读取合约状态…"
+      : phaseStatus !== "ready"
+        ? phaseStatus === "failed"
+          ? "读取合约阶段失败，无法判断能否取回押金；请检查 RPC 后重试。"
+          : "正在读取合约状态…"
         : currentPhase === VotingPhase.Voting
           ? "投票还在进行中，结束后才能取回押金。"
-          : myStake === 0n
-            ? "没有可取回的押金。"
-            : undefined;
+          : stakeStatus !== "ready"
+            ? stakeStatus === "failed"
+              ? "读取押金余额失败，无法判断是否有可取回的押金；请检查 RPC 后重试。"
+              : "正在读取押金余额…"
+            : myStake === 0n
+              ? "没有可取回的押金。"
+              : undefined;
 
   const disabledReason = !contractKnown
     ? `当前链（${chainId}）没有已登记的合约地址，无法投票。`
     : !isConnected
       ? "请先连接钱包。"
-      : currentPhase === undefined
-        ? "正在读取合约状态…"
+      : phaseStatus !== "ready"
+        ? phaseStatus === "failed"
+          ? "读取合约阶段失败，无法判断能否投票；请检查 RPC 后重试。"
+          : "正在读取合约状态…"
         : currentPhase === VotingPhase.Setup
           ? "投票尚未开始。"
           : currentPhase === VotingPhase.Ended
             ? "投票已结束，现在可以取回押金。"
             : hasVotedValue
               ? "每个地址只能投一票。"
-              : whitelisted.data === undefined
-                ? "正在读取白名单状态…"
+              : whitelistStatus !== "ready"
+                ? whitelistStatus === "failed"
+                  ? "读取白名单状态失败，无法判断能否投票；请检查 RPC 后重试。"
+                  : "正在读取白名单状态…"
                 : whitelisted.data === false
                   ? "这个地址不在白名单里，合约会拒绝投票。"
                   : undefined;
@@ -191,7 +268,14 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
   }
 
   const list = tally.data?.candidates ?? [];
-  const totalVotes = tally.data?.total ?? 0;
+  const totalVotes = tally.data?.total;
+  const labels = tallyLabels({
+    isPending: tally.isPending,
+    isError: tally.isError,
+    ...(tally.data?.source !== undefined ? { source: tally.data.source } : {}),
+    ...(totalVotes !== undefined ? { total: totalVotes } : {}),
+    candidateCount: list.length,
+  });
 
   return (
     <main className="mx-auto max-w-5xl px-5 py-10">
@@ -210,7 +294,8 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
 
       {initialError !== null && (
         <section className="mt-6 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-          服务端无法读取链上数据：{initialError}
+          服务端有读取失败（下面能读到的数据仍会显示）：
+          {initialError}
           <br />
           请确认 <code className="font-mono">web/.env</code> 里的{" "}
           <code className="font-mono">RPC_URL</code> 可达，且目标链上已部署合约、并已执行过{" "}
@@ -235,12 +320,14 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
           <Row label="合约地址">
             <span className="font-mono text-xs">{contractKnown ? contractAddress : "未登记"}</span>
           </Row>
-          <Row label="数据来源">{tally.data?.source === "index" ? "MySQL 索引" : "链上直读"}</Row>
-          <Row label="票数合计">{totalVotes}</Row>
+          <Row label="数据来源">{labels.source}</Row>
+          <Row label="票数合计">{labels.total}</Row>
           <Row label="索引高度">
-            {health.data === undefined || !health.data.indexConfigured
-              ? "未启用"
-              : `${health.data.lastIndexedBlock ?? "—"} / 链头 ${health.data.chainHead ?? "—"}`}
+            {health.data === undefined
+              ? "读取中…"
+              : !health.data.indexConfigured
+                ? "未启用"
+                : `${health.data.lastIndexedBlock ?? "—"} / 链头 ${health.data.chainHead ?? "—"}`}
           </Row>
           <Row label="落后区块">{health.data?.lagBlocks ?? "—"}</Row>
           {health.data?.indexConfigured === true && health.data.indexerLoopEnabled === false && (
@@ -307,7 +394,7 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
 
       <section className="mt-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-slate-900">候选人（{list.length}）</h2>
+          <h2 className="text-sm font-semibold text-slate-900">候选人（{labels.candidates}）</h2>
           <ConsistencyBadge
             results={results.data}
             isLoading={results.isPending}
@@ -332,7 +419,9 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
             <CandidateCard
               key={candidate.id}
               candidate={candidate}
-              totalVotes={totalVotes}
+              // Only reached when `list` is non-empty, which requires tally data,
+              // so the total is genuinely known here.
+              totalVotes={totalVotes ?? 0}
               canVote={
                 votingOpen && isConnected && !hasVotedValue && contractKnown && isWhitelistedValue
               }

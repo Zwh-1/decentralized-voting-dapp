@@ -75,20 +75,21 @@ flowchart LR
 
 以下数字全部来自本仓库中可复现的命令，不是估计值。
 
-| 编号 | 指标               | 实测结果                                                                                                                                                                                | 复现命令                         |
-| ---- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| M-1  | 合约覆盖率         | `Voting.sol` 行 **100.00%**、语句 **100.00%**                                                                                                                                           | `pnpm coverage`                  |
-| M-2  | 越权与非法调用拦截 | 7 类路径全部 revert：非白名单、重复投票、阶段错误（4 种）、押金金额错误、未知候选人、零地址、非管理员                                                                                   | `pnpm test:contracts`            |
-| M-3  | 重入攻击防护       | 四组对照矩阵全部符合预期（见下）                                                                                                                                                        | `pnpm test:contracts`            |
-| M-4  | 长序列属性测试     | 1000 轮确定性随机投票 + 256 轮 fuzz，**0 反例**，且经变异测试证明可失败                                                                                                                 | `pnpm test:contracts`            |
-| M-5  | Gas（中位数）      | `vote` **109,256**；`refund` **37,920**；部署 **1,249,757**；运行时代码 5,298 字节                                                                                                      | `pnpm gas`                       |
-| M-6  | 链上/索引一致性    | **200 / 200 票，0 处偏差**（3 名候选人逐一比对）；`CONFIRMATIONS=5` 下索引合法落后至 197 票时**仍判定一致**（加回 3 票待确认）；同样的落后叠加删掉 1 行则**判定不一致**并定位到候选人 2 | `pnpm indexer:check-consistency` |
-| M-6b | 索引幂等性         | 游标回退到 0 强制重放：404 行**全部命中重复，插入 0 行**，票数仍为 200（未翻倍）                                                                                                        | 见[验证与复现](#验证与复现)      |
-| M-6c | 真实链重组         | `evm_revert` 让链头 407→406：索引报告 `rewound`、孤立事件行被删（201→200）、**票数仍为 200**                                                                                            | `pnpm indexer:reorg-drill`       |
-| M-6d | 真实退款入库       | `0.001 ETH` 全额入库（`amount_wei` 逐位相同、无精度丢失）、**票数不变**、回退后索引撤销退款与阶段行                                                                                     | `pnpm indexer:refund-drill`      |
-| M-6e | 浏览器端写入路径   | 注入钱包后驱动真实 DOM：未白名单账户按钮禁用并说明理由；**已白名单账户可点且确认上链**；**退款可点，链上 `stakeOf` 读回 0**；全程无"提交中…"假状态                                      | `pnpm ui:drill`                  |
-| M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                    | `pnpm build:web`                 |
-| —    | 测试总数           | **132 个**（合约 41 Solidity + 8 TypeScript，索引器 83）                                                                                                                                | `pnpm test`                      |
+| 编号 | 指标               | 实测结果                                                                                                                                                                                | 复现命令                                             |
+| ---- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| M-1  | 合约覆盖率         | `Voting.sol` 行 **100.00%**、语句 **100.00%**                                                                                                                                           | `pnpm coverage`                                      |
+| M-2  | 越权与非法调用拦截 | 7 类路径全部 revert：非白名单、重复投票、阶段错误（4 种）、押金金额错误、未知候选人、零地址、非管理员                                                                                   | `pnpm test:contracts`                                |
+| M-3  | 重入攻击防护       | 四组对照矩阵全部符合预期（见下）                                                                                                                                                        | `pnpm test:contracts`                                |
+| M-4  | 长序列属性测试     | 1000 轮确定性随机投票 + 256 轮 fuzz，**0 反例**，且经变异测试证明可失败                                                                                                                 | `pnpm test:contracts`                                |
+| M-5  | Gas（中位数）      | `vote` **109,256**；`refund` **37,920**；部署 **1,249,757**；运行时代码 5,298 字节                                                                                                      | `pnpm gas`                                           |
+| M-6  | 链上/索引一致性    | **200 / 200 票，0 处偏差**（3 名候选人逐一比对）；`CONFIRMATIONS=5` 下索引合法落后至 197 票时**仍判定一致**（加回 3 票待确认）；同样的落后叠加删掉 1 行则**判定不一致**并定位到候选人 2 | `pnpm indexer:check-consistency`                     |
+| M-6b | 索引幂等性         | 游标回退到 0 强制重放：404 行**全部命中重复，插入 0 行**，票数仍为 200（未翻倍）                                                                                                        | 见[验证与复现](#验证与复现)                          |
+| M-6c | 真实链重组         | `evm_revert` 让链头 407→406：索引报告 `rewound`、孤立事件行被删（201→200）、**票数仍为 200**                                                                                            | `pnpm indexer:reorg-drill`                           |
+| M-6d | 真实退款入库       | `0.001 ETH` 全额入库（`amount_wei` 逐位相同、无精度丢失）、**票数不变**、回退后索引撤销退款与阶段行                                                                                     | `pnpm indexer:refund-drill`                          |
+| M-6e | 浏览器端写入路径   | 注入钱包后驱动真实 DOM：未白名单账户按钮禁用并说明理由；**已白名单账户可点且确认上链**；**退款可点，链上 `stakeOf` 读回 0**；全程无"提交中…"假状态                                      | `pnpm ui:drill`                                      |
+| M-6f | 分块大小无关性     | `CHUNK_BLOCKS` = 1 / 7 / 2000 三种取值完整重建，投影逐位相同（`1` 时为 406 轮、插入 404、重复 0）                                                                                       | 见[分块大小不影响结果](#m-6b-附加分块大小不影响结果) |
+| M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                    | `pnpm build:web`                                     |
+| —    | 测试总数           | **141 个**（合约 41 Solidity + 8 TypeScript，索引器 92）                                                                                                                                | `pnpm test`                                          |
 
 ### M-3：四组重入对照矩阵
 
@@ -198,7 +199,7 @@ pnpm web:dev
 git clone <repo> && cd decentralized-voting-dapp
 pnpm install --frozen-lockfile   # 53.8s
 pnpm run typecheck
-pnpm test                        # 合约 49 + 索引器 83，0 失败
+pnpm test                        # 合约 49 + 索引器 92，0 失败
 pnpm coverage                    # Voting.sol 100.00 / 100.00
 pnpm export-abi && git diff --exit-code -- web/src/lib/contracts
 pnpm run build:web
@@ -268,7 +269,7 @@ cd .. && pnpm run seed:local                           # 部署 + 200 票（约 
 
 ```bash
 pnpm typecheck            # Next.js 层类型检查
-pnpm test                 # 合约 49 个 + 索引器 83 个
+pnpm test                 # 合约 49 个 + 索引器 92 个
 pnpm coverage             # Voting.sol 行/语句覆盖率
 pnpm gas                  # gas 统计表
 pnpm build:web            # Next.js 生产构建
@@ -387,6 +388,25 @@ pnpm indexer:check-consistency
 ```
 
 > 测量前请先停掉应用（或设 `INDEXER_ENABLED=false`）：否则后台循环会抢先把游标推回链头，`drain` 就只能看到 `rounds: 0`。
+
+### M-6b 附加：分块大小不影响结果
+
+`CHUNK_BLOCKS` 默认为 2000，而播种链只有 406 块——也就是说 `drain.ts` 的分块循环**一直是单轮**，其边界行为只有针对假链的单测。清空投影表后以不同分块大小完整重建，三种取值的结果逐位相同：
+
+| `CHUNK_BLOCKS` | 轮数 | 事件行 | 插入 | 重复 | 投影（candidates / votes / whitelist / phase / 游标） | tally        |
+| -------------- | ---- | ------ | ---- | ---- | ----------------------------------------------------- | ------------ |
+| `1`            | 406  | 404    | 404  | 0    | 3 / 200 / 200 / 1 / 406                               | 67 / 67 / 66 |
+| `7`            | 58   | 404    | 404  | 0    | 同上                                                  | 同上         |
+| `2000`（默认） | 1    | 404    | 404  | 0    | 同上                                                  | 同上         |
+
+`CHUNK_BLOCKS=1` 让每个区块各成一个分块，是边界覆盖最强的情形（每个事件的起止都落在分块边缘）。三种取值下 `pnpm indexer:check-consistency` 均为 `consistent`、200/200。CI 的 `indexer-e2e` 作业把 `CHUNK_BLOCKS` 设为 `7`，因此分块边界在每次推送时都被真实穿过，而不是只由单测断言。
+
+```bash
+mysql -u root -p voting -e "DELETE FROM votes; DELETE FROM refunds; DELETE FROM whitelist_events;
+  DELETE FROM phase_events; DELETE FROM candidates; UPDATE sync_cursor SET last_block = 0;"
+CHUNK_BLOCKS=1 pnpm indexer:drain   # 期望 rounds: 406, inserted: 404
+pnpm indexer:check-consistency      # 必须是 consistent
+```
 
 ### M-6c：真实链重组演练
 
@@ -662,8 +682,8 @@ CONFIRMATIONS=5
 │   │   │   └── contracts/         # ABI 与部署地址（由 export-abi 生成）
 │   │   └── instrumentation.ts     # 启动后台索引循环
 │   ├── scripts/                   # migrate / drain / check-consistency / reorg-drill / refund-drill
-│   └── test/                      # 83 个单测，不需要链或数据库
-├── docs/aegis/                    # 设计规格、基线、13 条 ADR、实测校正记录
+│   └── test/                      # 92 个单测，不需要链或数据库
+├── docs/aegis/                    # 设计规格、基线、14 条 ADR、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）
 └── .github/workflows/ci.yml       # 5 条流水线
 ```
