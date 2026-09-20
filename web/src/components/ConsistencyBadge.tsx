@@ -56,6 +56,11 @@ export function ConsistencyBadge({ results, isLoading, isError }: Props) {
           {results.pendingVotes > 0 ? `（已计入 ${results.pendingVotes} 票待确认）` : ""}
         </Badge>
       );
+
+    default:
+      // An unrecognised status means this bundle is older than the API it is
+      // talking to. Naming that beats rendering nothing at all.
+      return <Badge tone="warn">无法比对（未知状态：{String(results.status)}）</Badge>;
   }
 }
 
