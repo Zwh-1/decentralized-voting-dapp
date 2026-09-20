@@ -10,11 +10,13 @@ import { planNextRange, planReorgRewind } from "./plan.js";
  */
 export interface ChainReader {
   getBlockNumber(): Promise<bigint>;
-  getLogs(args: {
-    address: `0x${string}`;
-    fromBlock: bigint;
-    toBlock: bigint;
-  }): Promise<readonly { blockNumber: bigint | null; transactionHash: string | null; logIndex: number | null }[]>;
+  getLogs(args: { address: `0x${string}`; fromBlock: bigint; toBlock: bigint }): Promise<
+    readonly {
+      blockNumber: bigint | null;
+      transactionHash: string | null;
+      logIndex: number | null;
+    }[]
+  >;
 }
 
 export interface Logger {
@@ -317,7 +319,11 @@ export function startSyncLoop(deps: SyncDeps & { pollIntervalMs: number }): Loop
         const backoff = Math.min(deps.pollIntervalMs * 2 ** (consecutiveFailures - 1), 60_000);
 
         logger.error(
-          { err: error instanceof Error ? error.message : String(error), backoff, consecutiveFailures },
+          {
+            err: error instanceof Error ? error.message : String(error),
+            backoff,
+            consecutiveFailures,
+          },
           "sync iteration failed; retrying",
         );
 

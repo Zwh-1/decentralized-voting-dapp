@@ -2,7 +2,8 @@ import { createConfig, http } from "wagmi";
 import { hardhat, sepolia } from "wagmi/chains";
 import { injected } from "wagmi/connectors";
 
-const localRpcUrl = (import.meta.env.VITE_LOCAL_RPC_URL as string | undefined) ?? "http://127.0.0.1:8545";
+const localRpcUrl =
+  (import.meta.env.VITE_LOCAL_RPC_URL as string | undefined) ?? "http://127.0.0.1:8545";
 
 /**
  * wagmi configuration.

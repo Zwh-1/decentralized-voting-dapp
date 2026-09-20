@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # Hardhat 3 requires Node >= 22.13.0; this project was developed and verified
+  # on 24.x, which is what CI pins so a green run means something.
+  NODE_VERSION: "24"
+
+jobs:
+  contracts:
+    name: Contracts (build, test, coverage, gas)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Compile
+        run: pnpm run build:contracts
+
+      - name: Solidity and TypeScript tests
+        run: pnpm run test:contracts
+
+      - name: Coverage
+        run: pnpm run coverage
+
+      - name: Gas statistics
+        run: pnpm run gas
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: contracts/coverage/html
+          if-no-files-found: ignore
+
+  abi-drift:
+    name: Generated ABI is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Regenerate and compare
+        # The committed ABI in @voting/shared is what the indexer and frontend
+        # compile against. Regenerating it and requiring a clean diff is what
+        # stops it from silently going stale.
+        run: |
+          pnpm run build:contracts
+          pnpm run export-abi
+          git diff --exit-code -- packages/shared/src
+
+  indexer:
+    name: Indexer (schema, typecheck, tests)
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: voting
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      DATABASE_URL: mysql://root:root@127.0.0.1:3306/voting
+      RPC_URL: http://127.0.0.1:8545
+      CHAIN_ID: "31337"
+      CONFIRMATIONS: "0"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --filter @voting/indexer typecheck
+
+      - name: Unit tests
+        run: pnpm run test:indexer
+
+      - name: Apply the schema to a real MySQL
+        # Proves schema.sql is valid MySQL 8.4 and that the migration is
+        # genuinely idempotent by running it twice.
+        run: |
+          pnpm run indexer:migrate
+          pnpm run indexer:migrate
+
+  web:
+    name: Frontend (typecheck, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Build
+        run: pnpm run build:web
+
+  format:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run format:check

@@ -35,7 +35,13 @@ const BANNER = `// SPDX-License-Identifier: MIT
 `;
 
 async function readArtifact(): Promise<Artifact> {
-  const artifactPath = path.join(contractsDir, "artifacts", "contracts", "Voting.sol", "Voting.json");
+  const artifactPath = path.join(
+    contractsDir,
+    "artifacts",
+    "contracts",
+    "Voting.sol",
+    "Voting.json",
+  );
 
   try {
     return JSON.parse(await readFile(artifactPath, "utf8")) as Artifact;

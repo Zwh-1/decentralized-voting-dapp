@@ -38,7 +38,10 @@ export function phaseLabel(phase: number | undefined): string {
 
 export function formatEth(wei: bigint): string {
   const whole = wei / 1_000_000_000_000_000_000n;
-  const fraction = (wei % 1_000_000_000_000_000_000n).toString().padStart(18, "0").replace(/0+$/, "");
+  const fraction = (wei % 1_000_000_000_000_000_000n)
+    .toString()
+    .padStart(18, "0")
+    .replace(/0+$/, "");
 
   return fraction.length === 0 ? `${whole}` : `${whole}.${fraction}`;
 }

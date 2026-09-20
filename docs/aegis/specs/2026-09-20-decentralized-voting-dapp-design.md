@@ -69,31 +69,31 @@ Requirement Ready Check:
 
 ### 已确认的决策（本会话产出，不再重新讨论）
 
-| # | 决策项 | 结论 |
-|---|---|---|
-| D1 | 投票隐私 | **明票上链**，在 README 显式声明「本 Demo 不含投票隐私」及原因 |
-| D2 | 链下存储 | **MySQL 保留**，承担事件索引与聚合查询；**IPFS 只存候选人元数据**，链上存 CID |
-| D3 | 交付边界 | **本地一条命令可复现 + Sepolia 真部署**（含 Etherscan 源码验证）；不做公网托管 |
-| D4 | 合约工具链 | **Hardhat 3 + TypeScript**（用户明确拒绝 Foundry） |
-| D5 | 重入防护 | **加投票质押 + 退还**，构造真实外部调用面，并写攻击合约做对照测试 |
-| D6 | 后端职责 | **只读事件索引器**，后端不参与任何链上写入 |
+| #   | 决策项     | 结论                                                                           |
+| --- | ---------- | ------------------------------------------------------------------------------ |
+| D1  | 投票隐私   | **明票上链**，在 README 显式声明「本 Demo 不含投票隐私」及原因                 |
+| D2  | 链下存储   | **MySQL 保留**，承担事件索引与聚合查询；**IPFS 只存候选人元数据**，链上存 CID  |
+| D3  | 交付边界   | **本地一条命令可复现 + Sepolia 真部署**（含 Etherscan 源码验证）；不做公网托管 |
+| D4  | 合约工具链 | **Hardhat 3 + TypeScript**（用户明确拒绝 Foundry）                             |
+| D5  | 重入防护   | **加投票质押 + 退还**，构造真实外部调用面，并写攻击合约做对照测试              |
+| D6  | 后端职责   | **只读事件索引器**，后端不参与任何链上写入                                     |
 
 ---
 
 ## 3. 相对原始方案的修正清单
 
-| # | 原始方案 | 问题 | 本方案的处理 |
-|---|---|---|---|
-| C1 | 简历「准确率达 99%」 | 投票合约无天然的"准确率"定义，无法回答"分子分母是什么" | 替换为 §8 的 6 项可复现指标；其中「索引一致性偏差 0 条」是唯一可称为"准确率"的量，且定义为 `一致记录数 / 总记录数` |
-| C2 | `vote()` 内加 `ReentrancyGuard` | `vote()` 无外部调用 → 无重入面 → 面试官一问即崩 | 引入质押/退还路径创造真实外部调用；防护采用 **CEI（主）+ `nonReentrant`（纵深）**，并用攻击合约证明防护生效 |
-| C3 | 后端 JWT 鉴权 + 限流 | 只读 API 没有写入面，JWT 是空转的复杂度 | **删除 JWT**；保留读接口限流。删除动作本身记入 §12 ADR 信号 |
-| C4 | 用 IPFS 做链下存储 | IPFS 是内容寻址的不可变存储，无查询/聚合/事务/唯一约束，不能当数据库 | IPFS 仅存候选人宣言与头像；链上只存 CID；MySQL 保留索引职责（D2） |
-| C5 | `address → candidate` 全部公开且不声明 | 投票隐私是投票类项目的核心难点，回避会被认为不懂行 | 明确选择明票并**主动声明取舍**，同时说明若要隐私需引入何种机制（D1） |
-| C6 | 未提及事件重复消费与链重组 | 索引器最容易被追问且最容易出错的两点 | §5 用 `UNIQUE(tx_hash, log_index)` 幂等键 + 确认数 + 游标回退处理 |
-| C7 | 测试网部署放在第 4 周 | Sepolia 需要 faucet 领测试 ETH，可能排队数天 | M1 起即申领并储备测试 ETH（§9） |
-| C8 | "测试覆盖率 > 95%" 但未指定工具 | `solidity-coverage` 的 peer 是 `hardhat: ^2.11.0`，**不兼容 Hardhat 3** | 使用 Hardhat 3 原生 `--coverage`（§8），不安装该插件 |
-| C9 | 用 `hardhat-gas-reporter` | peer 为 `hardhat: ^2.16.0`，**不兼容 Hardhat 3** | 使用 Hardhat 3 原生 `--gas-stats`（§8） |
-| C10 | 未划分可独立交付的里程碑 | 一旦延期就交付不出任何完整成果 | §9 每个里程碑都是可独立演示、可写进简历的完整状态 |
+| #   | 原始方案                               | 问题                                                                    | 本方案的处理                                                                                                       |
+| --- | -------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| C1  | 简历「准确率达 99%」                   | 投票合约无天然的"准确率"定义，无法回答"分子分母是什么"                  | 替换为 §8 的 6 项可复现指标；其中「索引一致性偏差 0 条」是唯一可称为"准确率"的量，且定义为 `一致记录数 / 总记录数` |
+| C2  | `vote()` 内加 `ReentrancyGuard`        | `vote()` 无外部调用 → 无重入面 → 面试官一问即崩                         | 引入质押/退还路径创造真实外部调用；防护采用 **CEI（主）+ `nonReentrant`（纵深）**，并用攻击合约证明防护生效        |
+| C3  | 后端 JWT 鉴权 + 限流                   | 只读 API 没有写入面，JWT 是空转的复杂度                                 | **删除 JWT**；保留读接口限流。删除动作本身记入 §12 ADR 信号                                                        |
+| C4  | 用 IPFS 做链下存储                     | IPFS 是内容寻址的不可变存储，无查询/聚合/事务/唯一约束，不能当数据库    | IPFS 仅存候选人宣言与头像；链上只存 CID；MySQL 保留索引职责（D2）                                                  |
+| C5  | `address → candidate` 全部公开且不声明 | 投票隐私是投票类项目的核心难点，回避会被认为不懂行                      | 明确选择明票并**主动声明取舍**，同时说明若要隐私需引入何种机制（D1）                                               |
+| C6  | 未提及事件重复消费与链重组             | 索引器最容易被追问且最容易出错的两点                                    | §5 用 `UNIQUE(tx_hash, log_index)` 幂等键 + 确认数 + 游标回退处理                                                  |
+| C7  | 测试网部署放在第 4 周                  | Sepolia 需要 faucet 领测试 ETH，可能排队数天                            | M1 起即申领并储备测试 ETH（§9）                                                                                    |
+| C8  | "测试覆盖率 > 95%" 但未指定工具        | `solidity-coverage` 的 peer 是 `hardhat: ^2.11.0`，**不兼容 Hardhat 3** | 使用 Hardhat 3 原生 `--coverage`（§8），不安装该插件                                                               |
+| C9  | 用 `hardhat-gas-reporter`              | peer 为 `hardhat: ^2.16.0`，**不兼容 Hardhat 3**                        | 使用 Hardhat 3 原生 `--gas-stats`（§8）                                                                            |
+| C10 | 未划分可独立交付的里程碑               | 一旦延期就交付不出任何完整成果                                          | §9 每个里程碑都是可独立演示、可写进简历的完整状态                                                                  |
 
 ---
 
@@ -139,15 +139,15 @@ decentralized-voting-dapp/
 
 ### 5.1 技术选型
 
-| 项 | 版本 | 说明 |
-|---|---|---|
-| Node.js | ≥ 22.13.0（宿主 24.14.0） | Hardhat 3 要求 |
-| hardhat | 3.17.0 | 完全重写版；ESM-first、`defineConfig` |
-| @openzeppelin/contracts | 5.6.1 | `Ownable` 在 `access/`，`ReentrancyGuard` 已移至 `utils/`（5.0 起） |
-| TypeScript | **~6.0.3** | 见 §14 校正 1：Hardhat 3 官方模板自行选择 `~6.0.3`，比原定 5.9.3 更可信 |
-| Solidity | 0.8.37 | pin 精确版本，不用 `^`；M0 已实测该版本可正常下载与编译 |
-| forge-std | `github:foundry-rs/forge-std#v1.16.2` | Solidity 测试的断言与 cheatcode 来源。**必须从 GitHub 安装**，见 §14 校正 3 |
-| 配置格式 | `hardhat.config.ts` 用 `defineConfig`，项目 `"type": "module"` | Hardhat 3 强制 ESM 配置 |
+| 项                      | 版本                                                           | 说明                                                                        |
+| ----------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Node.js                 | ≥ 22.13.0（宿主 24.14.0）                                      | Hardhat 3 要求                                                              |
+| hardhat                 | 3.17.0                                                         | 完全重写版；ESM-first、`defineConfig`                                       |
+| @openzeppelin/contracts | 5.6.1                                                          | `Ownable` 在 `access/`，`ReentrancyGuard` 已移至 `utils/`（5.0 起）         |
+| TypeScript              | **~6.0.3**                                                     | 见 §14 校正 1：Hardhat 3 官方模板自行选择 `~6.0.3`，比原定 5.9.3 更可信     |
+| Solidity                | 0.8.37                                                         | pin 精确版本，不用 `^`；M0 已实测该版本可正常下载与编译                     |
+| forge-std               | `github:foundry-rs/forge-std#v1.16.2`                          | Solidity 测试的断言与 cheatcode 来源。**必须从 GitHub 安装**，见 §14 校正 3 |
+| 配置格式                | `hardhat.config.ts` 用 `defineConfig`，项目 `"type": "module"` | Hardhat 3 强制 ESM 配置                                                     |
 
 ### 5.2 状态与数据结构
 
@@ -173,15 +173,15 @@ mapping(address => uint256) public stakeOf;   // 尚未退还的质押
 
 ### 5.3 接口
 
-| 函数 | 权限 | 前置条件 | 说明 |
-|---|---|---|---|
-| `addCandidate(string metadataCID)` | `onlyOwner` | `phase == Setup` | 追加候选人，发 `CandidateAdded` |
-| `setWhitelist(address[] voters, bool allowed)` | `onlyOwner` | `phase != Ended` | 批量增删白名单，发 `WhitelistUpdated` |
-| `startVoting()` | `onlyOwner` | `phase == Setup` 且 `candidateCount > 0` | 迁移到 `Voting`，发 `PhaseChanged` |
-| `endVoting()` | `onlyOwner` | `phase == Voting` | 迁移到 `Ended`，发 `PhaseChanged` |
-| `vote(uint256 candidateId)` | 白名单 | `Voting` 阶段、未投过、`msg.value == STAKE` | `nonReentrant`，发 `VoteCast` |
-| `refund()` | 质押人 | `phase == Ended`、`stakeOf[msg.sender] > 0` | `nonReentrant`，发 `Refunded` |
-| `results()` | 只读 | — | 返回候选人票数，供前端与索引一致性比对 |
+| 函数                                           | 权限        | 前置条件                                    | 说明                                   |
+| ---------------------------------------------- | ----------- | ------------------------------------------- | -------------------------------------- |
+| `addCandidate(string metadataCID)`             | `onlyOwner` | `phase == Setup`                            | 追加候选人，发 `CandidateAdded`        |
+| `setWhitelist(address[] voters, bool allowed)` | `onlyOwner` | `phase != Ended`                            | 批量增删白名单，发 `WhitelistUpdated`  |
+| `startVoting()`                                | `onlyOwner` | `phase == Setup` 且 `candidateCount > 0`    | 迁移到 `Voting`，发 `PhaseChanged`     |
+| `endVoting()`                                  | `onlyOwner` | `phase == Voting`                           | 迁移到 `Ended`，发 `PhaseChanged`      |
+| `vote(uint256 candidateId)`                    | 白名单      | `Voting` 阶段、未投过、`msg.value == STAKE` | `nonReentrant`，发 `VoteCast`          |
+| `refund()`                                     | 质押人      | `phase == Ended`、`stakeOf[msg.sender] > 0` | `nonReentrant`，发 `Refunded`          |
+| `results()`                                    | 只读        | —                                           | 返回候选人票数，供前端与索引一致性比对 |
 
 ### 5.4 事件（索引器的唯一输入）
 
@@ -205,6 +205,7 @@ require(ok, "refund failed");
 ```
 
 **两层防护**：
+
 1. **CEI（主）**：`stakeOf[msg.sender] = 0;` 在 `call` **之前**执行；
 2. **`nonReentrant`（纵深）**：即使未来有人重排语句，攻击仍然失败。
 
@@ -306,12 +307,12 @@ loop:
 
 ### 6.3 REST API（Express 5 + zod 校验）
 
-| 端点 | 说明 |
-|---|---|
-| `GET /api/health` | `{ chainHead, indexedBlock, lagBlocks, phase }` |
-| `GET /api/candidates` | 候选人列表 + MySQL 聚合票数 + 元数据 CID |
-| `GET /api/results` | **同时返回链上 `results()` 与 MySQL 聚合结果，以及 `consistent: boolean`** |
-| `GET /api/voters/:address` | 该地址是否已投、质押金额、是否已退还 |
+| 端点                       | 说明                                                                       |
+| -------------------------- | -------------------------------------------------------------------------- |
+| `GET /api/health`          | `{ chainHead, indexedBlock, lagBlocks, phase }`                            |
+| `GET /api/candidates`      | 候选人列表 + MySQL 聚合票数 + 元数据 CID                                   |
+| `GET /api/results`         | **同时返回链上 `results()` 与 MySQL 聚合结果，以及 `consistent: boolean`** |
+| `GET /api/voters/:address` | 该地址是否已投、质押金额、是否已退还                                       |
 
 **`/api/results` 的双源返回是本设计的关键设计**：它把"链上与链下是否一致"从一句口头承诺变成每次请求都可见的运行时事实，同时为 §8 的索引一致性指标提供了测量入口。
 
@@ -333,14 +334,14 @@ loop:
 
 ### 7.2 前端（`web/`）
 
-| 项 | 版本 |
-|---|---|
-| Vite | 8.3.0 |
-| React | 19.3.0 |
-| wagmi | 3.7.7 |
-| viem | 2.56.8 |
+| 项                    | 版本    |
+| --------------------- | ------- |
+| Vite                  | 8.3.0   |
+| React                 | 19.3.0  |
+| wagmi                 | 3.7.7   |
+| viem                  | 2.56.8  |
 | @tanstack/react-query | 5.103.1 |
-| TailwindCSS | 4.3.3 |
+| TailwindCSS           | 4.3.3   |
 
 **选 Vite 而非 Next.js 的理由**：本项目是纯客户端 dApp，没有需要 SSR 的内容；Next.js 的服务端渲染与钱包连接存在天然的客户端边界摩擦，对 Demo 只增加复杂度而不带来收益。
 
@@ -360,14 +361,14 @@ loop:
 
 所有指标必须能在本地一条命令复现。**gas 必须在非 coverage 模式下测量**——Hardhat 文档明确 `--coverage` 会放大字节码与 gas 消耗，用覆盖率模式下的 gas 数字会得到错误结论。
 
-| # | 指标 | 命令 / 方式 | 目标 |
-|---|---|---|---|
-| M-1 | 合约测试覆盖率 | `npx hardhat test --coverage`（终端报告 + `coverage/lcov.info` + `coverage/html/index.html`） | **行覆盖率与语句覆盖率** ≥ 95%（见 §14 校正 2：Hardhat 3 不产出分支覆盖率） |
-| M-2 | 授权拦截完整性 | Solidity 测试，`expectRevert` 断言自定义 error | 非白名单、重复投票、阶段错误、金额不符、非管理员 → 全部 revert，0 例外 |
-| M-3 | 重入攻击对照 | 攻击合约对 `VulnerableRefund` 成功、对 `Voting` revert | 两条断言均通过（§5.5） |
-| M-4 | 不变量（fuzz / invariant） | 随机 1000 次投票后断言 `Σ voteCount == VoteCast 事件数 == hasVoted 为真的地址数` | 反例 0 个 |
-| M-5 | Gas 成本 | `npx hardhat test --gas-stats --gas-stats-json gas-stats.json` | 记录 `vote` / `refund` 的 min/avg/median/max，写入 README |
-| M-6 | 索引一致性 | 灌入 200 票后请求 `/api/results`，比对 `onChain` 与 `indexed` | **偏差 0 条**；此即唯一可称为"准确率"的量：`一致记录数 / 总记录数 = 200/200` |
+| #   | 指标                       | 命令 / 方式                                                                                   | 目标                                                                         |
+| --- | -------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| M-1 | 合约测试覆盖率             | `npx hardhat test --coverage`（终端报告 + `coverage/lcov.info` + `coverage/html/index.html`） | **行覆盖率与语句覆盖率** ≥ 95%（见 §14 校正 2：Hardhat 3 不产出分支覆盖率）  |
+| M-2 | 授权拦截完整性             | Solidity 测试，`expectRevert` 断言自定义 error                                                | 非白名单、重复投票、阶段错误、金额不符、非管理员 → 全部 revert，0 例外       |
+| M-3 | 重入攻击对照               | 攻击合约对 `VulnerableRefund` 成功、对 `Voting` revert                                        | 两条断言均通过（§5.5）                                                       |
+| M-4 | 不变量（fuzz / invariant） | 随机 1000 次投票后断言 `Σ voteCount == VoteCast 事件数 == hasVoted 为真的地址数`              | 反例 0 个                                                                    |
+| M-5 | Gas 成本                   | `npx hardhat test --gas-stats --gas-stats-json gas-stats.json`                                | 记录 `vote` / `refund` 的 min/avg/median/max，写入 README                    |
+| M-6 | 索引一致性                 | 灌入 200 票后请求 `/api/results`，比对 `onChain` 与 `indexed`                                 | **偏差 0 条**；此即唯一可称为"准确率"的量：`一致记录数 / 总记录数 = 200/200` |
 
 **关于简历表述的建议**：把"准确率达 99%"替换为可直接复现的描述，例如「合约测试覆盖率 96%、1000 轮不变量测试 0 反例、索引器与链上状态一致性偏差 0/200」。带具体分母的数字才经得起追问；而"99%"既无法定义分子，也无法现场复现。
 
@@ -375,13 +376,13 @@ loop:
 
 ## 9. 里程碑（每个均可独立演示与独立写进简历）
 
-| 里程碑 | 内容 | 验收（可演示的状态） |
-|---|---|---|
-| **M0** 骨架与 CI | pnpm workspace、`contracts/`（Hardhat 3 ESM 配置）、`docker-compose.yml`（MySQL 8）、GitHub Actions 跑合约测试；**申领 Sepolia 测试 ETH 并开始储备**；确定 pinning 服务 | 全新 clone 后一条命令跑通空测试套件 |
-| **M1** 合约与测试 | `Voting.sol`、`VulnerableRefund.sol`（仅测试）、`RefundAttacker.sol`、完整测试套件、部署脚本 | `--coverage` 报告 ≥95%；M-2/M-3/M-4 全绿；**此里程碑已足以支撑简历的合约部分** |
-| **M2** 索引器与 API | schema 迁移、游标索引器、REST API、`/api/results` 双源比对 | M-6 偏差 0/200；断点续跑与重组回退有测试覆盖 |
-| **M3** 前端与联调 | 钱包连接、投票、退款、管理员后台、索引高度提示 | 端到端手动走通一遍；产出截图与 GIF |
-| **M4** 部署与开源包装 | Sepolia 部署 + Etherscan 验证、README（架构图/亮点/本地运行指南/指标表）、MIT 协议、Conventional Commits | 有公开合约地址与可访问的仓库 |
+| 里程碑                | 内容                                                                                                                                                                    | 验收（可演示的状态）                                                           |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **M0** 骨架与 CI      | pnpm workspace、`contracts/`（Hardhat 3 ESM 配置）、`docker-compose.yml`（MySQL 8）、GitHub Actions 跑合约测试；**申领 Sepolia 测试 ETH 并开始储备**；确定 pinning 服务 | 全新 clone 后一条命令跑通空测试套件                                            |
+| **M1** 合约与测试     | `Voting.sol`、`VulnerableRefund.sol`（仅测试）、`RefundAttacker.sol`、完整测试套件、部署脚本                                                                            | `--coverage` 报告 ≥95%；M-2/M-3/M-4 全绿；**此里程碑已足以支撑简历的合约部分** |
+| **M2** 索引器与 API   | schema 迁移、游标索引器、REST API、`/api/results` 双源比对                                                                                                              | M-6 偏差 0/200；断点续跑与重组回退有测试覆盖                                   |
+| **M3** 前端与联调     | 钱包连接、投票、退款、管理员后台、索引高度提示                                                                                                                          | 端到端手动走通一遍；产出截图与 GIF                                             |
+| **M4** 部署与开源包装 | Sepolia 部署 + Etherscan 验证、README（架构图/亮点/本地运行指南/指标表）、MIT 协议、Conventional Commits                                                                | 有公开合约地址与可访问的仓库                                                   |
 
 **排期风险与降级策略**：4 周 × 3-4 h/天 ≈ 80-110 小时，此范围偏紧。若时间不足，**优先保证 M1 完整**——合约与测试是简历主张的核心，且它是唯一无需任何外部依赖（faucet、数据库、网关）即可完整交付的部分。M3/M4 可延后而不损害 M1 的价值。
 
@@ -389,16 +390,16 @@ loop:
 
 ## 10. 风险登记
 
-| # | 风险 | 影响 | 应对 |
-|---|---|---|---|
-| R1 | Hardhat 3 是完全重写版，绝大多数既有教程与 LLM 记忆基于 Hardhat 2，照抄会失败 | 高 | 只依据官方 Hardhat 3 文档；已知 `solidity-coverage`、`hardhat-gas-reporter` **不可用**（peer 为 `^2.x`），改用原生 `--coverage` 与 `--gas-stats`；ESM 配置、`defineConfig`、显式网络连接均为新 API |
-| R2 | 插件生态缺口（如需要额外的检查/报告插件） | 中 | 优先用原生能力；确需插件时先核对 peer 范围是否含 `^3` |
-| R3 | Sepolia faucet 领币可能排队或限流 | 中 | M0 即开始申领储备；本地 Hardhat 网络始终是主开发环境，部署只是最后一步 |
-| R4 | IPFS 网关限流（实测 429），pinning 服务可用性待定（Storacha TLS 不通） | 中 | M0 实测候选服务；前端强制网关失败兜底，不阻塞投票主流程 |
-| R5 | TypeScript 7.0.2 与 typed-lint/框架插件的兼容性未知 | 中 | 固定 5.9.3（§5.1） |
-| R6 | wagmi 3.x + React 19 + Vite 8 + Tailwind 4 是较新组合，文档可能滞后 | 中 | 前端问题不阻塞合约与索引器交付；必要时降级到更成熟的组合版本 |
-| R7 | 质押资金未领取时永久锁定 | 低 | `sweepUnclaimed()` + 30 天宽限期（§5.6），并在 README 列为已知中心化风险 |
-| R8 | 时间预算紧张 | 高 | 里程碑可独立交付（§9）；M1 为不可妥协的核心 |
+| #   | 风险                                                                          | 影响 | 应对                                                                                                                                                                                               |
+| --- | ----------------------------------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | Hardhat 3 是完全重写版，绝大多数既有教程与 LLM 记忆基于 Hardhat 2，照抄会失败 | 高   | 只依据官方 Hardhat 3 文档；已知 `solidity-coverage`、`hardhat-gas-reporter` **不可用**（peer 为 `^2.x`），改用原生 `--coverage` 与 `--gas-stats`；ESM 配置、`defineConfig`、显式网络连接均为新 API |
+| R2  | 插件生态缺口（如需要额外的检查/报告插件）                                     | 中   | 优先用原生能力；确需插件时先核对 peer 范围是否含 `^3`                                                                                                                                              |
+| R3  | Sepolia faucet 领币可能排队或限流                                             | 中   | M0 即开始申领储备；本地 Hardhat 网络始终是主开发环境，部署只是最后一步                                                                                                                             |
+| R4  | IPFS 网关限流（实测 429），pinning 服务可用性待定（Storacha TLS 不通）        | 中   | M0 实测候选服务；前端强制网关失败兜底，不阻塞投票主流程                                                                                                                                            |
+| R5  | TypeScript 7.0.2 与 typed-lint/框架插件的兼容性未知                           | 中   | 固定 5.9.3（§5.1）                                                                                                                                                                                 |
+| R6  | wagmi 3.x + React 19 + Vite 8 + Tailwind 4 是较新组合，文档可能滞后           | 中   | 前端问题不阻塞合约与索引器交付；必要时降级到更成熟的组合版本                                                                                                                                       |
+| R7  | 质押资金未领取时永久锁定                                                      | 低   | `sweepUnclaimed()` + 30 天宽限期（§5.6），并在 README 列为已知中心化风险                                                                                                                           |
+| R8  | 时间预算紧张                                                                  | 高   | 里程碑可独立交付（§9）；M1 为不可妥协的核心                                                                                                                                                        |
 
 ---
 
@@ -416,13 +417,13 @@ loop:
 
 ## 12. ADR 信号（留待实现后回填，此刻不创建已接受的架构记忆）
 
-| ADR | 主题 | 真实备选 | 待验证问题 |
-|---|---|---|---|
-| ADR-1 | 链上唯一事实源 + 只读事件索引器，取代双写 | 后端代发交易（Gas 代付）；前端直连链无索引器 | 删除 JWT 与写入 API 后，简历的"后端开发"分量是否仍成立？ |
-| ADR-2 | 采用 Hardhat 3 而非 Hardhat 2 | Hardhat 2.29.1 + `solidity-coverage` + `hardhat-gas-reporter` | Hardhat 3 的插件缺口在 M2/M3 是否会成为阻塞？ |
-| ADR-3 | 明票上链，主动声明隐私取舍 | commit-reveal 两阶段；Merkle + nullifier 匿名投票 | 面试中"为什么不做隐私"的回答是否充分？ |
-| ADR-4 | IPFS 仅承载候选人元数据 | 元数据存 MySQL；元数据全部上链 | 网关限流（429）是否影响演示可靠性？ |
-| ADR-5 | 引入质押/退还以构造真实重入面 | 不引入质押，改简历表述；仅写独立的重入演示合约 | 质押带来的资金锁定与额外权限点是否值得？ |
+| ADR   | 主题                                      | 真实备选                                                      | 待验证问题                                               |
+| ----- | ----------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------- |
+| ADR-1 | 链上唯一事实源 + 只读事件索引器，取代双写 | 后端代发交易（Gas 代付）；前端直连链无索引器                  | 删除 JWT 与写入 API 后，简历的"后端开发"分量是否仍成立？ |
+| ADR-2 | 采用 Hardhat 3 而非 Hardhat 2             | Hardhat 2.29.1 + `solidity-coverage` + `hardhat-gas-reporter` | Hardhat 3 的插件缺口在 M2/M3 是否会成为阻塞？            |
+| ADR-3 | 明票上链，主动声明隐私取舍                | commit-reveal 两阶段；Merkle + nullifier 匿名投票             | 面试中"为什么不做隐私"的回答是否充分？                   |
+| ADR-4 | IPFS 仅承载候选人元数据                   | 元数据存 MySQL；元数据全部上链                                | 网关限流（429）是否影响演示可靠性？                      |
+| ADR-5 | 引入质押/退还以构造真实重入面             | 不引入质押，改简历表述；仅写独立的重入演示合约                | 质押带来的资金锁定与额外权限点是否值得？                 |
 
 ---
 
@@ -517,25 +518,25 @@ allowBuilds:
 
 因此扩展为四组合约矩阵，每一层都被独立验证：
 
-| 变体 | CEI | 守卫 | 攻击结果 | 断言 |
-|---|---|---|---|---|
-| `VulnerableRefund` | ✗ | ✗ | 攻击成功 | 攻击者取回 3×STAKE，合约余额归零 |
-| `CEIOnlyRefund` | ✓ | ✗ | 攻击失败 | 攻击者只取回 1×STAKE，受害者余额完好 |
-| `GuardOnlyRefund` | ✗ | ✓ | 攻击失败 | 攻击者只取回 1×STAKE，且重入尝试被记录 |
-| `Voting`（生产） | ✓ | ✓ | 攻击失败 | 攻击者只取回 1×STAKE，账目一致 |
+| 变体               | CEI | 守卫 | 攻击结果 | 断言                                   |
+| ------------------ | --- | ---- | -------- | -------------------------------------- |
+| `VulnerableRefund` | ✗   | ✗    | 攻击成功 | 攻击者取回 3×STAKE，合约余额归零       |
+| `CEIOnlyRefund`    | ✓   | ✗    | 攻击失败 | 攻击者只取回 1×STAKE，受害者余额完好   |
+| `GuardOnlyRefund`  | ✗   | ✓    | 攻击失败 | 攻击者只取回 1×STAKE，且重入尝试被记录 |
+| `Voting`（生产）   | ✓   | ✓    | 攻击失败 | 攻击者只取回 1×STAKE，账目一致         |
 
 四个变体全部为测试夹具（`contracts/contracts/test/`），通过 `coverage.skipFiles` 排除在覆盖率分母之外，绝不进入部署路径。
 
 ## 15. M1 实测结果
 
-| 指标 | 结果 |
-|---|---|
-| M-1 覆盖率 | `contracts/Voting.sol` 行覆盖率 **100.00%**，语句覆盖率 **100.00%** |
-| M-2 授权拦截 | 非白名单、重复投票、阶段错误（4 种）、质押金额错误、未知候选人、零地址、非管理员 → 全部 revert，无例外 |
-| M-3 重入对照 | 四组矩阵全部按预期（见校正 8） |
-| M-4 不变量 | 1000 轮确定性投票序列 + 256 轮 fuzz，0 反例；且经变异测试证明可失败（见校正 7） |
-| M-5 Gas | `vote` 中位 **109,256**（min 109,256 / avg 119,250 / max 143,456）；`refund` **37,920**；部署 **1,249,757**；运行时代码 5,298 字节 |
-| 测试总数 | Solidity 41 个 + TypeScript(viem) 8 个 = **49 个，全部通过** |
+| 指标         | 结果                                                                                                                               |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| M-1 覆盖率   | `contracts/Voting.sol` 行覆盖率 **100.00%**，语句覆盖率 **100.00%**                                                                |
+| M-2 授权拦截 | 非白名单、重复投票、阶段错误（4 种）、质押金额错误、未知候选人、零地址、非管理员 → 全部 revert，无例外                             |
+| M-3 重入对照 | 四组矩阵全部按预期（见校正 8）                                                                                                     |
+| M-4 不变量   | 1000 轮确定性投票序列 + 256 轮 fuzz，0 反例；且经变异测试证明可失败（见校正 7）                                                    |
+| M-5 Gas      | `vote` 中位 **109,256**（min 109,256 / avg 119,250 / max 143,456）；`refund` **37,920**；部署 **1,249,757**；运行时代码 5,298 字节 |
+| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 = **49 个，全部通过**                                                                       |
 
 ### 遗留的复现风险
 

@@ -12,7 +12,14 @@ import { CandidateCard } from "./components/CandidateCard.js";
 import { ConsistencyBadge } from "./components/ConsistencyBadge.js";
 import { WalletBar } from "./components/WalletBar.js";
 import { fetchCandidates, fetchHealth, fetchResults } from "./lib/api.js";
-import { formatEth, phaseLabel, STAKE, votingAbi, votingAddressFor, VotingPhase } from "./lib/voting.js";
+import {
+  formatEth,
+  phaseLabel,
+  STAKE,
+  votingAbi,
+  votingAddressFor,
+  VotingPhase,
+} from "./lib/voting.js";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as const;
 
@@ -143,7 +150,9 @@ export function App() {
     <div className="mx-auto max-w-5xl px-5 py-10">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">去中心化投票 Demo</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+            去中心化投票 Demo
+          </h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-500">
             票数与事件通过只读索引器投影到 MySQL；候选人元数据存放在 IPFS，链上只保存 CID。
             私钥只存在于你的钱包里。
@@ -188,7 +197,9 @@ export function App() {
           <dl className="mt-2 space-y-1.5 text-sm">
             <Row label="已投票">{hasVotedValue ? "是" : isConnected ? "否" : "未连接"}</Row>
             <Row label="投给">
-              {myCandidateId === undefined || myCandidateId === 0 ? "—" : `候选人 #${myCandidateId}`}
+              {myCandidateId === undefined || myCandidateId === 0
+                ? "—"
+                : `候选人 #${myCandidateId}`}
             </Row>
             <Row label="押金">{isConnected ? `${formatEth(myStake)} ETH` : "—"}</Row>
           </dl>
@@ -222,9 +233,7 @@ export function App() {
 
       <section className="mt-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-slate-900">
-            候选人（{list.length}）
-          </h2>
+          <h2 className="text-sm font-semibold text-slate-900">候选人（{list.length}）</h2>
           <ConsistencyBadge
             results={results.data}
             isLoading={results.isPending}
@@ -236,7 +245,8 @@ export function App() {
 
         {candidates.isError && (
           <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-            索引 API 不可达。请确认索引器已启动（<code className="font-mono">pnpm --filter @voting/indexer start</code>）。
+            索引 API 不可达。请确认索引器已启动（
+            <code className="font-mono">pnpm --filter @voting/indexer start</code>）。
           </div>
         )}
 
@@ -262,7 +272,8 @@ export function App() {
 
       <footer className="mt-10 border-t border-slate-200 pt-5 text-xs text-slate-400">
         <p>
-          已知中心化风险：管理员可维护白名单、可调用 <code className="font-mono">sweepUnclaimed()</code>
+          已知中心化风险：管理员可维护白名单、可调用{" "}
+          <code className="font-mono">sweepUnclaimed()</code>
           取走超过宽限期未被领回的押金；索引器是可重建的缓存，链上数据才是唯一真相。
         </p>
       </footer>

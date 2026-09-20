@@ -33,10 +33,7 @@ describe("Voting (viem + node:test)", function () {
     const voting = await viem.deployContract("Voting", [admin.account.address]);
 
     assert.equal(await voting.read.phase(), 0);
-    assert.equal(
-      (await voting.read.owner()).toLowerCase(),
-      admin.account.address.toLowerCase(),
-    );
+    assert.equal((await voting.read.owner()).toLowerCase(), admin.account.address.toLowerCase());
   });
 
   it("records a vote and reflects it in results()", async function () {

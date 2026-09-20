@@ -27,7 +27,9 @@ export function WalletBar() {
         >
           {isPending ? "连接中…" : "连接钱包"}
         </button>
-        {error !== null && <p className="max-w-xs text-right text-xs text-rose-600">{error.message}</p>}
+        {error !== null && (
+          <p className="max-w-xs text-right text-xs text-rose-600">{error.message}</p>
+        )}
       </div>
     );
   }

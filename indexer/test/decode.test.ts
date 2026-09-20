@@ -12,11 +12,7 @@ const CONTRACT = "0x1111111111111111111111111111111111111111" as const;
 
 /** The events `Voting` emits, narrowed so viem can resolve them by name. */
 type VotingEventName =
-  | "CandidateAdded"
-  | "VoteCast"
-  | "Refunded"
-  | "WhitelistUpdated"
-  | "PhaseChanged";
+  "CandidateAdded" | "VoteCast" | "Refunded" | "WhitelistUpdated" | "PhaseChanged";
 
 /**
  * Builds a realistic log entry by encoding the event against the very ABI the
@@ -32,7 +28,9 @@ function makeLog(
   const inputs = item.inputs;
 
   const indexedArgs = Object.fromEntries(
-    inputs.filter((input) => input.indexed).map((input) => [input.name, args[input.name as string]]),
+    inputs
+      .filter((input) => input.indexed)
+      .map((input) => [input.name, args[input.name as string]]),
   );
   const nonIndexed = inputs.filter((input) => !input.indexed);
 
@@ -77,11 +75,7 @@ describe("decodeLogs", () => {
 
   it("decodes VoteCast", () => {
     const result = decodeLogs([
-      makeLog(
-        "VoteCast",
-        { voter: CONTRACT, candidateId: 2n, newCount: 1n },
-        base,
-      ),
+      makeLog("VoteCast", { voter: CONTRACT, candidateId: 2n, newCount: 1n }, base),
     ]);
 
     assert.equal(result.votes.length, 1);
@@ -122,7 +116,11 @@ describe("decodeLogs", () => {
   it("sorts mixed events into the right tables", () => {
     const result = decodeLogs([
       makeLog("CandidateAdded", { id: 1n, metadataCID: "cid-a" }, { ...base, logIndex: 1 }),
-      makeLog("VoteCast", { voter: CONTRACT, candidateId: 1n, newCount: 1n }, { ...base, logIndex: 2 }),
+      makeLog(
+        "VoteCast",
+        { voter: CONTRACT, candidateId: 1n, newCount: 1n },
+        { ...base, logIndex: 2 },
+      ),
       makeLog("Refunded", { voter: CONTRACT, amount: 5n }, { ...base, logIndex: 3 }),
       makeLog("PhaseChanged", { from: 0, to: 1 }, { ...base, logIndex: 4 }),
       makeLog("WhitelistUpdated", { voter: CONTRACT, allowed: true }, { ...base, logIndex: 5 }),

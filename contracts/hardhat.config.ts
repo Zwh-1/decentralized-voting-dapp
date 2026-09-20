@@ -6,12 +6,7 @@ import hardhatViem from "@nomicfoundation/hardhat-viem";
 import hardhatViemAssertions from "@nomicfoundation/hardhat-viem-assertions";
 
 export default defineConfig({
-  plugins: [
-    hardhatViem,
-    hardhatViemAssertions,
-    hardhatNodeTestRunner,
-    hardhatNetworkHelpers,
-  ],
+  plugins: [hardhatViem, hardhatViemAssertions, hardhatNodeTestRunner, hardhatNetworkHelpers],
 
   solidity: {
     version: "0.8.37",

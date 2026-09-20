@@ -34,7 +34,8 @@ export function ConsistencyBadge({ results, isLoading, isError }: Props) {
 
   return (
     <Badge tone="bad">
-      链上 {results.onChainTotal} 票 ≠ 索引 {results.indexedTotal} 票 · {results.discrepancies.length} 处偏差
+      链上 {results.onChainTotal} 票 ≠ 索引 {results.indexedTotal} 票 ·{" "}
+      {results.discrepancies.length} 处偏差
     </Badge>
   );
 }
@@ -54,7 +55,9 @@ function Badge({
   } as const;
 
   return (
-    <span className={`inline-block rounded-full border px-3 py-1 text-xs font-medium ${tones[tone]}`}>
+    <span
+      className={`inline-block rounded-full border px-3 py-1 text-xs font-medium ${tones[tone]}`}
+    >
       {children}
     </span>
   );

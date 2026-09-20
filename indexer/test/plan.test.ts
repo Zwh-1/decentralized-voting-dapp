@@ -124,7 +124,10 @@ describe("planReorgRewind", () => {
   });
 
   it("does nothing when nothing has been indexed", () => {
-    assert.equal(planReorgRewind({ chainHead: 0n, lastIndexedBlock: null, confirmations: 5 }), null);
+    assert.equal(
+      planReorgRewind({ chainHead: 0n, lastIndexedBlock: null, confirmations: 5 }),
+      null,
+    );
   });
 
   it("rewinds to the safe head when the chain moves behind the cursor", () => {

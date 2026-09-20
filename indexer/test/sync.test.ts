@@ -95,11 +95,13 @@ class FakeChain implements ChainReader {
     return this.head;
   }
 
-  async getLogs(args: {
-    address: `0x${string}`;
-    fromBlock: bigint;
-    toBlock: bigint;
-  }): Promise<readonly { blockNumber: bigint | null; transactionHash: string | null; logIndex: number | null }[]> {
+  async getLogs(args: { address: `0x${string}`; fromBlock: bigint; toBlock: bigint }): Promise<
+    readonly {
+      blockNumber: bigint | null;
+      transactionHash: string | null;
+      logIndex: number | null;
+    }[]
+  > {
     this.requested.push({ fromBlock: args.fromBlock, toBlock: args.toBlock });
 
     return this.logs.filter(
@@ -180,10 +182,7 @@ describe("syncOnce", () => {
   it("persists decoded votes and reports how many were seen", async () => {
     const { pool, chain, deps } = setup();
     chain.head = 20n;
-    chain.logs = [
-      makeVoteLog(CONTRACT, 1n, 1n, 0),
-      makeVoteLog(CONTRACT, 2n, 2n, 1),
-    ];
+    chain.logs = [makeVoteLog(CONTRACT, 1n, 1n, 0), makeVoteLog(CONTRACT, 2n, 2n, 1)];
 
     const outcome = await syncOnce(deps);
 

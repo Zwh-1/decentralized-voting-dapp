@@ -23,9 +23,7 @@ const schema = z.object({
   CHUNK_BLOCKS: z.coerce.number().int().positive().max(100_000).default(2000),
   POLL_INTERVAL_MS: z.coerce.number().int().positive().default(4000),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3001),
-  LOG_LEVEL: z
-    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
-    .default("info"),
+  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
 });
 
 export type IndexerConfig = ReturnType<typeof loadConfig>;

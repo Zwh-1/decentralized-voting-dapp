@@ -92,7 +92,10 @@ export interface ConsistencyReport {
  * vote counts must match exactly, and so must the totals. Any difference is
  * reported per candidate so a failure is diagnosable rather than just red.
  */
-export function compareResults(onChain: OnChainResults, indexed: OnChainResults): ConsistencyReport {
+export function compareResults(
+  onChain: OnChainResults,
+  indexed: OnChainResults,
+): ConsistencyReport {
   const discrepancies: ConsistencyReport["discrepancies"] = [];
 
   const indexedById = new Map(indexed.candidates.map((candidate) => [candidate.id, candidate]));
@@ -228,7 +231,9 @@ export function createApp(deps: AppDeps): Express {
     const address = String(req.params.address);
 
     if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
-      res.status(400).json({ error: "invalid_address", message: "Expected a 20 byte hex address." });
+      res
+        .status(400)
+        .json({ error: "invalid_address", message: "Expected a 20 byte hex address." });
       return;
     }
 
