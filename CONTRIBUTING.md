@@ -34,6 +34,17 @@ pnpm run typecheck
 pnpm run format        # 提交前请运行；CI 会检查
 ```
 
+需要一条本地链与已排空的索引时，还可以跑这几条（不属于 CI，因为它需要完整本地栈）：
+
+```bash
+pnpm indexer:migrate
+pnpm indexer:drain
+pnpm indexer:check-consistency
+pnpm indexer:reorg-drill   # 用 evm_snapshot/evm_revert 造一次真实重组
+```
+
+改动索引器的游标、重组或幂等逻辑时，请连同 `indexer:drain`、`indexer:check-consistency` 与 `indexer:reorg-drill` 一起验证——这三条覆盖的性质，单元测试覆盖不到。
+
 ## 不要手改生成物
 
 `web/src/lib/contracts/` 下的 `voting-abi.ts`、`deployments.ts`、`index.ts` 由下述命令生成：

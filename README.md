@@ -84,6 +84,7 @@ flowchart LR
 | M-5  | Gas（中位数）      | `vote` **109,256**；`refund` **37,920**；部署 **1,249,757**；运行时代码 5,298 字节                    | `pnpm gas`                       |
 | M-6  | 链上/索引一致性    | **200 / 200 票，0 处偏差**（3 名候选人逐一比对）；删掉 1 行后**确实报不一致**并定位到候选人 2         | `pnpm indexer:check-consistency` |
 | M-6b | 索引幂等性         | 游标回退到 0 强制重放：404 行**全部命中重复，插入 0 行**，票数仍为 200（未翻倍）                      | 见[验证与复现](#验证与复现)      |
+| M-6c | 真实链重组         | `evm_revert` 让链头 407→406：索引报告 `rewound`、孤立事件行被删（201→200）、**票数仍为 200**          | `pnpm indexer:reorg-drill`       |
 | M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                  | `pnpm build:web`                 |
 | —    | 测试总数           | **90 个**（合约 41 Solidity + 8 TypeScript，索引器 41）                                               | `pnpm test`                      |
 
@@ -272,6 +273,27 @@ pnpm indexer:check-consistency
 
 > 测量前请先停掉应用（或设 `INDEXER_ENABLED=false`）：否则后台循环会抢先把游标推回链头，`drain` 就只能看到 `rounds: 0`。
 
+### M-6c：真实链重组演练
+
+重组回退原本只有单元测试，而单元测试跑在假对象上——假对象证明不了真实 RPC、真实游标行与真实 `DELETE` 对"分叉点在哪"的判断是一致的。这条演练用 Hardhat 的 `evm_snapshot` / `evm_revert` 让一个**真实节点**的链头后退，再检查索引是否自行修复：
+
+```bash
+pnpm indexer:reorg-drill     # 需要 hardhat node + 已排空的索引；先停掉应用
+```
+
+它只允许在 chainId 31337 上运行，并且每次自取快照——无论成功失败都会把链还原，因此可以反复跑。实测输出（干净状态，链头 406）：
+
+| 阶段              | 链头 | 游标                | `whitelist_events`      | 票数                |
+| ----------------- | ---- | ------------------- | ----------------------- | ------------------- |
+| 开始              | 406  | 406                 | 200                     | 200                 |
+| 发一笔真实交易后  | 407  | 407                 | **201**（新事件被索引） | 200                 |
+| `evm_revert` 之后 | 406  | 407（游标领先于链） | 201                     | 200                 |
+| 索引器修复之后    | 406  | **406**             | **200**（孤立行被丢弃） | **200**（未被误删） |
+
+它断言三件事：链头退到游标**之后**时索引器确实报告了 `rewound`（`rewoundTo: 406, discardedFrom: 407`）；被孤立的 `WhitelistUpdated` 行确实被删掉（201 → 200）；而**票数必须原封不动**——回退只能丢弃被孤立的日志，绝不能丢掉仍然在链上的票。
+
+> 两个实测踩到的坑，已写进脚本注释：`evm_snapshot` 返回的 id 是节点生命周期内递增的十六进制数（不是想当然的 `0x1`，传错只会安静地返回 `false`）；并且 `evm_revert` 返回 `true` 之后，`eth_blockNumber` **不会立刻**反映回退——只读一次就下结论，会误判成"重组从未发生"。
+
 ### 其他接口
 
 ```bash
@@ -437,7 +459,7 @@ CONFIRMATIONS=5
 │   │   │   ├── data.ts            # 链上/索引两侧的统一读取入口
 │   │   │   └── contracts/         # ABI 与部署地址（由 export-abi 生成）
 │   │   └── instrumentation.ts     # 启动后台索引循环
-│   ├── scripts/                   # migrate / drain / check-consistency
+│   ├── scripts/                   # migrate / drain / check-consistency / reorg-drill
 │   └── test/                      # 41 个单测，不需要链或数据库
 ├── docs/aegis/                    # 设计规格、基线、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）

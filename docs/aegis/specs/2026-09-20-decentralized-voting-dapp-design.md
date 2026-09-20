@@ -551,6 +551,7 @@ allowBuilds:
 | M-6 一致性   | 链上 **200** 票 == 索引 **200** 票，3 名候选人逐一比对，**0 处偏差**                                                               |
 | M-6 负向对照 | 从 `votes` 删除 1 行后：`consistent: false`、200 vs 199、定位到 `candidateId 2`（67 vs 66）、CLI 退出码 1、HTTP 500                |
 | M-6b 幂等性  | 游标回退到 0 强制重放：**404 行全部命中重复，插入 0 行**，票数仍为 200（未翻倍）                                                   |
+| M-6c 重组    | `evm_revert` 把真实链头 407→406：索引报告 `rewound`（`rewoundTo 406, discardedFrom 407`）、孤立事件行 201→200、票数保持 200        |
 | M-7 构建     | Next.js 生产构建成功：1 个页面 + 5 个动态 Route Handler 全部产出                                                                   |
 | 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 41 个 = **90 个，全部通过**                                                    |
 
