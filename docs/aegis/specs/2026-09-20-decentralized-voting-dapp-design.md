@@ -763,7 +763,7 @@ TransactionExecutionError: Execution reverted with reason: gas required exceeds 
 | MySQL 是必需依赖                                                    | MySQL 是**可选**依赖：无 `DATABASE_URL` 时全部读取回退为直接读链                         |
 | 前端读票数走索引                                                    | 票数与我的状态直接读链，索引只用于列表与历史                                             |
 
-**保留下来的东西（有意为之）**：`plan.ts` 的纯函数式分块/重组判定、`decode.ts` 的事件解码、`sync.ts` 的事务+游标+幂等写入，以及它们的单测（移植时 36 个，现为 41 个）——这些逻辑与 HTTP 框架无关，是被移植而非重写的。M-1…M-6b 的全部实测值在重构后重新跑过并且不变。
+**保留下来的东西（有意为之）**：`plan.ts` 的纯函数式分块/重组判定、`decode.ts` 的事件解码、`sync.ts` 的事务+游标+幂等写入，以及它们的单测（移植时 36 个，现仍为 36 个；索引器单测总数从 36 增至 57，新增的是 `config` 4、`report` 10、`client-api` 7）——这些逻辑与 HTTP 框架无关，是被移植而非重写的。M-1…M-6b 的全部实测值在重构后重新跑过并且不变。
 
 **新增的验证**：M-7（Next 生产构建）、全部 5 个 API 路由的实测响应（含 400 / 404 / 503 分支）、以及"无 `DATABASE_URL` 时降级为 `status: "unavailable"`"这一路径。
 

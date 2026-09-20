@@ -198,7 +198,7 @@ pnpm web:dev
 git clone <repo> && cd decentralized-voting-dapp
 pnpm install --frozen-lockfile   # 53.8s
 pnpm run typecheck
-pnpm test                        # 合约 49 + 索引器 41，0 失败
+pnpm test                        # 合约 49 + 索引器 57，0 失败
 pnpm coverage                    # Voting.sol 100.00 / 100.00
 pnpm export-abi && git diff --exit-code -- web/src/lib/contracts
 pnpm run build:web
@@ -207,11 +207,41 @@ pnpm run format:check
 
 这组命令**不需要**链、数据库、IPFS 网关或任何凭证。需要外部依赖的 M-5（gas）与 M-6（一致性）在下面的小节里单独说明。
 
+### 从零复现索引
+
+`pnpm test` 里的索引器单测用的是**假对象**：它们固定的是判定逻辑，不是"索引真的能把一条链读成正确投影"。后者需要一次真实的重建。
+
+下面这套流程在**一个全新的空数据库**上跑过（链复用已播种的本地节点）：
+
+```bash
+mysql -e "CREATE DATABASE voting CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+export DATABASE_URL='mysql://root:<pw>@127.0.0.1:3306/voting'
+export RPC_URL='http://127.0.0.1:8545' CHAIN_ID=31337 CONFIRMATIONS=0
+
+pnpm run indexer:migrate        # 建表，7 张
+pnpm run indexer:drain          # 从部署区块扫到链头
+pnpm run indexer:check-consistency
+```
+
+实测（空库 → 与文档基线逐项相同）：
+
+| 步骤                | 结果                                                                                  |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| `indexer:migrate`   | 7 张表；重复执行同样退出 0（幂等）                                                    |
+| `indexer:drain`     | `totalEventRowsSeen: 404`、`inserted: 404`、`duplicatesIgnored: 0`                    |
+| 投影结果            | `votes=200 whitelist=200 phases=1 cursor=406 tally=67/67/66`                          |
+| `check-consistency` | `status: "consistent"`、`onChainTotal: 200`、`indexedTotal: 200`、`discrepancies: []` |
+| 再 `drain` 一次     | `totalEventRowsSeen: 0`、`inserted: 0`——游标已到链头，重放不重复计数                  |
+
+也就是说：**只给一个空数据库和一条可达的链，索引就能自行收敛到与链完全一致的状态**，不需要任何手工播种。
+
+> **CI 不覆盖这一步。** `.github/workflows/ci.yml` 的 `web` 作业只把 schema 应用到真实的 MySQL 服务（并跑两遍证明幂等），它**不起节点、不部署、不播种、不 drain、不跑一致性检查**。上面这套流程是手动步骤，CI 里没有任何替代品——这一点在 workflow 文件的注释里也写明了，以免有人把绿色徽章误读成"索引端到端已被验证"。
+
 ### 全部测试与覆盖率
 
 ```bash
 pnpm typecheck            # Next.js 层类型检查
-pnpm test                 # 合约 49 个 + 索引器 41 个
+pnpm test                 # 合约 49 个 + 索引器 57 个
 pnpm coverage             # Voting.sol 行/语句覆盖率
 pnpm gas                  # gas 统计表
 pnpm build:web            # Next.js 生产构建
@@ -561,7 +591,7 @@ CONFIRMATIONS=5
 │   │   │   └── contracts/         # ABI 与部署地址（由 export-abi 生成）
 │   │   └── instrumentation.ts     # 启动后台索引循环
 │   ├── scripts/                   # migrate / drain / check-consistency / reorg-drill / refund-drill
-│   └── test/                      # 41 个单测，不需要链或数据库
+│   └── test/                      # 57 个单测，不需要链或数据库
 ├── docs/aegis/                    # 设计规格、基线、9 条 ADR、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）
 └── .github/workflows/ci.yml       # 4 条流水线

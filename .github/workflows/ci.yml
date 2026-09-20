@@ -90,8 +90,17 @@ jobs:
           --health-retries=20
 
     env:
-      # The app is designed to run without a database, but CI exercises the
-      # indexed path so the schema and the dual-source comparison are covered.
+      # Only DATABASE_URL is consumed here, by `indexer:migrate`. The other two
+      # are kept so the schema step runs under the same environment the app uses
+      # locally, but no step in this job talks to a chain.
+      #
+      # Boundary: this job does NOT exercise the indexer end to end. Nothing here
+      # starts a node, deploys, seeds, drains or runs the consistency check, so
+      # the "0/200 deviation" claim is not re-verified by CI. Reproducing it from
+      # scratch is a documented manual procedure — see "从零复现索引" in the
+      # README. The unit tests below cover the indexer's decision logic and
+      # decoding with fakes, which is a different (and deliberately narrower)
+      # guarantee.
       DATABASE_URL: mysql://root:root@127.0.0.1:3306/voting
       RPC_URL: http://127.0.0.1:8545
       CHAIN_ID: "31337"
