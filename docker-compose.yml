@@ -1,0 +1,33 @@
+# Reproducible MySQL for the indexer.
+#
+#   docker compose up -d mysql
+#   mysql://voting:voting@127.0.0.1:3307/voting
+#
+# Port 3307 is used on purpose so this never collides with an existing local
+# MySQL on 3306. The schema itself is applied by the indexer (`pnpm migrate`),
+# not by an init script, so there is exactly one definition of the schema.
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: voting-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: voting
+      MYSQL_USER: voting
+      MYSQL_PASSWORD: voting
+    ports:
+      - "3307:3306"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - voting-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  voting-mysql-data:
