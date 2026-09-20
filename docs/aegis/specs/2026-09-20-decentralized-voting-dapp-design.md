@@ -552,6 +552,21 @@ allowBuilds:
 
 四个变体全部为测试夹具（`contracts/contracts/test/`），通过 `coverage.skipFiles` 排除在覆盖率分母之外，绝不进入部署路径。
 
+### 校正 9：Hardhat 3 不读取 `.env`，因此配置里显式加载它
+
+原规格假定凭证可以放在 `contracts/.env`。实测这**不成立**：把 `SEPOLIA_RPC_URL` 写进 `contracts/.env` 而不导出为环境变量，脚本里 `process.env.SEPOLIA_RPC_URL` 为 `undefined`，Hardhat 直接报 `HHE7: Configuration Variable "SEPOLIA_RPC_URL" not found`——值就摆在文件里，却没有任何东西去读它。Hardhat 3 只从真实环境变量或 keystore 解析 Configuration Variable，CLI 也没有 `--env-file` 之类的选项。
+
+这个陷阱的代价不是报错本身，而是**报错信息指向了错误的方向**：使用者会去检查自己填的值，而问题在于文件从未被读取。
+
+修复：在 `hardhat.config.ts` 顶部用 Node 24 内置的 `process.loadEnvFile()` 显式加载 `contracts/.env`（存在才加载），不引入 `dotenv` 依赖。实测两条性质：
+
+| 场景                                  | 结果                                              |
+| ------------------------------------- | ------------------------------------------------- |
+| 只写 `contracts/.env`，不导出环境变量 | 通过，解析到 chain id 11155111（修复前为 `HHE7`） |
+| 同时导出 `SEPOLIA_RPC_URL` 且值不同   | 导出的值胜出，`process.env` 中为导出值而非文件值  |
+
+第二条是关键的安全性质：`loadEnvFile` 与 `--env-file` 语义一致，不覆盖已存在的环境变量，因此临时覆盖仍然有效。
+
 ## 15. 实测结果
 
 | 指标         | 结果                                                                                                                                                                                                                                                                                                                      |

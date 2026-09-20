@@ -374,9 +374,11 @@ npx hardhat keystore set SEPOLIA_RPC_URL
 npx hardhat keystore set SEPOLIA_PRIVATE_KEY
 npx hardhat keystore set ETHERSCAN_API_KEY
 
-# 方式二：明文环境变量
+# 方式二：明文文件
 cp contracts/.env.example contracts/.env   # 然后填写（.env 已被 gitignore）
 ```
+
+> Hardhat 3 **自己不会**读 `.env`——只认环境变量和 keystore。因此 `contracts/hardhat.config.ts` 用 Node 内置的 `process.loadEnvFile()` 显式加载 `contracts/.env`（文件存在才加载，不引入 `dotenv` 依赖）。语义与 `--env-file` 一致：**已导出的环境变量优先于文件**，所以临时覆盖仍然有效。
 
 ### 部署
 

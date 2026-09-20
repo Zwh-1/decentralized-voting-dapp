@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+
 import { configVariable, defineConfig } from "hardhat/config";
 
 import hardhatNetworkHelpers from "@nomicfoundation/hardhat-network-helpers";
@@ -5,6 +8,24 @@ import hardhatNodeTestRunner from "@nomicfoundation/hardhat-node-test-runner";
 import hardhatVerify from "@nomicfoundation/hardhat-verify";
 import hardhatViem from "@nomicfoundation/hardhat-viem";
 import hardhatViemAssertions from "@nomicfoundation/hardhat-viem-assertions";
+
+/**
+ * Loads `contracts/.env` before any Configuration Variable is resolved.
+ *
+ * Hardhat 3 does not read a `.env` file on its own — it resolves
+ * Configuration Variables from the real environment or the keystore. Since
+ * `.env.example` tells people to copy it to `.env`, that instruction was a
+ * dead end: the file was read by nothing, and the next command failed with
+ * `HHE7: Configuration Variable not found` while the value sat right there.
+ *
+ * Node's built-in loader keeps this dependency-free, and it matches `--env-file`
+ * semantics: an already-exported variable wins, so a shell override still works.
+ */
+const envFile = path.resolve(import.meta.dirname, ".env");
+
+if (existsSync(envFile)) {
+  process.loadEnvFile(envFile);
+}
 
 export default defineConfig({
   plugins: [
