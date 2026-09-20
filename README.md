@@ -82,10 +82,10 @@ flowchart LR
 | M-3  | 重入攻击防护       | 四组对照矩阵全部符合预期（见下）                                                                      | `pnpm test:contracts`            |
 | M-4  | 长序列属性测试     | 1000 轮确定性随机投票 + 256 轮 fuzz，**0 反例**，且经变异测试证明可失败                               | `pnpm test:contracts`            |
 | M-5  | Gas（中位数）      | `vote` **109,256**；`refund` **37,920**；部署 **1,249,757**；运行时代码 5,298 字节                    | `pnpm gas`                       |
-| M-6  | 链上/索引一致性    | **200 / 200 票，0 处偏差**（3 名候选人逐一比对）                                                      | `pnpm indexer:check-consistency` |
+| M-6  | 链上/索引一致性    | **200 / 200 票，0 处偏差**（3 名候选人逐一比对）；删掉 1 行后**确实报不一致**并定位到候选人 2         | `pnpm indexer:check-consistency` |
 | M-6b | 索引幂等性         | 游标回退到 0 强制重放：404 行**全部命中重复，插入 0 行**，票数仍为 200（未翻倍）                      | 见[验证与复现](#验证与复现)      |
 | M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                  | `pnpm build:web`                 |
-| —    | 测试总数           | **85 个**（合约 41 Solidity + 8 TypeScript，索引器 36）                                               | `pnpm test`                      |
+| —    | 测试总数           | **90 个**（合约 41 Solidity + 8 TypeScript，索引器 41）                                               | `pnpm test`                      |
 
 ### M-3：四组重入对照矩阵
 
@@ -193,7 +193,7 @@ pnpm web:dev
 git clone <repo> && cd decentralized-voting-dapp
 pnpm install --frozen-lockfile   # 53.8s
 pnpm run typecheck
-pnpm test                        # 合约 49 + 索引器 36，0 失败
+pnpm test                        # 合约 49 + 索引器 41，0 失败
 pnpm coverage                    # Voting.sol 100.00 / 100.00
 pnpm export-abi && git diff --exit-code -- web/src/lib/contracts
 pnpm run build:web
@@ -206,7 +206,7 @@ pnpm run format:check
 
 ```bash
 pnpm typecheck            # Next.js 层类型检查
-pnpm test                 # 合约 49 个 + 索引器 36 个
+pnpm test                 # 合约 49 个 + 索引器 41 个
 pnpm coverage             # Voting.sol 行/语句覆盖率
 pnpm gas                  # gas 统计表
 pnpm build:web            # Next.js 生产构建
@@ -230,6 +230,31 @@ curl http://127.0.0.1:3000/api/results
 ```
 
 不一致时该接口返回 **HTTP 500** 并给出逐候选人的差异，避免调用方把错误数据当作可用结果。
+
+#### M-6 的负向对照（这个检查确实会报警）
+
+一个永远只说"一致"的检查器不是证据。因此这里刻意制造了一次分歧：从 `votes` 表删掉**一行**，然后观察两侧是否被发现。
+
+```bash
+mysql -u root -p voting -e "DELETE FROM votes ORDER BY id DESC LIMIT 1;"   # 199 行
+pnpm indexer:check-consistency
+# 退出码 1，且定位到具体候选人：
+#   "consistent": false, "onChainTotal": 200, "indexedTotal": 199
+#   "discrepancies": [{ "candidateId": 2, "onChain": 67, "indexed": 66 }]
+
+curl -i http://127.0.0.1:3000/api/results      # 期望 HTTP 500 + 同一份差异
+
+# 恢复：回退游标后重放，缺失的行会被重新插入
+mysql -u root -p voting -e "UPDATE sync_cursor SET last_block = 0;"
+pnpm indexer:drain
+pnpm indexer:check-consistency                 # 回到 200/200，退出码 0
+```
+
+界面上这两个状态分别长这样（均为无头浏览器实拍）：
+
+| 一致（正常）                                                                       | 不一致（检查器报警）                                                                          |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| ![一致](docs/screenshots/ballot.png)<br>`链上与索引一致 · 200 / 200 票 · 0 处偏差` | ![不一致](docs/screenshots/ballot-inconsistent.png)<br>`链上 200 票 ≠ 索引 199 票 · 1 处偏差` |
 
 ### M-6b：幂等性（重放不重复计数）
 
@@ -294,15 +319,18 @@ pnpm --filter @voting/contracts verify:sepolia           # Etherscan 源码验�
 
 ### 让本地索引跟上 Sepolia
 
+只需要改链相关的项，`DATABASE_URL` 保持你上面已经配好的那个值不变：
+
 ```bash
 # web/.env
-DATABASE_URL=mysql://root:root@127.0.0.1:3306/voting
 RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
 CHAIN_ID=11155111
 CONFIRMATIONS=5
 ```
 
 `CONFIRMATIONS` 在真实网络上**不要设成 0**：那会让索引在重组发生时已经写入了可能被回滚的区块。
+
+注意 `CHAIN_ID` 变了之后，合约地址也要跟着变——它会由 `pnpm export-abi` 从 `contracts/deployments/11155111.json` 重新写入 `web/src/lib/contracts/`。本地 31337 的索引与 Sepolia 的索引是同一个库里的两张不同游标，因此**建议换库**，否则两条链的事件会混在同一个投影里。
 
 ### 已验证到什么程度（诚实说明）
 
@@ -408,7 +436,7 @@ CONFIRMATIONS=5
 │   │   │   └── contracts/         # ABI 与部署地址（由 export-abi 生成）
 │   │   └── instrumentation.ts     # 启动后台索引循环
 │   ├── scripts/                   # migrate / drain / check-consistency
-│   └── test/                      # 36 个单测，不需要链或数据库
+│   └── test/                      # 41 个单测，不需要链或数据库
 ├── docs/aegis/                    # 设计规格、基线、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）
 └── .github/workflows/ci.yml       # 4 条流水线

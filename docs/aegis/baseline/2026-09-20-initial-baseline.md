@@ -145,7 +145,7 @@ decentralized-voting-dapp/
 | --------------------- | ---------------------------------------------------------------------------------- |
 | Design Spec           | 已存在，已按实施校正（§14）与重构记录（§16）更新                                   |
 | ADR                   | 已存在：7 条 accepted ADR（`docs/aegis/adr/`），经 `aegis-workspace.py check` 通过 |
-| 代码与测试            | 已存在：85 个测试全部通过                                                          |
+| 代码与测试            | 已存在：90 个测试全部通过                                                          |
 | README（面向 GitHub） | 已存在                                                                             |
 | CI                    | 已存在：4 条流水线（contracts / abi-drift / web / format）                         |
 

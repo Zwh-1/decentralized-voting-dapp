@@ -25,7 +25,7 @@
 ```bash
 pnpm install
 
-pnpm test              # 全部测试：合约 49 + 索引器 36
+pnpm test              # 全部测试：合约 49 + 索引器 41
 pnpm run test:contracts
 pnpm run test:indexer
 pnpm coverage          # 行覆盖率 / 语句覆盖率
