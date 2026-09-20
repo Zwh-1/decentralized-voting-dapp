@@ -126,14 +126,15 @@ decentralized-voting-dapp/
 
 本节由实施过程追加。**上文正文保持原样**，因为它是"无代码时"的时间点快照，改写它会让基线失去作为历史记录的价值；下表逐条取代受影响的陈述。
 
-| 日期       | 取代上文                           | 原陈述                                                            | 取代为                                                                                                                                                |
-| ---------- | ---------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-09-20 | §2、§5.1、§6（第 98-101 行）       | 四层结构：`contracts/` + `indexer/` + `packages/shared/` + `web/` | 两层结构：`contracts/` + `web/`。索引器并入 `web/src/lib/indexer/`，ABI 生成到 `web/src/lib/contracts/`，`packages/shared` 与独立 `indexer/` 包已删除 |
-| 2026-09-20 | §5.1（第 76 行）                   | 合约工具链 TypeScript `5.9.3`                                     | TypeScript `6.0.3`                                                                                                                                    |
-| 2026-09-20 | §5.1（第 77 行）                   | 链下工具链：Express 5.2.1、zod 4.6.5、pino 10.3.1                 | Next.js 16.3.5 的 Route Handlers；mysql2 3.24.4 与 viem 2.56.8 保留；Express、zod、pino 与 express-rate-limit 均已移除                                |
-| 2026-09-20 | §5.1（第 78 行）、§6（第 101 行）  | 前端工具链：Vite 8.3.0                                            | Next.js 16.3.5（React 19.3.0、wagmi 3.7.7、viem 2.56.8、TailwindCSS 4.3.3 保留）                                                                      |
-| 2026-09-20 | §5.2 第 1 条、§9 末条              | MySQL 是必需依赖                                                  | MySQL 是**可选**依赖：无 `DATABASE_URL` 时全部读取回退为直接读链，`/api/results` 报告 `mode: "chain-only"`，但删库重建与非必需性不变量不变            |
-| 2026-09-20 | §3（第 30 行）、§6（第 96-101 行） | ADR 不存在；所有者为"尚未创建"的空壳                              | §12 的 ADR 信号已落地为 7 条 accepted ADR（`docs/aegis/adr/ADR-0001` … `ADR-0007`）；§6 的每个所有者面均已存在并指向具体文件                          |
+| 日期       | 取代上文                           | 原陈述                                                                                   | 取代为                                                                                                                                                                                                                                          |
+| ---------- | ---------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-09-20 | §2、§5.1、§6（第 98-101 行）       | 四层结构：`contracts/` + `indexer/` + `packages/shared/` + `web/`                        | 两层结构：`contracts/` + `web/`。索引器并入 `web/src/lib/indexer/`，ABI 生成到 `web/src/lib/contracts/`，`packages/shared` 与独立 `indexer/` 包已删除                                                                                           |
+| 2026-09-20 | §5.1（第 76 行）                   | 合约工具链 TypeScript `5.9.3`                                                            | TypeScript `6.0.3`                                                                                                                                                                                                                              |
+| 2026-09-20 | §5.1（第 77 行）                   | 链下工具链：Express 5.2.1、zod 4.6.5、pino 10.3.1                                        | Next.js 16.3.5 的 Route Handlers；mysql2 3.24.4 与 viem 2.56.8 保留；Express、zod、pino 与 express-rate-limit 均已移除                                                                                                                          |
+| 2026-09-20 | §5.1（第 78 行）、§6（第 101 行）  | 前端工具链：Vite 8.3.0                                                                   | Next.js 16.3.5（React 19.3.0、wagmi 3.7.7、viem 2.56.8、TailwindCSS 4.3.3 保留）                                                                                                                                                                |
+| 2026-09-20 | §5.2 第 1 条、§9 末条              | MySQL 是必需依赖                                                                         | MySQL 是**可选**依赖：无 `DATABASE_URL` 时全部读取回退为直接读链，`/api/results` 报告 `status: "unavailable"`，但删库重建与非必需性不变量不变                                                                                                   |
+| 2026-09-20 | §6.3（第 322、328 行）             | `/api/results` 返回 `consistent: boolean` 与 `mode`；无数据库时仍断言 `consistent: true` | 改为四值 `status`（`consistent` / `divergent` / `lagging` / `unavailable`）；判定前先把未索引区间 `(cursor, head]` 内的 `VoteCast` 加回索引一侧再比较；只有 `divergent` 返回 HTTP 500 与退出码 1；`unavailable` 不再断言任何一致性。见 ADR-0008 |
+| 2026-09-20 | §3（第 30 行）、§6（第 96-101 行） | ADR 不存在；所有者为"尚未创建"的空壳                                                     | §12 的 ADR 信号已落地为 8 条 accepted ADR（`docs/aegis/adr/ADR-0001` … `ADR-0008`）；§6 的每个所有者面均已存在并指向具体文件                                                                                                                    |
 
 **未受影响的 Non-negotiables**：§4.2 全部 4 条、§5.2 全部 5 条（链上唯一事实源、后端不持私钥、幂等消费、一人一票、事件与游标同事务）在重构后**逐条重新验证通过**（见 Spec §15 的 M-1 … M-6b）。
 
@@ -144,8 +145,8 @@ decentralized-voting-dapp/
 | 面                    | 状态                                                                               |
 | --------------------- | ---------------------------------------------------------------------------------- |
 | Design Spec           | 已存在，已按实施校正（§14）与重构记录（§16）更新                                   |
-| ADR                   | 已存在：7 条 accepted ADR（`docs/aegis/adr/`），经 `aegis-workspace.py check` 通过 |
-| 代码与测试            | 已存在：90 个测试全部通过                                                          |
+| ADR                   | 已存在：8 条 accepted ADR（`docs/aegis/adr/`），经 `aegis-workspace.py check` 通过 |
+| 代码与测试            | 已存在：102 个测试全部通过                                                         |
 | README（面向 GitHub） | 已存在                                                                             |
 | CI                    | 已存在：4 条流水线（contracts / abi-drift / web / format）                         |
 
@@ -160,5 +161,6 @@ decentralized-voting-dapp/
 | ADR-5 质押构造重入面   | `ADR-0005-stake-creates-a-real-reentrancy-surface.md`        |
 | —（重构新增）          | `ADR-0006-two-layers-and-optional-mysql.md`                  |
 | —（M-4 方法新增）      | `ADR-0007-property-tests-instead-of-the-invariant-runner.md` |
+| —（M-6 判定新增）      | `ADR-0008-reconcile-unindexed-range-before-verdict.md`       |
 
 注意 Spec §12 原表把"两层结构"记为 ADR-2 的主题之一，实际落地时它独立为 `ADR-0006`，而 `ADR-0002` 保持为"Hardhat 3 vs Hardhat 2"。上表为准。

@@ -45,6 +45,9 @@ interface CountRow extends RowDataPacket {
 
 const config = loadServerConfig();
 
+// These guards run before any client or pool exists, so `process.exit()` has no
+// handle to race with here and is safe. Every exit *after* a resource is open
+// must go through `process.exitCode` instead.
 if (config.databaseUrl === null) {
   console.error("DATABASE_URL is not set, so there is no index to repair.");
   process.exit(1);
@@ -54,6 +57,17 @@ if (config.chainId !== 31337) {
   console.error(
     `Refusing to run: this drill moves a chain's head backwards, so it is limited to the ` +
       `local Hardhat network (31337). CHAIN_ID is ${config.chainId}.`,
+  );
+  process.exit(1);
+}
+
+if (config.confirmations !== 0) {
+  console.error(
+    `Refusing to run: this drill grows the chain by one block and then expects to see that ` +
+      `block indexed, which only happens once it clears the confirmation window. With ` +
+      `CONFIRMATIONS=${config.confirmations} the new block is correctly withheld, and the drill ` +
+      `would report as a fault something that is really the setting. Use CONFIRMATIONS=0 against ` +
+      `a local node.`,
   );
   process.exit(1);
 }

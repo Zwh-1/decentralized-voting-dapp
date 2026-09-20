@@ -23,18 +23,42 @@ export interface Discrepancy {
   candidateId: number;
   onChain: number | null;
   indexed: number | null;
+  /**
+   * Votes for this candidate found in the unindexed range. They were already
+   * added to `indexed` before comparing, so a reader can tell why the raw
+   * numbers differ.
+   */
+  pending: number;
 }
 
+/**
+ * What the two-source comparison concluded.
+ *
+ * `lagging` is not a polite word for "fine": the unindexed range was too large
+ * to reconcile, so the comparison is simply inconclusive. Its own value, rather
+ * than a shade of "inconsistent", is the point — an index that trails inside the
+ * confirmation window is behaving correctly, and calling that a fault would bury
+ * the genuine divergence this check exists for.
+ */
+export type ConsistencyStatus = "unavailable" | "consistent" | "divergent" | "lagging";
+
 export interface ResultsResponse {
-  /** False when the two sources disagree; the route then answers 500. */
-  consistent: boolean;
-  /** "chain-only" when no database is configured, so only one source exists. */
-  mode: "dual-source" | "chain-only";
+  status: ConsistencyStatus;
   onChainTotal: number;
   indexedTotal: number | null;
+  /** Per-candidate differences. Only meaningful when `status` is "divergent". */
   discrepancies: Discrepancy[];
+  /**
+   * Votes found in the blocks between the index's cursor and the chain head.
+   * The indexer is not allowed to read those blocks yet, so they are added to
+   * the indexed side before comparing.
+   */
+  pendingVotes: number;
+  /** Blocks the index has not been allowed to read. Null when there is no index. */
+  unindexedBlocks: number | null;
   onChain: TallyResponse;
   indexed: TallyResponse | null;
+  lastIndexedBlock: string | null;
 }
 
 export interface HealthResponse {

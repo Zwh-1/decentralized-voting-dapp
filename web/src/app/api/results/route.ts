@@ -8,19 +8,22 @@ export const dynamic = "force-dynamic";
 /**
  * The dual-source consistency check — metric M-6.
  *
- * Reads the tally from the contract AND from MySQL and compares them. A
- * disagreement is answered with 500 and a per-candidate diff, because it means
- * the index is wrong and a caller should not treat the numbers as usable.
+ * Reads the tally from the contract AND from MySQL and compares them.
  *
- * When no database is configured the response is `mode: "chain-only"` with
- * `indexed: null`: there is nothing to compare, and saying so is better than
- * reporting a vacuous success.
+ * Only a genuine divergence answers 500: the index has reached the newest block
+ * it is allowed to read and still disagrees, so the numbers are wrong and a
+ * caller should not treat them as usable. A `lagging` index answers 200 — it is
+ * what the confirmation window is supposed to do, and a check that fired on
+ * expected behaviour would be ignored by the time a real divergence arrived.
+ *
+ * With no database the response is `status: "unavailable"` with `indexed: null`:
+ * there is nothing to compare, and saying so beats a vacuous success.
  */
 export async function GET() {
   try {
     const results = await getResults();
 
-    return NextResponse.json(results, { status: results.consistent ? 200 : 500 });
+    return NextResponse.json(results, { status: results.status === "divergent" ? 500 : 200 });
   } catch (error) {
     return NextResponse.json(
       {

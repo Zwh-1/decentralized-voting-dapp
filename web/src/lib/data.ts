@@ -12,7 +12,7 @@
  *     refund transactions).
  *
  * When `DATABASE_URL` is unset every read falls back to the chain and the API
- * reports `chain-only`, so the app is fully usable with no database at all.
+ * reports `unavailable`, so the app is fully usable with no database at all.
  *
  * This module is server-only: it holds a MySQL pool and an RPC client. Client
  * components must never import it.
@@ -32,7 +32,7 @@ import { migrate } from "./db/migrate";
 import { createPool } from "./db/pool";
 import { lagBlocks } from "./indexer/plan";
 import { readCursor, startSyncLoop, syncOnce, type Logger, type SyncOutcome } from "./indexer/sync";
-import { compareTally, readIndexedTally } from "./report";
+import { checkConsistency, readIndexedTally } from "./report";
 import type {
   HealthResponse,
   ResultsResponse,
@@ -125,39 +125,48 @@ export async function getTally(): Promise<TallyResponse> {
 /**
  * Both answers plus the comparison between them.
  *
- * With no database this degrades honestly: `mode` becomes "chain-only",
- * `indexedTotal` is null and `consistent` is true because there is nothing to
- * disagree with. It never claims a comparison it did not perform.
+ * With no database this degrades honestly: `status` becomes "unavailable",
+ * `indexedTotal` is null, and no comparison is claimed.
+ *
+ * The comparison itself lives in `checkConsistency` so that this route and the
+ * `check-consistency` script cannot drift into different verdicts.
  */
 export async function getResults(): Promise<ResultsResponse> {
   const state = getServerState();
   await ready(state);
 
-  const onChain = await readOnChainTally(state.client, state.config.votingAddress);
-
   if (state.pool === null) {
+    const onChain = await readOnChainTally(state.client, state.config.votingAddress);
+
     return {
-      consistent: true,
-      mode: "chain-only",
+      status: "unavailable",
       onChainTotal: onChain.total,
       indexedTotal: null,
       discrepancies: [],
+      pendingVotes: 0,
+      unindexedBlocks: null,
       onChain,
       indexed: null,
+      lastIndexedBlock: null,
     };
   }
 
-  const indexed = await readIndexedTally(state.pool);
-  const report = compareTally(onChain, indexed);
+  const check = await checkConsistency({
+    client: state.client,
+    pool: state.pool,
+    address: state.config.votingAddress,
+  });
 
   return {
-    consistent: report.consistent,
-    mode: "dual-source",
-    onChainTotal: onChain.total,
-    indexedTotal: indexed.total,
-    discrepancies: report.discrepancies,
-    onChain,
-    indexed,
+    status: check.status,
+    onChainTotal: check.onChain.total,
+    indexedTotal: check.indexed.total,
+    discrepancies: check.discrepancies,
+    pendingVotes: check.pendingVotes,
+    unindexedBlocks: check.unindexedBlocks,
+    onChain: check.onChain,
+    indexed: check.indexed,
+    lastIndexedBlock: check.lastIndexedBlock?.toString() ?? null,
   };
 }
 

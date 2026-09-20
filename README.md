@@ -67,7 +67,7 @@ flowchart LR
 两条关键设计线：
 
 1. **MySQL 里的一切都能从链上事件重放重建。** 删库不会丢任何信息，这使索引器的正确性可以被独立验证，而不是被信任。
-2. **索引是可选依赖。** 不设 `DATABASE_URL` 时，应用照常工作：所有读取回退为直接读链，`/api/results` 会如实报告 `mode: "chain-only"`，而不是给一个"没比对过却显示一致"的假结论。
+2. **索引是可选依赖。** 不设 `DATABASE_URL` 时，应用照常工作：所有读取回退为直接读链，`/api/results` 会如实报告 `status: "unavailable"`，而不是给一个"没比对过却显示一致"的假结论。
 
 ---
 
@@ -75,19 +75,19 @@ flowchart LR
 
 以下数字全部来自本仓库中可复现的命令，不是估计值。
 
-| 编号 | 指标               | 实测结果                                                                                              | 复现命令                         |
-| ---- | ------------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------- |
-| M-1  | 合约覆盖率         | `Voting.sol` 行 **100.00%**、语句 **100.00%**                                                         | `pnpm coverage`                  |
-| M-2  | 越权与非法调用拦截 | 7 类路径全部 revert：非白名单、重复投票、阶段错误（4 种）、押金金额错误、未知候选人、零地址、非管理员 | `pnpm test:contracts`            |
-| M-3  | 重入攻击防护       | 四组对照矩阵全部符合预期（见下）                                                                      | `pnpm test:contracts`            |
-| M-4  | 长序列属性测试     | 1000 轮确定性随机投票 + 256 轮 fuzz，**0 反例**，且经变异测试证明可失败                               | `pnpm test:contracts`            |
-| M-5  | Gas（中位数）      | `vote` **109,256**；`refund` **37,920**；部署 **1,249,757**；运行时代码 5,298 字节                    | `pnpm gas`                       |
-| M-6  | 链上/索引一致性    | **200 / 200 票，0 处偏差**（3 名候选人逐一比对）；删掉 1 行后**确实报不一致**并定位到候选人 2         | `pnpm indexer:check-consistency` |
-| M-6b | 索引幂等性         | 游标回退到 0 强制重放：404 行**全部命中重复，插入 0 行**，票数仍为 200（未翻倍）                      | 见[验证与复现](#验证与复现)      |
-| M-6c | 真实链重组         | `evm_revert` 让链头 407→406：索引报告 `rewound`、孤立事件行被删（201→200）、**票数仍为 200**          | `pnpm indexer:reorg-drill`       |
-| M-6d | 真实退款入库       | `0.001 ETH` 全额入库（`amount_wei` 逐位相同、无精度丢失）、**票数不变**、回退后索引撤销退款与阶段行   | `pnpm indexer:refund-drill`      |
-| M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                  | `pnpm build:web`                 |
-| —    | 测试总数           | **90 个**（合约 41 Solidity + 8 TypeScript，索引器 41）                                               | `pnpm test`                      |
+| 编号 | 指标               | 实测结果                                                                                                                                                                                | 复现命令                         |
+| ---- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| M-1  | 合约覆盖率         | `Voting.sol` 行 **100.00%**、语句 **100.00%**                                                                                                                                           | `pnpm coverage`                  |
+| M-2  | 越权与非法调用拦截 | 7 类路径全部 revert：非白名单、重复投票、阶段错误（4 种）、押金金额错误、未知候选人、零地址、非管理员                                                                                   | `pnpm test:contracts`            |
+| M-3  | 重入攻击防护       | 四组对照矩阵全部符合预期（见下）                                                                                                                                                        | `pnpm test:contracts`            |
+| M-4  | 长序列属性测试     | 1000 轮确定性随机投票 + 256 轮 fuzz，**0 反例**，且经变异测试证明可失败                                                                                                                 | `pnpm test:contracts`            |
+| M-5  | Gas（中位数）      | `vote` **109,256**；`refund` **37,920**；部署 **1,249,757**；运行时代码 5,298 字节                                                                                                      | `pnpm gas`                       |
+| M-6  | 链上/索引一致性    | **200 / 200 票，0 处偏差**（3 名候选人逐一比对）；`CONFIRMATIONS=5` 下索引合法落后至 197 票时**仍判定一致**（加回 3 票待确认）；同样的落后叠加删掉 1 行则**判定不一致**并定位到候选人 2 | `pnpm indexer:check-consistency` |
+| M-6b | 索引幂等性         | 游标回退到 0 强制重放：404 行**全部命中重复，插入 0 行**，票数仍为 200（未翻倍）                                                                                                        | 见[验证与复现](#验证与复现)      |
+| M-6c | 真实链重组         | `evm_revert` 让链头 407→406：索引报告 `rewound`、孤立事件行被删（201→200）、**票数仍为 200**                                                                                            | `pnpm indexer:reorg-drill`       |
+| M-6d | 真实退款入库       | `0.001 ETH` 全额入库（`amount_wei` 逐位相同、无精度丢失）、**票数不变**、回退后索引撤销退款与阶段行                                                                                     | `pnpm indexer:refund-drill`      |
+| M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                    | `pnpm build:web`                 |
+| —    | 测试总数           | **90 个**（合约 41 Solidity + 8 TypeScript，索引器 41）                                                                                                                                 | `pnpm test`                      |
 
 ### M-3：四组重入对照矩阵
 
@@ -224,7 +224,7 @@ pnpm seed:local                                     # 终端 2：部署 + 200 �
 pnpm export-abi
 pnpm indexer:migrate
 pnpm indexer:drain
-pnpm indexer:check-consistency                      # 期望 0 处偏差，不一致时退出码非 0
+pnpm indexer:check-consistency                      # 期望 0 处偏差，退出码 0
 ```
 
 也可直接看 API 的双侧比对结果：
@@ -233,7 +233,28 @@ pnpm indexer:check-consistency                      # 期望 0 处偏差，不�
 curl http://127.0.0.1:3000/api/results
 ```
 
-不一致时该接口返回 **HTTP 500** 并给出逐候选人的差异，避免调用方把错误数据当作可用结果。
+#### 为什么不能直接比较两个总数
+
+索引器按设计**故意不索引最近的 `CONFIRMATIONS` 个区块**（默认 5，本地开发设 0），否则一次链重组就会把可能被回滚的数据永久写进库。因此索引里的票数**本来就应该少于链上当前的票数**——这是正确行为，不是偏差。
+
+直接比较两个总数会把这种正确行为报成故障。这个项目的第一版就真踩了这个坑：在默认 `CONFIRMATIONS=5` 下，`check-consistency` 稳定地报"不一致"并退出 1，而数据库完全健康。这种告警的下场是被忽略——等真正的分歧出现时，没有人会再看它。
+
+正确的问法是：**索引，加上它还不被允许读取的那段区块里的投票，是否等于链上的结果？**
+
+为此检查器会拉取 `(cursor, head]` 区间内的日志，解码出其中的 `VoteCast`，把票数加回索引一侧再比较。这个判断只有一处实现（`web/src/lib/report.ts` 的 `checkConsistency`），`/api/results` 与 `check-consistency` 都调用它，所以界面和命令行不可能给出不同结论。
+
+`status` 有四个取值：
+
+| `status`      | 含义                                             | `/api/results` | CLI 退出码               |
+| ------------- | ------------------------------------------------ | -------------- | ------------------------ |
+| `consistent`  | 计入待确认票数后两侧完全吻合                     | 200            | 0                        |
+| `divergent`   | 计入之后**仍然**不吻合——真故障                   | 500            | 1                        |
+| `lagging`     | 未索引区间大到无法枚举（超过 5000 块），无法归因 | 200            | 0，并打印 `INCONCLUSIVE` |
+| `unavailable` | 没有配置数据库，不存在可比较的索引               | 200            | 0                        |
+
+只有 `divergent` 会返回 HTTP 500、退出码 1。`lagging` 不是"其实没问题"的委婉说法，而是"得不出结论"，所以它**不会**静默通过：CLI 会把 `INCONCLUSIVE` 写到 stderr。
+
+> 退出码本身也是可依赖的：脚本用 `process.exitCode` 而不是 `process.exit()`。后者会立即终止进程，`finally` 里的 `pool.end()` 根本不会执行；Windows 上 libuv 随后在拆卸未关闭句柄时触发 `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c`，把一次正确的运行报成退出码 `0xC0000409`。对一个"契约就是退出码"的验证脚本，这是致命的。
 
 #### M-6 的负向对照（这个检查确实会报警）
 
@@ -243,8 +264,8 @@ curl http://127.0.0.1:3000/api/results
 mysql -u root -p voting -e "DELETE FROM votes ORDER BY id DESC LIMIT 1;"   # 199 行
 pnpm indexer:check-consistency
 # 退出码 1，且定位到具体候选人：
-#   "consistent": false, "onChainTotal": 200, "indexedTotal": 199
-#   "discrepancies": [{ "candidateId": 2, "onChain": 67, "indexed": 66 }]
+#   "status": "divergent", "onChainTotal": 200, "indexedTotal": 199
+#   "discrepancies": [{ "candidateId": 2, "onChain": 67, "indexed": 66, "pending": 0 }]
 
 curl -i http://127.0.0.1:3000/api/results      # 期望 HTTP 500 + 同一份差异
 
@@ -254,11 +275,20 @@ pnpm indexer:drain
 pnpm indexer:check-consistency                 # 回到 200/200，退出码 0
 ```
 
-界面上这两个状态分别长这样（均为无头浏览器实拍）：
+**这套对账逻辑真正被考验的地方，是它能否在"索引确实合法落后"时仍然抓住真故障。** 在 `CONFIRMATIONS=5`、链上 200 票、索引已追平安全头（401 块）因而只持有 197 票的情况下：
 
-| 一致（正常）                                                                       | 不一致（检查器报警）                                                                          |
-| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| ![一致](docs/screenshots/ballot.png)<br>`链上与索引一致 · 200 / 200 票 · 0 处偏差` | ![不一致](docs/screenshots/ballot-inconsistent.png)<br>`链上 200 票 ≠ 索引 199 票 · 1 处偏差` |
+| 数据库状态                       | `unindexedBlocks` | 加回待确认票数 | `status`        | 退出码 |
+| -------------------------------- | ----------------- | -------------- | --------------- | ------ |
+| 健康（197 票）                   | 5                 | 3              | `consistent`    | 0      |
+| 同样的落后 + 删掉 1 行（196 票） | 5                 | 3              | **`divergent`** | **1**  |
+
+第二行是关键：故障没有被"还在确认窗口里"这块遮羞布盖过去。差异被定位到候选人 2，`pending: 1` 说明即使把那 1 票加回来也仍然对不上。
+
+界面上这三种状态长这样（均为无头浏览器实拍）：
+
+| 一致（正常）                                                                       | 一致（索引落后但已对账）                                                                                                          | 不一致（检查器报警）                                                                          |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| ![一致](docs/screenshots/ballot.png)<br>`链上与索引一致 · 200 / 200 票 · 0 处偏差` | ![落后但对账](docs/screenshots/consistency-reconciled-lag.png)<br>`链上与索引一致 · 200 / 197 票 · 0 处偏差（已计入 3 票待确认）` | ![不一致](docs/screenshots/ballot-inconsistent.png)<br>`链上 200 票 ≠ 索引 199 票 · 1 处偏差` |
 
 ### M-6b：幂等性（重放不重复计数）
 
@@ -426,7 +456,7 @@ CONFIRMATIONS=5
 
 - 它是**只读**的：`web/src/app/api/**/route.ts` 里每个处理器都只有 GET（同步接口是 POST，且只写本地缓存，不碰链），每条 SQL 都是 SELECT，进程不持有任何私钥。
 - 它是**可重建**的：删库后重放全部事件即可恢复。
-- 它**可能落后**：默认保留 5 个确认区块（本地开发设为 0），因此最近几秒的投票可能尚未出现在索引结果里。前端的 `/api/results` 会因此显示不一致——这是设计上的诚实表现，而不是 bug。
+- 它**可能落后**：默认保留 5 个确认区块（本地开发设为 0），因此最近几秒的投票可能尚未出现在索引结果里。前端不会把这报成故障——`/api/results` 会把那段未索引区块里的 `VoteCast` 解码出来加到索引一侧再比较，两侧对得上就仍显示"一致"，并注明`（已计入 N 票待确认）`；只有加回之后**仍然**对不上才报`不一致`。见 [M-6](#m-6链上索引一致性端到端)。
 - 前端读链上**权威**数据（票数、我的状态），索引只用于列表与历史查询，因此界面不会因为索引落后而显示错误的票数。
 
 ### 6. IPFS 元数据依赖公共网关
@@ -463,18 +493,18 @@ CONFIRMATIONS=5
 ├── contracts/                     # 合约层：Hardhat 3 + Solidity 0.8.37 + OpenZeppelin 5.6.1
 │   ├── contracts/
 │   │   ├── Voting.sol             # 生产合约
-│   │   ├── Voting.t.sol           # 41 个 Solidity 测试（含四组重入矩阵）
-│   │   ├── VotingProperties.t.sol # 1000 轮属性测试（M-4）
+│   │   ├── Voting.t.sol           # 39 个 Solidity 测试（含四组重入矩阵）
+│   │   ├── VotingProperties.t.sol # 2 个：1000 轮属性测试与 fuzz（M-4）
 │   │   └── test/                  # 仅测试用夹具，绝不部署
 │   ├── test/Voting.ts             # 8 个 viem + node:test 消费方测试
-│   ├── scripts/                   # deploy / seed-local / export-abi
+│   ├── scripts/                   # deploy / seed-local / export-abi / verify
 │   └── hardhat.config.ts
 ├── web/                           # Next.js 层：界面 + 只读索引器 + REST API
 │   ├── src/
 │   │   ├── app/
 │   │   │   ├── page.tsx           # 服务端预取，首屏即有真实数据
 │   │   │   └── api/               # 5 个 Route Handler（health/candidates/results/voters/sync）
-│   │   ├── components/            # Ballot / CandidateCard / ConsistencyBadge / WalletBar
+│   │   ├── components/            # Ballot / CandidateCard / ConsistencyBadge / WalletBar / Providers
 │   │   ├── lib/
 │   │   │   ├── indexer/plan.ts    # 纯函数：分块与重组判定（可单测，无 IO）
 │   │   │   ├── indexer/decode.ts  # 事件解码
@@ -485,7 +515,7 @@ CONFIRMATIONS=5
 │   │   └── instrumentation.ts     # 启动后台索引循环
 │   ├── scripts/                   # migrate / drain / check-consistency / reorg-drill / refund-drill
 │   └── test/                      # 41 个单测，不需要链或数据库
-├── docs/aegis/                    # 设计规格、基线、实测校正记录
+├── docs/aegis/                    # 设计规格、基线、8 条 ADR、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）
 └── .github/workflows/ci.yml       # 4 条流水线
 ```

@@ -14,6 +14,12 @@ interface Props {
  * The point of showing this in the UI is that it is checkable: the badge is
  * green only when the contract's own `results()` agrees with the indexer for
  * every candidate, and it names the candidates that disagree when it does not.
+ *
+ * `lagging` gets its own wording rather than borrowing the failure one. The
+ * indexer holds back recent blocks on purpose, so a red "不一致" during normal
+ * confirmation lag would be wrong twice over: it would describe correct
+ * behaviour as a fault, and it would make a real divergence look like the same
+ * thing.
  */
 export function ConsistencyBadge({ results, isLoading, isError }: Props) {
   if (isLoading) {
@@ -24,20 +30,33 @@ export function ConsistencyBadge({ results, isLoading, isError }: Props) {
     return <Badge tone="warn">无法比对（索引 API 不可达）</Badge>;
   }
 
-  if (results.consistent) {
-    return (
-      <Badge tone="ok">
-        链上与索引一致 · {results.onChainTotal} / {results.indexedTotal} 票 · 0 处偏差
-      </Badge>
-    );
-  }
+  switch (results.status) {
+    case "unavailable":
+      return <Badge tone="neutral">未启用索引 · 数字直接来自链上</Badge>;
 
-  return (
-    <Badge tone="bad">
-      链上 {results.onChainTotal} 票 ≠ 索引 {results.indexedTotal} 票 ·{" "}
-      {results.discrepancies.length} 处偏差
-    </Badge>
-  );
+    case "lagging":
+      return (
+        <Badge tone="warn">
+          索引落后 {results.unindexedBlocks} 个区块 · 链上 {results.onChainTotal} 票，暂不比对
+        </Badge>
+      );
+
+    case "divergent":
+      return (
+        <Badge tone="bad">
+          链上 {results.onChainTotal} 票 ≠ 索引 {results.indexedTotal} 票 ·{" "}
+          {results.discrepancies.length} 处偏差
+        </Badge>
+      );
+
+    case "consistent":
+      return (
+        <Badge tone="ok">
+          链上与索引一致 · {results.onChainTotal} / {results.indexedTotal} 票 · 0 处偏差
+          {results.pendingVotes > 0 ? `（已计入 ${results.pendingVotes} 票待确认）` : ""}
+        </Badge>
+      );
+  }
 }
 
 function Badge({

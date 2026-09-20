@@ -18,17 +18,19 @@ export function fetchTally(signal?: AbortSignal): Promise<TallyResponse> {
 }
 
 /**
- * `/api/results` answers 500 when the two sources disagree.
+ * `/api/results` answers 500 when the two sources genuinely disagree — the index
+ * has caught up and still reports different numbers.
  *
- * That status is deliberate — a non-2xx is what lets monitoring alert on index
- * divergence — but for this endpoint the body *is* the answer: it carries the
- * full per-candidate diff. Treating the 500 as a transport failure would throw
- * that payload away and make the UI report "cannot compare (index API
- * unreachable)" at exactly the moment it did compare and found a mismatch,
- * which points the reader at the network instead of at the data.
+ * That status is deliberate: a non-2xx is what lets monitoring alert on index
+ * divergence. But for this endpoint the body *is* the answer, carrying the full
+ * per-candidate diff. Treating the 500 as a transport failure would throw that
+ * payload away and make the UI report "cannot compare (index API unreachable)"
+ * at exactly the moment it did compare and found a mismatch, which points the
+ * reader at the network instead of at the data.
  *
- * So a 500 that parses as a results body is returned as data; anything else
- * still throws.
+ * So a 500 that parses as a results body is returned as data. The route's error
+ * shape is `{ error, message }`, so a `status` string is what distinguishes the
+ * two; anything else still throws.
  */
 export async function fetchResults(signal?: AbortSignal): Promise<ResultsResponse> {
   const response = await fetch("/api/results", { signal });
@@ -40,7 +42,7 @@ export async function fetchResults(signal?: AbortSignal): Promise<ResultsRespons
   if (response.status === 500) {
     const body = (await response.json().catch(() => null)) as ResultsResponse | null;
 
-    if (body !== null && typeof body.consistent === "boolean") {
+    if (body !== null && typeof body.status === "string") {
       return body;
     }
   }

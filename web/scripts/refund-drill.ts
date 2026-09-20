@@ -49,6 +49,9 @@ interface RefundRow extends RowDataPacket {
 
 const config = loadServerConfig();
 
+// These guards run before any client or pool exists, so `process.exit()` has no
+// handle to race with here and is safe. Every exit *after* a resource is open
+// must go through `process.exitCode` instead.
 if (config.databaseUrl === null) {
   console.error("DATABASE_URL is not set, so there is no index to inspect.");
   process.exit(1);
@@ -58,6 +61,17 @@ if (config.chainId !== 31337) {
   console.error(
     `Refusing to run: this drill ends the ballot, which cannot be undone on a chain that ` +
       `matters. It is limited to the local Hardhat network (31337). CHAIN_ID is ${config.chainId}.`,
+  );
+  process.exit(1);
+}
+
+if (config.confirmations !== 0) {
+  console.error(
+    `Refusing to run: this drill ends the ballot and refunds in consecutive blocks and then ` +
+      `expects both to be indexed, which only happens once they clear the confirmation window. ` +
+      `With CONFIRMATIONS=${config.confirmations} they are correctly withheld, and the drill ` +
+      `would report as a fault something that is really the setting. Use CONFIRMATIONS=0 against ` +
+      `a local node.`,
   );
   process.exit(1);
 }
@@ -357,7 +371,10 @@ try {
 
 if (failure !== null) {
   console.error(`\nDRILL FAILED: ${failure}`);
-  process.exit(1);
+  // `process.exitCode` rather than `process.exit()`, so the pool that `finally`
+  // already closed is the only thing Node has to tear down. See the note in
+  // `check-consistency.ts` for what `process.exit()` does to the exit code here.
+  process.exitCode = 1;
 }
 
 console.log(
