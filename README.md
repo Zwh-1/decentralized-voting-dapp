@@ -85,6 +85,7 @@ flowchart LR
 | M-6  | 链上/索引一致性    | **200 / 200 票，0 处偏差**（3 名候选人逐一比对）；删掉 1 行后**确实报不一致**并定位到候选人 2         | `pnpm indexer:check-consistency` |
 | M-6b | 索引幂等性         | 游标回退到 0 强制重放：404 行**全部命中重复，插入 0 行**，票数仍为 200（未翻倍）                      | 见[验证与复现](#验证与复现)      |
 | M-6c | 真实链重组         | `evm_revert` 让链头 407→406：索引报告 `rewound`、孤立事件行被删（201→200）、**票数仍为 200**          | `pnpm indexer:reorg-drill`       |
+| M-6d | 真实退款入库       | `0.001 ETH` 全额入库（`amount_wei` 逐位相同、无精度丢失）、**票数不变**、回退后索引撤销退款与阶段行   | `pnpm indexer:refund-drill`      |
 | M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                  | `pnpm build:web`                 |
 | —    | 测试总数           | **90 个**（合约 41 Solidity + 8 TypeScript，索引器 41）                                               | `pnpm test`                      |
 
@@ -294,6 +295,29 @@ pnpm indexer:reorg-drill     # 需要 hardhat node + 已排空的索引；先停
 
 > 两个实测踩到的坑，已写进脚本注释：`evm_snapshot` 返回的 id 是节点生命周期内递增的十六进制数（不是想当然的 `0x1`，传错只会安静地返回 `false`）；并且 `evm_revert` 返回 `true` 之后，`eth_blockNumber` **不会立刻**反映回退——只读一次就下结论，会误判成"重组从未发生"。
 
+### M-6d：真实退款演练
+
+`refunds` 是投影里唯一一张种子数据填不满的表——播种结束时选票仍停在 Voting 阶段，无法退款，所以它一直是 0 行。`Refunded` 的解码有单测、插入语句也出现在同步测试里，但两者用的都是合成日志：**从来没有一个真实的 wei 数额从合约走到 `DECIMAL(38,0)`**。
+
+这个缺口值得补，因为精度丢失是**静默的**：行照样出现、接口照样返回，唯一的症状是数字不对。
+
+```bash
+pnpm indexer:refund-drill     # 需要 hardhat node + 刚播种并排空的索引；先停掉应用
+```
+
+`endVoting()` 不可逆，所以整个场景跑在一次快照里，结束时回退——失败时同样回退。实测：
+
+| 阶段             | 阶段值     | `refunds` | `phase_events` | 票数                |
+| ---------------- | ---------- | --------- | -------------- | ------------------- |
+| 开始             | 1 投票     | 0         | 1              | 200                 |
+| `endVoting()` 后 | 2 结束     | 0         | **2**          | 200                 |
+| `refund()` 后    | 2 结束     | **1**     | 2              | **200**（未被改动） |
+| `evm_revert` 后  | **1 投票** | **0**     | **1**          | 200                 |
+
+它断言四件事：链上 `stakeOf` 为 `1000000000000000` wei，入库的 `amount_wei` **逐位相同**（精度丢失会正好在这里现形）；退款**不改变票数**（合约不会因退款递减 `voteCount`，索引自然也不能）；退款后两侧仍然一致；回退后索引把**退款行与阶段行一并撤销**。
+
+两个演练都可重复运行，跑完状态与基线完全一致（票 200、白名单 200、退款 0、阶段事件 1、游标 406）。
+
 ### 其他接口
 
 ```bash
@@ -459,7 +483,7 @@ CONFIRMATIONS=5
 │   │   │   ├── data.ts            # 链上/索引两侧的统一读取入口
 │   │   │   └── contracts/         # ABI 与部署地址（由 export-abi 生成）
 │   │   └── instrumentation.ts     # 启动后台索引循环
-│   ├── scripts/                   # migrate / drain / check-consistency / reorg-drill
+│   ├── scripts/                   # migrate / drain / check-consistency / reorg-drill / refund-drill
 │   └── test/                      # 41 个单测，不需要链或数据库
 ├── docs/aegis/                    # 设计规格、基线、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）

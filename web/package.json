@@ -13,7 +13,8 @@
     "migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
     "drain": "node --env-file-if-exists=.env --import tsx scripts/drain.ts",
     "check-consistency": "node --env-file-if-exists=.env --import tsx scripts/check-consistency.ts",
-    "reorg-drill": "node --env-file-if-exists=.env --import tsx scripts/reorg-drill.ts"
+    "reorg-drill": "node --env-file-if-exists=.env --import tsx scripts/reorg-drill.ts",
+    "refund-drill": "node --env-file-if-exists=.env --import tsx scripts/refund-drill.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "5.103.1",

@@ -26,6 +26,7 @@
     "indexer:drain": "pnpm --filter @voting/web drain",
     "indexer:check-consistency": "pnpm --filter @voting/web check-consistency",
     "indexer:reorg-drill": "pnpm --filter @voting/web reorg-drill",
+    "indexer:refund-drill": "pnpm --filter @voting/web refund-drill",
     "web:dev": "pnpm --filter @voting/web dev",
     "web:start": "pnpm --filter @voting/web start",
     "format": "prettier --write .",

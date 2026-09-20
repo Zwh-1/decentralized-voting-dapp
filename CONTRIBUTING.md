@@ -41,9 +41,10 @@ pnpm indexer:migrate
 pnpm indexer:drain
 pnpm indexer:check-consistency
 pnpm indexer:reorg-drill   # 用 evm_snapshot/evm_revert 造一次真实重组
+pnpm indexer:refund-drill  # 走一遍真实退款，校验 wei 入库精度
 ```
 
-改动索引器的游标、重组或幂等逻辑时，请连同 `indexer:drain`、`indexer:check-consistency` 与 `indexer:reorg-drill` 一起验证——这三条覆盖的性质，单元测试覆盖不到。
+改动索引器的游标、重组或幂等逻辑时，请连同 `indexer:drain`、`indexer:check-consistency` 与 `indexer:reorg-drill` 一起验证——这三条覆盖的性质，单元测试覆盖不到。改动事件解码或表结构时，请再跑一次 `indexer:refund-drill`。两个 `*-drill` 都会自行还原链状态，可以反复运行。
 
 ## 不要手改生成物
 
