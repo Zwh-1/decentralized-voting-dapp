@@ -30,6 +30,14 @@ export default defineConfig({
   },
 
   networks: {
+    // A `hardhat node` process, used for the end-to-end verification and for
+    // local development. No secrets involved.
+    localhost: {
+      type: "http",
+      chainType: "l1",
+      url: "http://127.0.0.1:8545",
+    },
+
     // Secrets are never committed: resolved through Configuration Variables
     // (env vars, or `hardhat keystore set`). See .env.example.
     sepolia: {

@@ -5,11 +5,11 @@
   "type": "module",
   "description": "Read-only event indexer and REST API for the Voting contract",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
-    "migrate": "tsx src/db/migrate.ts",
-    "drain": "tsx src/cli/drain.ts",
-    "check-consistency": "tsx src/cli/check-consistency.ts",
+    "dev": "node --env-file-if-exists=.env --watch --import tsx src/index.ts",
+    "start": "node --env-file-if-exists=.env --import tsx src/index.ts",
+    "migrate": "node --env-file-if-exists=.env --import tsx src/db/migrate.ts",
+    "drain": "node --env-file-if-exists=.env --import tsx src/cli/drain.ts",
+    "check-consistency": "node --env-file-if-exists=.env --import tsx src/cli/check-consistency.ts",
     "test": "node --test --import tsx test/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
