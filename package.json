@@ -1,0 +1,23 @@
+{
+  "name": "decentralized-voting-dapp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Full-stack decentralized voting dApp: Hardhat 3 + Solidity contracts, TypeScript event indexer backed by MySQL, React + wagmi frontend.",
+  "license": "MIT",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter @voting/contracts build",
+    "test": "pnpm --filter @voting/contracts test",
+    "coverage": "pnpm --filter @voting/contracts coverage",
+    "gas": "pnpm --filter @voting/contracts gas",
+    "export-abi": "pnpm --filter @voting/contracts export-abi",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "3.9.8"
+  }
+}

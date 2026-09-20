@@ -1,0 +1,25 @@
+# Normalize all text files to LF in the repository.
+# This project is open source and developed on Windows; without this,
+# contributors on Windows/macOS/Linux produce whole-file diffs.
+* text=auto eol=lf
+
+# Windows-only scripts must keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary — never touched
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+
+# Generated — exclude from diffs and language stats
+pnpm-lock.yaml linguist-generated=true
+coverage/** linguist-generated=true
+artifacts/** linguist-generated=true
+cache/** linguist-generated=true
+gas-stats.json linguist-generated=true

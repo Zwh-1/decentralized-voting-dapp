@@ -144,8 +144,9 @@ decentralized-voting-dapp/
 | Node.js | ≥ 22.13.0（宿主 24.14.0） | Hardhat 3 要求 |
 | hardhat | 3.17.0 | 完全重写版；ESM-first、`defineConfig` |
 | @openzeppelin/contracts | 5.6.1 | `Ownable` 在 `access/`，`ReentrancyGuard` 已移至 `utils/`（5.0 起） |
-| TypeScript | **5.9.3** | 刻意不用 7.0.2：TS 7 是原生编译器重写（原 tsgo），typed-lint 与框架插件生态未必跟进；本项目目标是可复现交付，不为此承担工具链风险 |
-| Solidity | 0.8.37 | pin 精确版本，不用 `^` |
+| TypeScript | **~6.0.3** | 见 §14 校正 1：Hardhat 3 官方模板自行选择 `~6.0.3`，比原定 5.9.3 更可信 |
+| Solidity | 0.8.37 | pin 精确版本，不用 `^`；M0 已实测该版本可正常下载与编译 |
+| forge-std | `github:foundry-rs/forge-std#v1.16.2` | Solidity 测试的断言与 cheatcode 来源。**必须从 GitHub 安装**，见 §14 校正 3 |
 | 配置格式 | `hardhat.config.ts` 用 `defineConfig`，项目 `"type": "module"` | Hardhat 3 强制 ESM 配置 |
 
 ### 5.2 状态与数据结构
@@ -361,7 +362,7 @@ loop:
 
 | # | 指标 | 命令 / 方式 | 目标 |
 |---|---|---|---|
-| M-1 | 合约测试覆盖率 | `npx hardhat test --coverage`（终端 Markdown + `coverage/lcov.info` + `coverage/html/index.html`） | 语句与分支覆盖率 ≥ 95% |
+| M-1 | 合约测试覆盖率 | `npx hardhat test --coverage`（终端报告 + `coverage/lcov.info` + `coverage/html/index.html`） | **行覆盖率与语句覆盖率** ≥ 95%（见 §14 校正 2：Hardhat 3 不产出分支覆盖率） |
 | M-2 | 授权拦截完整性 | Solidity 测试，`expectRevert` 断言自定义 error | 非白名单、重复投票、阶段错误、金额不符、非管理员 → 全部 revert，0 例外 |
 | M-3 | 重入攻击对照 | 攻击合约对 `VulnerableRefund` 成功、对 `Voting` revert | 两条断言均通过（§5.5） |
 | M-4 | 不变量（fuzz / invariant） | 随机 1000 次投票后断言 `Σ voteCount == VoteCast 事件数 == hasVoted 为真的地址数` | 反例 0 个 |
@@ -432,3 +433,65 @@ loop:
 - **范围检查**：单一实现计划可覆盖，但跨度较大；里程碑已按可独立交付切分（§9）。
 - **歧义检查**：「准确率」只剩 M-6 一个精确定义（`一致记录数 / 总记录数`），其余改为覆盖率/反例数/gas 这类无歧义量。
 - **边界检查**：不变量（§1）、非目标（§11）、兼容边界（测试网与本地同源码同 ABI）、ADR 信号（§12）均已显式标注。
+
+---
+
+## 14. M0 实测校正记录
+
+以下为 M0 实际执行中发现与本规格不符的事实，均已原地修正（不另开文档）。每条都附实测证据。
+
+### 校正 1：TypeScript 版本 5.9.3 → ~6.0.3
+
+`hardhat --init --template minimal` 官方脚手架自行安装的是 `typescript@~6.0.3`。这是 Hardhat 官方对自身工具链的实证选择，比我原先"避开 TS 7 就退到 5.9.3"的推测更可信。原判断（避开 TS 7 原生编译器重写）仍成立，只是安全落点从 5.9.3 前移到 6.0.3。
+
+证据：`npx hardhat@3.17.0 --init --template minimal` 输出 `npm install --save-dev "hardhat@^3.17.0" "@types/node@^22.8.5" "typescript@~6.0.3"`。
+
+### 校正 2：覆盖率指标不含分支覆盖率
+
+实测 `hardhat test --coverage` 的报告表头为 `File Path | Line % | Statement % | Uncovered Lines`——**Hardhat 3 内置覆盖率只产出行覆盖率与语句覆盖率，没有分支覆盖率**。原规格写的"语句与分支覆盖率 ≥95%"是无法测量的目标。M-1 已改为"行覆盖率与语句覆盖率 ≥95%"。
+
+证据：M0 冒烟运行输出 `contracts\Smoke.sol | 100.00 | 100.00`，并生成 `coverage/lcov.info` 与 `coverage/html/index.html`。
+
+### 校正 3：forge-std 必须从 GitHub 安装
+
+npm 上的 `forge-std@1.1.2` 是**非官方分发**（`package.json.description` 自述 "Unofficial NPM distribution of Forge Standard Library"，`repository.url` 指向 `github.com/shunkakinoki/contracts`），且文件位于包根目录而非 `src/`，导致 Hardhat 的 `exports` 解析报错：
+
+```
+Error HHE902: There was an error while resolving the import "forge-std/Test.sol"
+The file "src/Test.sol" doesn't exist within the package.
+```
+
+官方文档规定从 GitHub 安装。改用 `github:foundry-rs/forge-std#v1.16.2` 后解析正常。
+
+**副作用（已列入风险）**：该依赖需要访问 GitHub。本机实测出现 `ECONNRESET` 重试两次后成功，安装耗时 1 分 41 秒。因此 `pnpm install` 在弱网环境下可能失败，README 需注明重试。
+
+### 校正 4：pnpm 11 的构建脚本白名单字段是 `allowBuilds`
+
+pnpm 11 默认阻止依赖的生命周期脚本，`esbuild`（Hardhat 工具链的传递依赖）因此未执行 postinstall，导致 `pnpm install` 以 exit 1 失败（`ERR_PNPM_IGNORED_BUILDS`）。pnpm 会自动在 `pnpm-workspace.yaml` 写入占位符：
+
+```yaml
+allowBuilds:
+  esbuild: set this to true or false
+```
+
+填为 `true` 后安装正常。注意字段名是 `allowBuilds`（映射），不是旧版的 `onlyBuiltDependencies`（列表）。
+
+### 校正 5：Solidity 测试与夹具的目录约定
+
+官方约定为：`test/` 目录下的 `.sol` 文件，或 `contracts/` 目录下以 `.t.sol` 结尾的文件，都被视为 Solidity 测试文件。本规格据此固定：
+
+- `contracts/contracts/*.t.sol` —— Solidity 测试（forge-std `Test` 基类，支持 fuzz 与 invariant）；
+- `contracts/contracts/test/` —— 仅测试用的夹具合约（`VulnerableRefund.sol`、`RefundAttacker.sol`），通过 `coverage.skipFiles: ["**/test/**", "**/*.t.sol"]` 排除在覆盖率分母之外；
+- `contracts/test/*.ts` —— `node:test` + viem 的 TypeScript 测试。
+
+**Solidity 测试跟随官方教程放在 `contracts/` 内**，而非 `test/solidity/`，以规避 `paths.tests.solidity` 的额外配置风险。
+
+### 校正 6：Solidity 0.8.37 确认可用
+
+原规格 pin 的 `0.8.37` 可用（M0 编译实测：`Compiled 2 Solidity files with solc 0.8.37`），无需回退到模板默认的 0.8.34。
+
+### 遗留的复现风险
+
+- **GitHub 连通性**：`forge-std` 的 git 依赖在弱网下可能安装失败（校正 3）。
+- **工具链版本漂移**：`hardhat`, `viem`, `@nomicfoundation/*` 均以精确版本固定；任一升级需重跑 M-1 … M-6。
+- **`test.solidity.invariant.runs` 设为 1000**：M-4 的 1000 轮证据来自该配置，属实测运行时间与证据强度的折中（每次运行最多 100 次调用）。

@@ -1,0 +1,9 @@
+packages:
+  - contracts
+  - packages/*
+
+# pnpm 10+ blocks dependency lifecycle scripts by default. esbuild (a
+# transitive dependency of the Hardhat toolchain) needs its postinstall to
+# run, otherwise `pnpm install` exits non-zero and CI fails.
+allowBuilds:
+  esbuild: true
