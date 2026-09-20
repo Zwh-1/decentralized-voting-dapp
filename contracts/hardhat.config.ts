@@ -48,6 +48,18 @@ export default defineConfig({
       url: configVariable("SEPOLIA_RPC_URL"),
       accounts: [configVariable("SEPOLIA_PRIVATE_KEY")],
     },
+
+    // Verification publishes the source of an address that is already deployed,
+    // so it never signs anything. This entry deliberately declares no `accounts`:
+    // Hardhat resolves the network it is given before the script's own guards
+    // run, so pointing verification at `sepolia` made it demand the deployer's
+    // private key merely to read a public contract — a needless coupling, and
+    // one that would put the key into CI and into any machine that verifies.
+    sepoliaReadOnly: {
+      type: "http",
+      chainType: "l1",
+      url: configVariable("SEPOLIA_RPC_URL"),
+    },
   },
 
   test: {

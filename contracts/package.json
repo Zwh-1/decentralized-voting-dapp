@@ -15,7 +15,7 @@
     "export-abi": "hardhat run scripts/export-abi.ts",
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
     "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia",
-    "verify:sepolia": "hardhat run scripts/verify.ts --network sepolia",
+    "verify:sepolia": "hardhat run scripts/verify.ts --network sepoliaReadOnly",
     "seed:local": "hardhat run scripts/seed-local.ts --network localhost"
   },
   "devDependencies": {

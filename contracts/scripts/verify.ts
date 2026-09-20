@@ -59,7 +59,9 @@ console.log(`Verifying Voting at ${record.voting} (chain ${chainId})`);
 console.log(`Constructor argument read from the deployment record: owner=${record.owner}`);
 
 // The verify task resolves its connection from the same CLI flags this script
-// was invoked with, so `--network sepolia` applies here as well.
+// was invoked with, so `--network sepoliaReadOnly` applies here as well. That
+// entry has no `accounts`, which is why verification does not need the
+// deployer's private key.
 await tasks.getTask("verify").run({
   address: record.voting,
   constructorArgs: [record.owner],
