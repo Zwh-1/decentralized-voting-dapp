@@ -62,13 +62,23 @@ export interface OnChainVoter {
   hasVoted: boolean;
   votedFor: number;
   stakeWei: bigint;
+  /**
+   * The current whitelist decision.
+   *
+   * Read from the chain even though the index also records whitelist events.
+   * `Voting.isWhitelisted` is a public mapping getter — one cheap call that is by
+   * construction at least as current as any projection, so an index that has
+   * fallen behind can never make this answer wrong. ADR-0009 relies on the same
+   * property for the ballot's buttons.
+   */
+  isWhitelisted: boolean;
 }
 
 /**
  * Reads one voter's on-chain state.
  *
- * Three independent reads issued in parallel rather than a multicall: Hardhat's
- * local network does not always have Multicall3 deployed, and three round trips
+ * Four independent reads issued in parallel rather than a multicall: Hardhat's
+ * local network does not always have Multicall3 deployed, and four round trips
  * against a local node or a good RPC is not worth a deployment dependency.
  */
 export async function readOnChainVoter(
@@ -76,25 +86,17 @@ export async function readOnChainVoter(
   address: `0x${string}`,
   voter: `0x${string}`,
 ): Promise<OnChainVoter> {
-  const [hasVoted, votedFor, stakeWei] = await Promise.all([
+  const [hasVoted, votedFor, stakeWei, isWhitelisted] = await Promise.all([
     client.readContract({ address, abi: votingAbi, functionName: "hasVoted", args: [voter] }),
     client.readContract({ address, abi: votingAbi, functionName: "votedFor", args: [voter] }),
     client.readContract({ address, abi: votingAbi, functionName: "stakeOf", args: [voter] }),
+    client.readContract({ address, abi: votingAbi, functionName: "isWhitelisted", args: [voter] }),
   ]);
 
   return {
     hasVoted: hasVoted as boolean,
     votedFor: Number(votedFor as bigint),
     stakeWei: stakeWei as bigint,
+    isWhitelisted: isWhitelisted as boolean,
   };
-}
-
-/** Reads the current ballot phase. */
-export async function readOnChainPhase(
-  client: PublicClient,
-  address: `0x${string}`,
-): Promise<number> {
-  const phase = await client.readContract({ address, abi: votingAbi, functionName: "phase" });
-
-  return Number(phase);
 }

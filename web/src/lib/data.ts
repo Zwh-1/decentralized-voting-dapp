@@ -4,15 +4,25 @@
  *
  * One place that decides where each answer comes from:
  *
- *   * the CHAIN is authoritative for the tally, the phase, whether you voted and
- *     your stake. These are never taken from the index when the index is absent,
- *     and always compared against it when it is present.
- *   * the INDEX, when configured, answers the heavier "list and count" questions
- *     and supplies history the chain does not retain cheaply (whitelist changes,
- *     refund transactions).
+ *   * the CHAIN is authoritative for the tally, the phase, the whitelist decision,
+ *     whether you voted, what you voted for and your stake. These are never taken
+ *     from the index, and the chain's answer is always compared against the index
+ *     when one is available.
+ *   * the INDEX supplies what the chain does not cheaply expose: the vote
+ *     transaction hash and the refund history.
  *
- * When `DATABASE_URL` is unset every read falls back to the chain and the API
- * reports `unavailable`, so the app is fully usable with no database at all.
+ * There are two ways for the index to be missing, and they must be handled the
+ * same way, because the chain is the source of truth in both:
+ *
+ *   * `DATABASE_URL` is unset — the index was never configured;
+ *   * `DATABASE_URL` is set but the database cannot be read — the index is down.
+ *
+ * In both cases every read falls back to the chain, `source` says so, and the API
+ * reports the comparison as `unavailable` rather than claiming a verdict it could
+ * not compute. Treating only the first case as "no index" meant a database outage
+ * replaced answers the chain could still give with a 503, and the ballot page then
+ * told the reader the *chain* was unreadable when it was the database that was
+ * down. The outage is still visible: `/api/health` reports it in `indexError`.
  *
  * This module is server-only: it holds a MySQL pool and an RPC client. Client
  * components must never import it.
@@ -22,7 +32,6 @@ import type { Pool } from "mysql2/promise";
 import {
   asChainReader,
   buildChainClient,
-  readOnChainPhase,
   readOnChainTally,
   readOnChainVoter,
   type OnChainVoter,
@@ -53,6 +62,13 @@ interface ServerState {
   pool: Pool | null;
   ready: Promise<void>;
   syncLoopStarted: boolean;
+  /**
+   * The most recent reason the index could not be read, or null.
+   *
+   * Cleared by any successful index read, so a recovered database stops being
+   * reported without a restart. Reported through `/api/health`.
+   */
+  indexError: string | null;
 }
 
 /** A plain key rather than a symbol: symbols are not valid interface keys. */
@@ -70,6 +86,7 @@ function initialise(): ServerState {
     pool: null,
     ready: Promise.resolve(),
     syncLoopStarted: false,
+    indexError: null,
   };
 
   if (config.databaseUrl !== null) {
@@ -90,17 +107,64 @@ export function getServerState(): ServerState {
   return globalStore.__votingServerState;
 }
 
-/** Waits until the optional schema has been applied. */
+/**
+ * Waits until the optional schema has been applied.
+ *
+ * A failure here is recorded rather than thrown. Applying the schema happens once
+ * per process, and when it fails it means the index is unreachable — not that the
+ * process is broken. Throwing would take down reads the chain can still answer,
+ * and the caller would be told the chain was unreadable when it was not.
+ */
 async function ready(state: ServerState): Promise<void> {
-  await state.ready;
+  try {
+    await state.ready;
+  } catch (error) {
+    recordIndexFailure(state, error);
+  }
 }
 
-function requirePool(state: ServerState): Pool {
+/** Remembers why the index could not be read, for `/api/health` to report. */
+function recordIndexFailure(state: ServerState, error: unknown): void {
+  state.indexError = error instanceof Error ? error.message : String(error);
+}
+
+/** Clears a previously recorded failure: the index answered this time. */
+function recordIndexSuccess(state: ServerState): void {
+  state.indexError = null;
+}
+
+/**
+ * Reads from the index, falling back to the chain when the index cannot be read.
+ *
+ * `DATABASE_URL` being set makes the index *expected*, not *guaranteed*. The two
+ * ways it can be missing — never configured, and configured but down — must lead
+ * to the same place for any question the chain can answer, because the chain is
+ * the source of truth either way (ADR-0001). Letting only the first fall back
+ * meant a MySQL outage replaced answers the chain could still give with a 503,
+ * and the page then reported that the *chain* was unreadable.
+ *
+ * The failure is not swallowed: it is recorded so `/api/health` shows the outage,
+ * and the returned `source` tells the client which path answered.
+ */
+async function withIndex<T>(
+  state: ServerState,
+  readFromIndex: (pool: Pool) => Promise<T>,
+  readFromChain: () => Promise<T>,
+): Promise<T> {
   if (state.pool === null) {
-    throw new Error("The index is not configured; this read must fall back to the chain.");
+    return readFromChain();
   }
 
-  return state.pool;
+  try {
+    const value = await readFromIndex(state.pool);
+    recordIndexSuccess(state);
+
+    return value;
+  } catch (error) {
+    recordIndexFailure(state, error);
+
+    return readFromChain();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -108,25 +172,42 @@ function requirePool(state: ServerState): Pool {
 // ---------------------------------------------------------------------------
 
 /**
- * The tally. From MySQL when the index exists, otherwise straight from the
+ * The tally. From MySQL when the index answers, otherwise straight from the
  * contract.
  */
 export async function getTally(): Promise<TallyResponse> {
   const state = getServerState();
   await ready(state);
 
-  if (state.pool === null) {
-    return readOnChainTally(state.client, state.config.votingAddress);
-  }
+  return withIndex(
+    state,
+    (pool) => readIndexedTally(pool),
+    () => readOnChainTally(state.client, state.config.votingAddress),
+  );
+}
 
-  return readIndexedTally(state.pool);
+/** The shape reported when the two sources cannot be compared at all. */
+function withoutComparison(onChain: TallyResponse): ResultsResponse {
+  return {
+    status: "unavailable",
+    onChainTotal: onChain.total,
+    indexedTotal: null,
+    discrepancies: [],
+    pendingVotes: 0,
+    unindexedBlocks: null,
+    onChain,
+    indexed: null,
+    lastIndexedBlock: null,
+  };
 }
 
 /**
  * Both answers plus the comparison between them.
  *
- * With no database this degrades honestly: `status` becomes "unavailable",
- * `indexedTotal` is null, and no comparison is claimed.
+ * With no usable index this degrades honestly: `status` becomes "unavailable",
+ * `indexedTotal` is null, and no comparison is claimed. That applies whether the
+ * index was never configured or is configured and unreachable — in both cases
+ * nothing was compared, so nothing may be asserted.
  *
  * The comparison itself lives in `checkConsistency` so that this route and the
  * `check-consistency` script cannot drift into different verdicts.
@@ -135,27 +216,29 @@ export async function getResults(): Promise<ResultsResponse> {
   const state = getServerState();
   await ready(state);
 
-  if (state.pool === null) {
-    const onChain = await readOnChainTally(state.client, state.config.votingAddress);
+  // Read the chain first and let a failure propagate: this endpoint's whole
+  // purpose is the comparison, and it cannot report a chain-side number it does
+  // not have. An index-side failure below is a different matter — the comparison
+  // is simply not available.
+  const onChain = await readOnChainTally(state.client, state.config.votingAddress);
 
-    return {
-      status: "unavailable",
-      onChainTotal: onChain.total,
-      indexedTotal: null,
-      discrepancies: [],
-      pendingVotes: 0,
-      unindexedBlocks: null,
-      onChain,
-      indexed: null,
-      lastIndexedBlock: null,
-    };
+  if (state.pool === null) {
+    return withoutComparison(onChain);
   }
 
-  const check = await checkConsistency({
-    client: state.client,
-    pool: state.pool,
-    address: state.config.votingAddress,
-  });
+  let check;
+  try {
+    check = await checkConsistency({
+      client: state.client,
+      pool: state.pool,
+      address: state.config.votingAddress,
+    });
+    recordIndexSuccess(state);
+  } catch (error) {
+    recordIndexFailure(state, error);
+
+    return withoutComparison(onChain);
+  }
 
   return {
     status: check.status,
@@ -178,7 +261,14 @@ export async function getHealth(): Promise<HealthResponse> {
 
   let lastIndexedBlock: bigint | null = null;
   if (state.pool !== null) {
-    lastIndexedBlock = await readCursor(state.pool);
+    try {
+      lastIndexedBlock = await readCursor(state.pool);
+      recordIndexSuccess(state);
+    } catch (error) {
+      // Reported, not raised: the chain half of this response is still true, and
+      // an index that is down is a degradation rather than a failure to answer.
+      recordIndexFailure(state, error);
+    }
   }
 
   let chainHead: bigint | null = null;
@@ -189,7 +279,7 @@ export async function getHealth(): Promise<HealthResponse> {
   }
 
   return {
-    status: chainHead === null ? "degraded" : "ok",
+    status: chainHead === null || state.indexError !== null ? "degraded" : "ok",
     chainId: state.config.chainId,
     contract: state.config.votingAddress,
     confirmations: state.config.confirmations,
@@ -204,90 +294,88 @@ export async function getHealth(): Promise<HealthResponse> {
             lastIndexedBlock,
             confirmations: state.config.confirmations,
           }).toString(),
+    indexError: state.indexError,
   };
 }
 
 /**
  * One voter's status.
  *
- * The chain is authoritative for `hasVoted`, `votedFor` and the stake. The index
- * only adds what the chain does not cheaply expose: the most recent whitelist
- * decision, and the refund transactions.
+ * The chain is authoritative for the whitelist decision, whether they voted, what
+ * they voted for and the stake. The index only adds what the chain does not
+ * cheaply expose: the vote transaction hash and the refund transactions.
+ *
+ * A failure to read the chain is deliberately *not* caught. Substituting
+ * `hasVoted: false` used to make a chain outage report that nobody had voted —
+ * a confident false answer to the one question this endpoint exists for. The
+ * route turns the throw into a 503, which is the honest reply.
  */
 export async function getVoter(address: `0x${string}`): Promise<VoterResponse> {
   const state = getServerState();
   await ready(state);
 
-  let onChain: OnChainVoter;
+  const onChain = await readOnChainVoter(state.client, state.config.votingAddress, address);
 
-  try {
-    onChain = await readOnChainVoter(state.client, state.config.votingAddress, address);
-  } catch {
-    onChain = { hasVoted: false, votedFor: 0, stakeWei: 0n };
-  }
-
-  if (state.pool === null) {
-    return {
-      address,
-      source: "chain",
-      whitelisted: null,
-      hasVoted: onChain.hasVoted,
-      votedFor: onChain.votedFor === 0 ? null : onChain.votedFor,
-      voteTxHash: null,
-      refunds: [],
-    };
-  }
-
-  const pool = requirePool(state);
-
-  const [whitelistRows] = await pool.query<
-    ({ allowed: number } & import("mysql2/promise").RowDataPacket)[]
-  >(
-    `SELECT allowed FROM whitelist_events
-     WHERE voter = ?
-     ORDER BY block_number DESC, log_index DESC
-     LIMIT 1`,
-    [address],
-  );
-
-  const [voteRows] = await pool.query<
-    ({ tx_hash: string } & import("mysql2/promise").RowDataPacket)[]
-  >(
-    `SELECT tx_hash FROM votes
-     WHERE voter = ?
-     ORDER BY block_number ASC, log_index ASC
-     LIMIT 1`,
-    [address],
-  );
-
-  const [refundRows] = await pool.query<
-    ({ amount_wei: string; tx_hash: string } & import("mysql2/promise").RowDataPacket)[]
-  >(
-    `SELECT amount_wei, tx_hash FROM refunds
-     WHERE voter = ?
-     ORDER BY block_number ASC, log_index ASC`,
-    [address],
-  );
-
-  const whitelist = whitelistRows[0];
-  const vote = voteRows[0];
-
-  return {
+  const fromChain: VoterResponse = {
     address,
-    source: "index",
-    whitelisted: whitelist === undefined ? null : whitelist.allowed === 1,
+    source: "chain",
+    whitelisted: onChain.isWhitelisted,
     hasVoted: onChain.hasVoted,
     votedFor: onChain.votedFor === 0 ? null : onChain.votedFor,
-    voteTxHash: vote?.tx_hash ?? null,
-    refunds: refundRows.map((row) => ({ amountWei: row.amount_wei, txHash: row.tx_hash })),
+    voteTxHash: null,
+    refunds: [],
   };
-}
 
-/** The current phase, read from the chain. */
-export async function getPhase(): Promise<number> {
-  const state = getServerState();
+  if (state.pool === null) {
+    return fromChain;
+  }
 
-  return readOnChainPhase(state.client, state.config.votingAddress);
+  const pool = state.pool;
+
+  try {
+    const [voteRows] = await pool.query<
+      ({ tx_hash: string } & import("mysql2/promise").RowDataPacket)[]
+    >(
+      `SELECT tx_hash FROM votes
+       WHERE voter = ?
+       ORDER BY block_number ASC, log_index ASC
+       LIMIT 1`,
+      [address],
+    );
+
+    const [refundRows] = await pool.query<
+      ({ amount_wei: string; tx_hash: string } & import("mysql2/promise").RowDataPacket)[]
+    >(
+      `SELECT amount_wei, tx_hash FROM refunds
+       WHERE voter = ?
+       ORDER BY block_number ASC, log_index ASC`,
+      [address],
+    );
+
+    const vote = voteRows[0];
+
+    recordIndexSuccess(state);
+
+    return {
+      address,
+      source: "index",
+      // From the chain, not from `whitelist_events`. The mapping getter is the
+      // current decision by construction, so a lagging index cannot make this
+      // wrong — the same reasoning ADR-0009 applies to the ballot's buttons.
+      whitelisted: onChain.isWhitelisted,
+      hasVoted: onChain.hasVoted,
+      votedFor: onChain.votedFor === 0 ? null : onChain.votedFor,
+      voteTxHash: vote?.tx_hash ?? null,
+      refunds: refundRows.map((row) => ({ amountWei: row.amount_wei, txHash: row.tx_hash })),
+    };
+  } catch (error) {
+    // The index supplied only the transaction hash and the refund history. Losing
+    // those is a loss of detail, not of the answer, so fall back to the chain-only
+    // shape and say which source answered.
+    recordIndexFailure(state, error);
+
+    return fromChain;
+  }
 }
 
 // ---------------------------------------------------------------------------

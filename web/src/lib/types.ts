@@ -70,6 +70,17 @@ export interface HealthResponse {
   lastIndexedBlock: string | null;
   chainHead: string | null;
   lagBlocks: string | null;
+  /**
+   * Why the index could not be read, or null when there is no such problem —
+   * including when no index is configured at all.
+   *
+   * Distinct from `indexEnabled`, which says an index is *expected*. A configured
+   * index whose database is down still leaves the app serving from the chain, so
+   * this is a degradation to report rather than a failure to raise: without it the
+   * outage would be invisible, and with it the reader knows which subsystem to
+   * look at.
+   */
+  indexError: string | null;
 }
 
 export interface VoterResponse {

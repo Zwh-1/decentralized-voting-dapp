@@ -652,6 +652,41 @@ CI 的"后台起节点 + 就绪轮询"机制在 `bash` 下单独实测通过：�
 
 顺带纠正四处测试计数错误：文档四处写"索引器 41 个单测"，实际是 **57**（41 是 Solidity 的数量，被抄到了索引器那一格）。逐文件核对：plan 18、decode 9、sync 9、report 10、client-api 7、config 4。
 
+### 校正 13：索引只有一种"缺失"被处理，另一种让页面说了假话
+
+本轮逐个端点实测了全部 5 条 REST 路由——此前只有 `/api/results` 与 `/api/health` 被真正执行过，`/api/candidates`、`/api/voters/[address]`、`/api/index/sync` 从未跑过。
+
+**发现：`data.ts` 用 `state.pool === null` 作为唯一判据**，因此"索引未配置"落回链，而"索引配置了但读不到"不落回链、直接抛错。后果（全部实测）：
+
+- `DATABASE_URL` 指向死端口时，**五条路由全部 503**，包括 `/api/candidates` 与 `/api/voters`——二者都有现成的链上回退路径，却在 `pool !== null` 时走不到。
+- 页面（HTTP 200）显示 **"服务端无法读取链上数据：connect ECONNREFUSED 127.0.0.1:3399"**。**链完全健康**，失败的是 MySQL。这句话把读者的排查方向指向了错误的子系统。
+- `page.tsx` 用一次 `Promise.all` 把三个读绑在一起，任一失败即全部丢弃，因此首屏连链上 tally 都没有——而那个 tally 一个 `eth_call` 就能拿到。
+- `getVoter` 吞掉链读失败并填 `hasVoted: false`，把"未知"变成"没有人投过票"这一句肯定的假话。
+
+**发现：`/api/voters` 的 `whitelisted` 在无索引时恒为 `null`**，尽管合约把 `mapping(address => bool) public isWhitelisted` 公开为 getter，一次廉价调用即可回答；ADR-0009 早已确立 UI 的白名单判断应读链而非读索引。
+
+**修正**（ADR-0011）：
+
+1. `ready()` 记录迁移失败而不再抛出；新增 `withIndex()`，把"索引读失败"与"索引未配置"归到同一条回退路径，`source` 字段说明实际由哪一侧作答。
+2. `getResults()` 先读链（链失败仍向上抛，因为这个接口的意义就是比对），索引侧失败则返回 `unavailable` 与链上 tally——**没有比对过就不宣称结论**。
+3. `getVoter()` 不再吞掉链读失败；`readOnChainVoter` 增加 `isWhitelisted`，因此 `whitelisted` 在两种模式下都由链回答（索引只再提供 `voteTxHash` 与退款历史，那是链不便廉价提供的东西）。
+4. `HealthResponse` 新增 `indexError`：索引不可达时报出原因、`status` 变 `degraded`，但**不影响链上字段**。故障可见，不是被藏起来。
+5. 删除死代码 `requirePool`（其报错文案写着 "this read must fall back to the chain"，而该路径恰恰不回退；它只在 null 检查之后被调用，永远不可能抛出）与无人调用的 `getPhase` / `readOnChainPhase`。
+
+**修正后的实测**（三种状态逐一跑过，本地链 406 块、200 票）：
+
+| 端点                   | 索引正常                               | 索引挂了                                                                   | 无索引                          |
+| ---------------------- | -------------------------------------- | -------------------------------------------------------------------------- | ------------------------------- |
+| `/api/health`          | 200 `ok`，`indexError: null`           | 200 `degraded`，`indexError: "connect ECONNREFUSED …"`，`chainHead: "406"` | 200 `ok`，`indexEnabled: false` |
+| `/api/candidates`      | 200 `source: "index"`                  | 200 `source: "chain"`，tally 67/67/66                                      | 200 `source: "chain"`           |
+| `/api/results`         | 200 `consistent` 200/200               | 200 `unavailable`，`indexedTotal: null`                                    | 200 `unavailable`               |
+| `/api/voters/<addr>`   | 200 `source: "index"`，有 `voteTxHash` | 200 `source: "chain"`，`whitelisted: true`（此前为 `null`）                | 200 `source: "chain"`           |
+| `POST /api/index/sync` | 200 `idle`                             | 503 `sync_failed`（写索引，无库不可写）                                    | 200 `enabled: false`            |
+
+页面在索引挂掉时不再出现"服务端无法读取链上数据"，而是正常渲染链上 tally 与 `status: "unavailable"`。
+
+新增 `web/test/data.test.ts`（9 个用例）钉住这些行为：索引挂掉时 tally 走链、`getResults` 不宣称结论、`getVoter` 保留链上答案、链不可达时**必须抛出**而不是返回 `hasVoted: false`、`getHealth` 报出 `indexError`。索引器单测因此从 57 增至 **66**，总数 **115**。
+
 ## 15. 实测结果
 
 | 指标         | 结果                                                                                                                                                                                                                                                                                                                                 |
@@ -670,7 +705,7 @@ CI 的"后台起节点 + 就绪轮询"机制在 `bash` 下单独实测通过：�
 | M-6e 浏览器  | 注入 EIP-1193 provider 后驱动真实 DOM：未白名单账户投票按钮**全部禁用**且给出理由；已白名单账户按钮**全部可点**，点击后到达"已确认"、卡片变为"你已投给该候选人"；`--refund` 场景退款按钮可点、点击后**从链上读回 `stakeOf=0`**、按钮随即禁用；三场景均断言 DOM 中**不存在**"提交中…"。`pnpm ui:drill` 退出码 0（7 / 11 / 17 项断言） |
 | M-7 构建     | Next.js 生产构建成功：1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                                                                                                                                                     |
 | M4 部署边界  | 部署脚本指向**真实** Sepolia（实测区块 11,742,273）：解析网络、由私钥推导部署账户、owner 默认取部署者、构造并广播交易 → 失败于 `gas required exceeds allowance (0)`，**唯一缺口是测试 ETH**；`verify:sepolia` 在**无** `SEPOLIA_PRIVATE_KEY` 时仍连上 Sepolia 并走到"该链无部署记录"守卫。失败的部署不写入 `deployments/`            |
-| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 57 个 = **106 个，全部通过**                                                                                                                                                                                                                                                     |
+| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 66 个 = **115 个，全部通过**                                                                                                                                                                                                                                                     |
 
 ### M-6 的 API 层观测（实测响应）
 

@@ -67,7 +67,7 @@ flowchart LR
 两条关键设计线：
 
 1. **MySQL 里的一切都能从链上事件重放重建。** 删库不会丢任何信息，这使索引器的正确性可以被独立验证，而不是被信任。
-2. **索引是可选依赖。** 不设 `DATABASE_URL` 时，应用照常工作：所有读取回退为直接读链，`/api/results` 会如实报告 `status: "unavailable"`，而不是给一个"没比对过却显示一致"的假结论。
+2. **索引是可选依赖。** 索引有**两种**缺失方式，应用对两者的处理相同，因为两种情况下链都是事实源：不设 `DATABASE_URL`（从未配置），以及设了但数据库读不到（索引挂了）。两种情况所有读取都回退为直接读链，`source` 字段说明是哪一侧回答的，`/api/results` 会如实报告 `status: "unavailable"`，而不是给一个"没比对过却显示一致"的假结论。挂掉的索引不会被悄悄吞掉：`/api/health` 用 `indexError` 报出原因，`status` 变为 `degraded`。
 
 ---
 
@@ -88,7 +88,7 @@ flowchart LR
 | M-6d | 真实退款入库       | `0.001 ETH` 全额入库（`amount_wei` 逐位相同、无精度丢失）、**票数不变**、回退后索引撤销退款与阶段行                                                                                     | `pnpm indexer:refund-drill`      |
 | M-6e | 浏览器端写入路径   | 注入钱包后驱动真实 DOM：未白名单账户按钮禁用并说明理由；**已白名单账户可点且确认上链**；**退款可点，链上 `stakeOf` 读回 0**；全程无"提交中…"假状态                                      | `pnpm ui:drill`                  |
 | M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                    | `pnpm build:web`                 |
-| —    | 测试总数           | **106 个**（合约 41 Solidity + 8 TypeScript，索引器 57）                                                                                                                                | `pnpm test`                      |
+| —    | 测试总数           | **115 个**（合约 41 Solidity + 8 TypeScript，索引器 66）                                                                                                                                | `pnpm test`                      |
 
 ### M-3：四组重入对照矩阵
 
@@ -198,7 +198,7 @@ pnpm web:dev
 git clone <repo> && cd decentralized-voting-dapp
 pnpm install --frozen-lockfile   # 53.8s
 pnpm run typecheck
-pnpm test                        # 合约 49 + 索引器 57，0 失败
+pnpm test                        # 合约 49 + 索引器 66，0 失败
 pnpm coverage                    # Voting.sol 100.00 / 100.00
 pnpm export-abi && git diff --exit-code -- web/src/lib/contracts
 pnpm run build:web
@@ -268,7 +268,7 @@ cd .. && pnpm run seed:local                           # 部署 + 200 票（约 
 
 ```bash
 pnpm typecheck            # Next.js 层类型检查
-pnpm test                 # 合约 49 个 + 索引器 57 个
+pnpm test                 # 合约 49 个 + 索引器 66 个
 pnpm coverage             # Voting.sol 行/语句覆盖率
 pnpm gas                  # gas 统计表
 pnpm build:web            # Next.js 生产构建
@@ -303,16 +303,33 @@ curl http://127.0.0.1:3000/api/results
 
 `status` 有四个取值：
 
-| `status`      | 含义                                             | `/api/results` | CLI 退出码               |
-| ------------- | ------------------------------------------------ | -------------- | ------------------------ |
-| `consistent`  | 计入待确认票数后两侧完全吻合                     | 200            | 0                        |
-| `divergent`   | 计入之后**仍然**不吻合——真故障                   | 500            | 1                        |
-| `lagging`     | 未索引区间大到无法枚举（超过 5000 块），无法归因 | 200            | 0，并打印 `INCONCLUSIVE` |
-| `unavailable` | 没有配置数据库，不存在可比较的索引               | 200            | 0                        |
+| `status`      | 含义                                                       | `/api/results` | CLI 退出码               |
+| ------------- | ---------------------------------------------------------- | -------------- | ------------------------ |
+| `consistent`  | 计入待确认票数后两侧完全吻合                               | 200            | 0                        |
+| `divergent`   | 计入之后**仍然**不吻合——真故障                             | 500            | 1                        |
+| `lagging`     | 未索引区间大到无法枚举（超过 5000 块），无法归因           | 200            | 0，并打印 `INCONCLUSIVE` |
+| `unavailable` | 索引不可用（未配置，或配置了但读不到），不存在可比较的索引 | 200            | 0                        |
 
 只有 `divergent` 会返回 HTTP 500、退出码 1。`lagging` 不是"其实没问题"的委婉说法，而是"得不出结论"，所以它**不会**静默通过：CLI 会把 `INCONCLUSIVE` 写到 stderr。
 
 > 退出码本身也是可依赖的：脚本用 `process.exitCode` 而不是 `process.exit()`。后者会立即终止进程，`finally` 里的 `pool.end()` 根本不会执行；Windows 上 libuv 随后在拆卸未关闭句柄时触发 `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c`，把一次正确的运行报成退出码 `0xC0000409`。对一个"契约就是退出码"的验证脚本，这是致命的。
+
+#### 三种索引状态下的 API 实测
+
+索引的两种缺失方式都会被实际跑过，而不是只写在文档里。下表是逐个端点的实测响应（本地链 406 块、200 票）：
+
+| 端点                   | 索引正常                                                           | 索引**挂了**（`DATABASE_URL` 指向死端口）                                                  | 无索引（未设 `DATABASE_URL`）                                  |
+| ---------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| `/api/health`          | 200，`status: "ok"`，`lastIndexedBlock: "406"`，`indexError: null` | 200，`status: "degraded"`，**`indexError: "connect ECONNREFUSED …"`**，`chainHead: "406"`  | 200，`status: "ok"`，`indexEnabled: false`，`indexError: null` |
+| `/api/candidates`      | 200，`source: "index"`，tally 67/67/66                             | 200，**`source: "chain"`**，tally 67/67/66                                                 | 200，`source: "chain"`，tally 67/67/66                         |
+| `/api/results`         | 200，`status: "consistent"`，200/200                               | 200，**`status: "unavailable"`**，`indexedTotal: null`                                     | 200，`status: "unavailable"`，`indexedTotal: null`             |
+| `/api/voters/<addr>`   | 200，`source: "index"`，带 `voteTxHash`                            | 200，**`source: "chain"`**，`whitelisted`/`hasVoted`/`votedFor` 仍正确，`voteTxHash: null` | 200，`source: "chain"`，同上                                   |
+| `POST /api/index/sync` | 200，`status: "idle"`                                              | 503 `sync_failed`（这是**写**索引，没有库就写不了）                                        | 200，`enabled: false`                                          |
+
+两条要点：
+
+- **`unavailable` 不等于"一致"。** 三种状态下 `discrepancies` 都是 `[]`，但只有索引正常时才给出 `consistent`。没有任何可以比较的东西时，这个接口不会宣称比过了。
+- **挂了与没配走同一条路。** 只处理"没配"意味着一次数据库宕机会把链仍能回答的问题变成 503，页面还会告诉读者"服务端无法读取**链上**数据"——而链是好的。挂掉的索引通过 `indexError` 依然可见，所以这不是把故障藏起来。
 
 #### M-6 的负向对照（这个检查确实会报警）
 
@@ -618,8 +635,8 @@ CONFIRMATIONS=5
 │   │   │   └── contracts/         # ABI 与部署地址（由 export-abi 生成）
 │   │   └── instrumentation.ts     # 启动后台索引循环
 │   ├── scripts/                   # migrate / drain / check-consistency / reorg-drill / refund-drill
-│   └── test/                      # 57 个单测，不需要链或数据库
-├── docs/aegis/                    # 设计规格、基线、10 条 ADR、实测校正记录
+│   └── test/                      # 66 个单测，不需要链或数据库
+├── docs/aegis/                    # 设计规格、基线、11 条 ADR、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）
 └── .github/workflows/ci.yml       # 5 条流水线
 ```

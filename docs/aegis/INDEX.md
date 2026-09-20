@@ -17,3 +17,4 @@ Entries are workspace records, not authoritative runtime decisions.
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0008-reconcile-unindexed-range-before-verdict.md                      | ADR-0008 - 一致性检查必须先对账未索引区间，再判定分歧                    |
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0009-ui-eligibility-from-chain-not-query-status.md                    | ADR-0009 - 投票按钮可用性由链上状态推导，进行态不得取自被禁用的查询      |
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0010-one-record-one-schema-no-volatile-fields-in-guarded-artifacts.md | ADR-0010 - 部署记录只有一个写入 schema，被字节级守护的产物只含可复现字段 |
+| 2026-09-20 | adr      | docs/aegis/adr/ADR-0011-both-kinds-of-missing-index-fall-back-to-the-chain.md            | ADR-0011 - 索引的两种缺失走同一条回退路径，且不得用默认值代替"未知"      |
