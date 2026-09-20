@@ -87,7 +87,7 @@ flowchart LR
 | M-6c | 真实链重组         | `evm_revert` 让链头 407→406：索引报告 `rewound`、孤立事件行被删（201→200）、**票数仍为 200**                                                                                            | `pnpm indexer:reorg-drill`       |
 | M-6d | 真实退款入库       | `0.001 ETH` 全额入库（`amount_wei` 逐位相同、无精度丢失）、**票数不变**、回退后索引撤销退款与阶段行                                                                                     | `pnpm indexer:refund-drill`      |
 | M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                    | `pnpm build:web`                 |
-| —    | 测试总数           | **90 个**（合约 41 Solidity + 8 TypeScript，索引器 41）                                                                                                                                 | `pnpm test`                      |
+| —    | 测试总数           | **106 个**（合约 41 Solidity + 8 TypeScript，索引器 57）                                                                                                                                | `pnpm test`                      |
 
 ### M-3：四组重入对照矩阵
 
@@ -410,7 +410,13 @@ CONFIRMATIONS=5
 
 `CONFIRMATIONS` 在真实网络上**不要设成 0**：那会让索引在重组发生时已经写入了可能被回滚的区块。
 
-注意 `CHAIN_ID` 变了之后，合约地址也要跟着变——它会由 `pnpm export-abi` 从 `contracts/deployments/11155111.json` 重新写入 `web/src/lib/contracts/`。本地 31337 的索引与 Sepolia 的索引是同一个库里的两张不同游标，因此**建议换库**，否则两条链的事件会混在同一个投影里。
+**起始区块不用你操心**：留空 `START_BLOCK`，索引会从合约的部署区块开始——`deploy.ts` 把它记进 `contracts/deployments/<chainId>.json`，再由 `pnpm export-abi` 传进前端配置。这个默认值是必需的，不是优化：公共 RPC 会裁剪历史（Sepolia 只提供约 1,000,000 之后的区块），从 0 扫描不是慢，而是**跑到 2000 个区块后彻底失败**，且因为游标已经推进过去，每次重试都重放同一个失败区间。详见规格校正 10。
+
+注意 `CHAIN_ID` 变了之后，合约地址也要跟着变——它会由 `pnpm export-abi` 从 `contracts/deployments/11155111.json` 重新写入 `web/src/lib/contracts/`。
+
+> **换链必须换库，这一点比看上去更硬。** 索引的表结构里**根本没有 `chain_id`**：`sync_cursor` 是一张 `CHECK (id = 1)` 的单行表，五张投影表也都不带链标识。所以同一个库里只存在**一个**游标、一套投影。把同一份 `DATABASE_URL` 指向 Sepolia，Sepolia 的事件会**追加**到本地 31337 的行旁边（两条链的交易哈希不同，`UNIQUE(tx_hash, log_index)` 不会拦），于是 `candidate_tally` 把两条链的票加在一起；而那个唯一的游标会从 406 跳到 Sepolia 的区块高度量级，此后重组检测拿一个链的区块号去比另一条链的链头，结果没有意义。
+>
+> 本项目按**单链**设计（ADR-0001），这不是遗漏而是取舍：多链需要在每张表上引入 `chain_id` 并重建全部唯一键。在同一实例里同时索引两条链，不在本项目范围内——请为 Sepolia 另建一个数据库。
 
 ### 已验证到什么程度（诚实说明）
 

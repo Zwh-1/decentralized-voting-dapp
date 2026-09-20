@@ -32,6 +32,11 @@ interface DeploymentRecord {
   owner: string;
   deployer: string;
   deployedAt: string;
+  /**
+   * The block the contract was created in, so the indexer can start there
+   * instead of at block 0. Absent in records written before this field existed.
+   */
+  blockNumber?: number;
 }
 
 const BANNER = `// SPDX-License-Identifier: MIT
@@ -114,6 +119,7 @@ const entries = records
     owner: "${record.owner}",
     deployer: "${record.deployer}",
     deployedAt: "${record.deployedAt}",
+    blockNumber: ${record.blockNumber ?? "undefined"},
   },`,
   )
   .join("\n");
@@ -125,6 +131,12 @@ export interface Deployment {
   owner: \`0x\${string}\`;
   deployer: \`0x\${string}\`;
   deployedAt: string;
+  /**
+   * The block the contract was created in. The indexer starts here rather than
+   * at block 0, because public RPCs prune old history and a scan from genesis
+   * fails outright on Sepolia instead of merely being slow.
+   */
+  blockNumber: number | undefined;
 }
 
 /** Well-known chain ids used by this project. */

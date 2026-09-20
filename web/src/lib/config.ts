@@ -85,6 +85,30 @@ function resolveAddress(env: NodeJS.ProcessEnv, chainId: number): `0x${string}` 
   return deployment.voting;
 }
 
+/**
+ * The first block the indexer should read.
+ *
+ * `START_BLOCK` wins when set. Otherwise this is the block the contract was
+ * deployed in, taken from the generated registry.
+ *
+ * Defaulting to the deployment block rather than 0 is load-bearing, not a
+ * shortcut: public RPCs prune old history (Sepolia's earliest available block is
+ * around 1,000,000), so a scan from genesis does not merely crawl — it fails
+ * with `pruned history unavailable` a couple of thousand blocks in, and because
+ * the cursor had already advanced past those blocks the failure repeats forever.
+ */
+function resolveStartBlock(env: NodeJS.ProcessEnv, chainId: number): bigint | undefined {
+  const explicit = env.START_BLOCK;
+
+  if (explicit !== undefined && explicit.length > 0) {
+    return BigInt(explicit);
+  }
+
+  const recorded = getDeployment(chainId)?.blockNumber;
+
+  return recorded === undefined ? undefined : BigInt(recorded);
+}
+
 export function loadServerConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const chainId = integer(env, "CHAIN_ID", DEFAULT_CHAIN_ID);
 
@@ -96,10 +120,6 @@ export function loadServerConfig(env: NodeJS.ProcessEnv = process.env): ServerCo
     throw new Error("DATABASE_URL must be a mysql:// connection URI");
   }
 
-  const startBlockRaw = env.START_BLOCK;
-  const startBlock =
-    startBlockRaw === undefined || startBlockRaw.length === 0 ? undefined : BigInt(startBlockRaw);
-
   return {
     rpcUrl: required(env, "RPC_URL", "http://127.0.0.1:8545"),
     chainId,
@@ -109,7 +129,7 @@ export function loadServerConfig(env: NodeJS.ProcessEnv = process.env): ServerCo
     chunkBlocks: integer(env, "CHUNK_BLOCKS", 2000),
     pollIntervalMs: integer(env, "POLL_INTERVAL_MS", 4000),
     indexerEnabled: (env.INDEXER_ENABLED ?? "true") !== "false",
-    startBlock,
+    startBlock: resolveStartBlock(env, chainId),
   };
 }
 

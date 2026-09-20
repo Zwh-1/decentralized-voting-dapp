@@ -567,6 +567,32 @@ allowBuilds:
 
 第二条是关键的安全性质：`loadEnvFile` 与 `--env-file` 语义一致，不覆盖已存在的环境变量，因此临时覆盖仍然有效。
 
+### 校正 10：索引必须从部署区块开始，否则在公共 RPC 上会永久卡死
+
+原设计让索引器在游标为空时从区块 0 开始扫描。这在本地开发网上没问题，但在使用**裁剪过历史**的公共 RPC 时是致命的——Sepolia 公共端点最早只提供约 1,000,000 之后的区块。
+
+实测（`https://ethereum-sepolia-rpc.publicnode.com`，直接调 `eth_getLogs`）：
+
+| 区间                   | 结果                                                                     |
+| ---------------------- | ------------------------------------------------------------------------ |
+| `[0, 1999]`            | 通过，0 条日志                                                           |
+| `[2000, 3999]`         | `pruned history unavailable: requested 2000, earliest available 1000000` |
+| `[999999, 1001999]`    | 同上                                                                     |
+| `[1000000, 1049999]`   | 通过                                                                     |
+| `[11700000, 11740000]` | 通过                                                                     |
+
+注意第一行：前 2000 个区块**能**通过，所以索引器会先推进游标到 1999，然后在 `[2000, 3999]` 上失败。而按本项目"RPC 失败不推进游标"的规则，此后的每一次重试都会重放同一个失败区间——**索引永久停在 1999，且 `START_BLOCK` 也救不了它**（该变量只在游标为空时生效，而此时游标已非空）。一个全新部署到 Sepolia 的合约会正好落进这个陷阱。
+
+修复分三处：
+
+1. `deploy.ts` 改用 `sendDeploymentTransaction`，等待收据，把 `blockNumber` 写进 `contracts/deployments/<chainId>.json`。
+2. `export-abi.ts` 把 `blockNumber` 带进 `web/src/lib/contracts/deployments.ts`（该字段可选，旧记录缺失时为 `undefined`）。
+3. `config.ts` 在 `START_BLOCK` 未设置时，默认取该链的部署区块。
+
+实测该默认值：`CHAIN_ID=31337 → startBlock=1`（本地合约确实创建于区块 1，其收据是区块 1 唯一一笔 `to = null` 的交易）；模拟一条 `11155111` 记录（`blockNumber: 11742273`）后，`CHAIN_ID=11155111 → startBlock=11742273`，即**不会**再从 0 开始。本地全量重建索引的结果与基线逐位一致（404 行 / 200 票 / 游标 406 / tally 67,67,66）。
+
+`START_BLOCK` 仍可覆盖，且**显式的 `0` 被当作有效值**而不是"未设置"（有单测固定这条语义）。
+
 ## 15. 实测结果
 
 | 指标         | 结果                                                                                                                                                                                                                                                                                                                      |
@@ -584,7 +610,7 @@ allowBuilds:
 | M-6d 退款    | 真实退款 0.001 ETH：入库 `amount_wei` 与链上 `stakeOf` 逐位相同（`DECIMAL(38,0)` 无精度丢失）、票数保持 200、回退后索引撤销退款行与阶段行                                                                                                                                                                                 |
 | M-7 构建     | Next.js 生产构建成功：1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                                                                                                                                          |
 | M4 部署边界  | 部署脚本指向**真实** Sepolia（实测区块 11,742,273）：解析网络、由私钥推导部署账户、owner 默认取部署者、构造并广播交易 → 失败于 `gas required exceeds allowance (0)`，**唯一缺口是测试 ETH**；`verify:sepolia` 在**无** `SEPOLIA_PRIVATE_KEY` 时仍连上 Sepolia 并走到"该链无部署记录"守卫。失败的部署不写入 `deployments/` |
-| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 53 个 = **102 个，全部通过**                                                                                                                                                                                                                                          |
+| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 57 个 = **106 个，全部通过**                                                                                                                                                                                                                                          |
 
 ### M-6 的 API 层观测（实测响应）
 

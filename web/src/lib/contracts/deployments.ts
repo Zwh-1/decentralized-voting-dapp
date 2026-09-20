@@ -8,6 +8,12 @@ export interface Deployment {
   owner: `0x${string}`;
   deployer: `0x${string}`;
   deployedAt: string;
+  /**
+   * The block the contract was created in. The indexer starts here rather than
+   * at block 0, because public RPCs prune old history and a scan from genesis
+   * fails outright on Sepolia instead of merely being slow.
+   */
+  blockNumber: number | undefined;
 }
 
 /** Well-known chain ids used by this project. */
@@ -27,6 +33,7 @@ export const deployments: Record<number, Deployment> = {
     owner: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
     deployer: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
     deployedAt: "2026-09-20T03:13:04.650Z",
+    blockNumber: 1,
   },
 };
 

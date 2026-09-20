@@ -84,7 +84,11 @@ console.log(
 );
 console.log("");
 
-const voting = await viem.deployContract("Voting", [owner]);
+const { contract: voting, deploymentTransaction } = await viem.sendDeploymentTransaction("Voting", [
+  owner,
+]);
+
+const receipt = await publicClient.waitForTransactionReceipt({ hash: deploymentTransaction.hash });
 const chainId = await publicClient.getChainId();
 
 const deployment = {
@@ -93,6 +97,19 @@ const deployment = {
   owner,
   deployer: deployer.account.address,
   deployedAt: new Date().toISOString(),
+  /**
+   * The block the contract was created in.
+   *
+   * The indexer starts here rather than at block 0. That is not an optimisation:
+   * public RPCs prune old history — Sepolia's earliest available block is around
+   * 1,000,000 — so scanning from 0 does not merely crawl, it fails outright, and
+   * a fresh index against Sepolia dies a couple of thousand blocks in with
+   * `pruned history unavailable` and never recovers.
+   *
+   * `undefined` on a chain whose receipt could not be read; `config.ts` then
+   * falls back to whatever the operator sets in `START_BLOCK`.
+   */
+  blockNumber: Number(receipt.blockNumber),
 };
 
 const outDir = path.resolve(import.meta.dirname, "..", "deployments");
