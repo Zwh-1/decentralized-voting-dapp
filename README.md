@@ -192,7 +192,7 @@ pnpm web:dev
 
 ### 冷克隆可复现性
 
-下列 7 项已在一个**全新 `git clone`**（无 `.env`、无 `node_modules`、无本地链、无数据库）中逐项跑通，全部退出码为 0：
+下列 8 项已在一个**全新 `git clone`**（无 `.env`、无 `node_modules`、无本地链、无数据库）中逐项跑通，全部退出码为 0：
 
 ```bash
 git clone <repo> && cd decentralized-voting-dapp
@@ -203,9 +203,12 @@ pnpm coverage                    # Voting.sol 100.00 / 100.00
 pnpm export-abi && git diff --exit-code -- web/src/lib/contracts
 pnpm run build:web
 pnpm run format:check
+python <aegis>/scripts/aegis-workspace.py check --root .   # 设计规格、基线、ADR 的结构校验
 ```
 
-这组命令**不需要**链、数据库、IPFS 网关或任何凭证。需要外部依赖的 M-5（gas）与 M-6（一致性）在下面的小节里单独说明。
+这组命令**不需要**链、数据库、IPFS 网关或任何凭证。需要外部依赖的 M-5（gas）、M-6（一致性）与端到端演练在下面的小节里单独说明。
+
+最后一项需要 `docs/aegis/plans/` 与 `docs/aegis/work/` 存在——它们是工作区结构的一部分，本身不含提交内容。git 无法跟踪空目录，因此这两个目录各有一个 `.gitkeep`；冷克隆缺少它们时校验会失败，而任何已经创建过它们的工作副本都会通过，这正是需要把它们纳入冷克隆清单的原因。
 
 ### 从零复现索引
 
@@ -616,7 +619,7 @@ CONFIRMATIONS=5
 │   │   └── instrumentation.ts     # 启动后台索引循环
 │   ├── scripts/                   # migrate / drain / check-consistency / reorg-drill / refund-drill
 │   └── test/                      # 57 个单测，不需要链或数据库
-├── docs/aegis/                    # 设计规格、基线、9 条 ADR、实测校正记录
+├── docs/aegis/                    # 设计规格、基线、10 条 ADR、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）
 └── .github/workflows/ci.yml       # 5 条流水线
 ```

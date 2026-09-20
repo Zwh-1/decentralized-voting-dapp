@@ -1,0 +1,7 @@
+# Keeps this directory in the repository.
+#
+# `docs/aegis/plans/` and `docs/aegis/work/` are part of the Aegis workspace
+# layout that `aegis-workspace.py check` requires. They hold no committed
+# content, and git cannot track an empty directory — so without this file a
+# fresh clone is missing them and the workspace check fails there while
+# passing in every working copy that happened to create them already.
