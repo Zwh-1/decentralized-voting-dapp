@@ -10,7 +10,7 @@
  *   pnpm --filter @voting/contracts exec hardhat run scripts/seed-local.ts --network localhost
  *
  * Writes the deployment to `deployments/<chainId>.json`, the same record
- * `deploy.ts` writes, so `export-abi` publishes it to @voting/shared.
+ * `deploy.ts` writes, so `export-abi` publishes it to web/src/lib/contracts.
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";

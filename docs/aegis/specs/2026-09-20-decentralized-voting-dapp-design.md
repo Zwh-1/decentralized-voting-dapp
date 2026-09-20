@@ -100,14 +100,20 @@ Requirement Ready Check:
 ## 4. 系统架构
 
 ```
-                        读（查 MySQL 缓存）                getLogs 分块轮询
-┌────────────────┐  ─────────────────────────▶  ┌──────────────────────┐  ──────────────▶  ┌──────────┐
-│  web/ 前端      │                              │  indexer/ 只读服务    │  ◀──────────────  │  MySQL   │
-│  Vite+React 19 │                              │  索引器 + REST API    │   幂等 upsert      │  事件缓存 │
-│  wagmi/viem    │  ◀── 链上结果（用于比对） ────  └──────────────────────┘                    └──────────┘
-└───────┬────────┘
-        │  写：用户钱包直连合约签名（后端不参与）
-        ▼
+                           读（查 MySQL 缓存）                    getLogs 分块轮询
+┌──────────────────────────────────────────────────┐  ─────────────────────────────▶  ┌──────────┐
+│  web/  Next.js 层（单个进程）                      │  ◀─────────────────────────────  │  MySQL   │
+│  ┌──────────────────┐    ┌────────────────────┐  │      幂等 upsert（可选依赖）      │  事件缓存 │
+│  │ 投票界面          │◀───│ Route Handlers     │  │                                 └──────────┘
+│  │ wagmi / viem     │    │ 只有 GET + SELECT   │  │
+│  └────────┬─────────┘    └─────────▲──────────┘  │
+│           │              ┌─────────┴──────────┐  │
+│           │              │ 只读索引器          │  │
+│           │              │ 游标/确认数/重组修复 │  │
+└───────────┼──────────────┴─────────▲──────────┘──┘
+            │  写：用户钱包直连合约签名（后端不参与）
+            │  读：权威票数 / 我的状态（直接读链，不经索引）
+            ▼
 ┌──────────────────────────┐      CID 解析      ┌──────────────┐
 │  Voting.sol（Sepolia）    │  ───────────────▶  │  IPFS 网关    │  候选人宣言 / 头像
 │  唯一事实源               │                    └──────────────┘
@@ -118,20 +124,22 @@ Requirement Ready Check:
 
 这条不变量一次性消除了原始方案里未被识别的双写一致性问题：不存在"链上成功、写库失败"需要补偿的窗口，因为后端从不写链。索引器只需保证「最终把全部事件读进来且不重复计数」，这被降级为一个**幂等+游标的单调推进问题**，可被精确测试。
 
-### 仓库结构（pnpm workspace）
+### 仓库结构（pnpm workspace，两层）
 
 ```
 decentralized-voting-dapp/
 ├─ contracts/          Hardhat 3 + TS：合约、Solidity 测试、部署脚本
-├─ indexer/            Node + TS：事件索引器、REST API、MySQL 迁移脚本
-├─ web/                Vite + React 19 + wagmi：前端 dApp
-├─ packages/shared/    ABI + 合约地址 + 事件类型（单一来源，防 ABI 漂移）
+├─ web/                Next.js 16 + TS：投票界面 + 只读索引器 + Route Handlers
+│   ├─ src/lib/contracts/  ABI + 合约地址（由 export-abi 生成，防 ABI 漂移）
+│   └─ scripts/            migrate / drain / check-consistency
 ├─ docker-compose.yml  MySQL 8 本地实例
-├─ .github/workflows/  CI：合约测试 + 覆盖率 + 索引器测试
+├─ .github/workflows/  CI：合约测试与覆盖率 + ABI 漂移 + Next 层类型/单测/构建
 └─ README.md           架构图、亮点、本地运行指南、截图
 ```
 
-`packages/shared` 的存在理由：ABI 在 `contracts/`、`indexer/`、`web/` 三处被消费，复制粘贴必然漂移（改合约忘改 ABI = 运行期静默失败）。单一来源是这里唯一值得的额外复杂度。
+**为什么是两层而不是三层**：索引器与本应用共享同一个部署单元、同一次 `pnpm install`、同一份配置，它没有独立的生命周期，因此不值得单独成包。原本计划的 `packages/shared` 也一并取消——它的唯一内容是生成物，放进 `web/src/lib/contracts/` 即可让仓库保持"合约层 + Next 层"的结构，同时仍然只有一个 ABI 来源。
+
+**ABI 单一来源的理由**：ABI 在合约测试、索引器解码、前端调用三处被消费，复制粘贴必然漂移（改合约忘改 ABI = 运行期静默失败）。生成物入库提交，CI 重新生成并要求 `git diff` 为空。
 
 ---
 
@@ -305,18 +313,21 @@ loop:
 - **链重组处理**：启动时若发现 `head < cursor.last_block`（链发生回退），则把游标回退到 `head - CONFIRMATIONS`，并删除 `block_number > head - CONFIRMATIONS` 的 votes / refunds / candidates 记录，然后重新向前索引。由于只处理 5 确认后的区块，该路径在实践中极少触发，但**必须有代码路径**，否则一次重组会留下永久性错误数据。
 - **可观测性**：`GET /api/health` 返回 `chainHead`、`indexedBlock`、`lagBlocks`；`lagBlocks` 持续增长即为索引器停摆的告警信号。
 
-### 6.3 REST API（Express 5 + zod 校验）
+### 6.3 REST API（Next.js Route Handlers）
 
 | 端点                       | 说明                                                                       |
 | -------------------------- | -------------------------------------------------------------------------- |
-| `GET /api/health`          | `{ chainHead, indexedBlock, lagBlocks, phase }`                            |
-| `GET /api/candidates`      | 候选人列表 + MySQL 聚合票数 + 元数据 CID                                   |
+| `GET /api/health`          | `{ chainHead, lastIndexedBlock, lagBlocks, indexEnabled, phase }`          |
+| `GET /api/candidates`      | 候选人列表 + 聚合票数 + 元数据 CID + `source`（`chain` / `index`）         |
 | `GET /api/results`         | **同时返回链上 `results()` 与 MySQL 聚合结果，以及 `consistent: boolean`** |
-| `GET /api/voters/:address` | 该地址是否已投、质押金额、是否已退还                                       |
+| `GET /api/voters/:address` | 该地址是否已投、投给谁、质押金额、是否已退还                               |
+| `POST /api/index/sync`     | 推进索引一步（先修重组，再索引下一段已确认区块）                           |
 
-**`/api/results` 的双源返回是本设计的关键设计**：它把"链上与链下是否一致"从一句口头承诺变成每次请求都可见的运行时事实，同时为 §8 的索引一致性指标提供了测量入口。
+**`/api/results` 的双源返回是本设计的关键设计**：它把"链上与链下是否一致"从一句口头承诺变成每次请求都可见的运行时事实，同时为 §8 的索引一致性指标提供了测量入口。不一致时该端点返回 **HTTP 500** 与逐候选人差异，避免调用方把错误数据当成可用结果。
 
-**鉴权策略**：全部端点为只读，**不引入 JWT**（原始方案的 JWT 是为写入面准备的，本项目写入面在链上、由钱包签名）。仅使用 `express-rate-limit` 做读接口防刷。
+**降级行为**：未配置 `DATABASE_URL` 时，`/api/results` 返回 `mode: "chain-only"`、`indexed: null`，并**仍然**断言 `consistent: true`——因为此时并不存在可比对的第二个来源。它绝不谎称做过一次没做的比对。
+
+**鉴权策略**：全部端点为只读，**不引入 JWT**（原始方案的 JWT 是为写入面准备的，本项目写入面在链上、由钱包签名）。读接口的防刷由部署层承担，应用内不再引第三方限流中间件。
 
 ---
 
@@ -332,18 +343,19 @@ loop:
 
 **实测约束**：本机对 `ipfs.io` 与 `dweb.link` 的请求均返回 429（限流），`up.storacha.network` TLS 连接被重置。因此 pinning 服务的选择需在 M0 实测后确定，且前端必须有网关失败兜底。
 
-### 7.2 前端（`web/`）
+### 7.2 Next.js 层（`web/`）
 
 | 项                    | 版本    |
 | --------------------- | ------- |
-| Vite                  | 8.3.0   |
+| Next.js               | 16.3.5  |
 | React                 | 19.3.0  |
 | wagmi                 | 3.7.7   |
 | viem                  | 2.56.8  |
 | @tanstack/react-query | 5.103.1 |
 | TailwindCSS           | 4.3.3   |
+| mysql2                | 3.24.4  |
 
-**选 Vite 而非 Next.js 的理由**：本项目是纯客户端 dApp，没有需要 SSR 的内容；Next.js 的服务端渲染与钱包连接存在天然的客户端边界摩擦，对 Demo 只增加复杂度而不带来收益。
+**选 Next.js 而非 Vite SPA 的理由**：本项目虽然不需要 SEO，但需要**一个服务端的、只读的数据投影层**。把索引器与 REST 接口放进同一个 Next 应用，让页面首屏可以由 Server Component 直接读取真实数据（首屏即有一致性结论，而不是先闪一个 loading），同时索引逻辑与 UI 共享同一份 ABI 与配置，省掉了一个部署单元、一份配置和一次跨进程契约。代价是钱包状态存在客户端边界，这一点用 `useMounted()` 在挂载后再渲染钱包相关 UI 来处理，避免 hydration 不一致。
 
 页面与状态：
 
@@ -353,7 +365,7 @@ loop:
 4. **退款**：仅在 `Ended` 阶段且存在未退还质押时可见。
 5. **管理员后台**：`addCandidate`、`setWhitelist`、`startVoting`、`endVoting`；非管理员地址访问时只读并说明原因。
 
-**读路径的取舍**：列表与票数走 MySQL（快），由此产生的"可能落后链上若干区块"由页面显式的索引高度提示（`已索引至 #block / 链上 #block`）来消解——这比假装数据永远最新更诚实。
+**读路径的取舍**：**票数与"我是否已投票"这类不能出错的读，一律直接读链**；索引只用于列表、历史与聚合查询。由此产生的"索引可能落后链上若干区块"由页面显式的索引高度提示（`已索引至 #block / 链上 #block`）来消解——这比假装数据永远最新更诚实，也比让用户因为索引落后而看到错误票数更安全。
 
 ---
 
@@ -361,14 +373,14 @@ loop:
 
 所有指标必须能在本地一条命令复现。**gas 必须在非 coverage 模式下测量**——Hardhat 文档明确 `--coverage` 会放大字节码与 gas 消耗，用覆盖率模式下的 gas 数字会得到错误结论。
 
-| #   | 指标                       | 命令 / 方式                                                                                   | 目标                                                                         |
-| --- | -------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| M-1 | 合约测试覆盖率             | `npx hardhat test --coverage`（终端报告 + `coverage/lcov.info` + `coverage/html/index.html`） | **行覆盖率与语句覆盖率** ≥ 95%（见 §14 校正 2：Hardhat 3 不产出分支覆盖率）  |
-| M-2 | 授权拦截完整性             | Solidity 测试，`expectRevert` 断言自定义 error                                                | 非白名单、重复投票、阶段错误、金额不符、非管理员 → 全部 revert，0 例外       |
-| M-3 | 重入攻击对照               | 攻击合约对 `VulnerableRefund` 成功、对 `Voting` revert                                        | 两条断言均通过（§5.5）                                                       |
-| M-4 | 不变量（fuzz / invariant） | 随机 1000 次投票后断言 `Σ voteCount == VoteCast 事件数 == hasVoted 为真的地址数`              | 反例 0 个                                                                    |
-| M-5 | Gas 成本                   | `npx hardhat test --gas-stats --gas-stats-json gas-stats.json`                                | 记录 `vote` / `refund` 的 min/avg/median/max，写入 README                    |
-| M-6 | 索引一致性                 | 灌入 200 票后请求 `/api/results`，比对 `onChain` 与 `indexed`                                 | **偏差 0 条**；此即唯一可称为"准确率"的量：`一致记录数 / 总记录数 = 200/200` |
+| #   | 指标           | 命令 / 方式                                                                                                                                 | 目标                                                                         |
+| --- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| M-1 | 合约测试覆盖率 | `npx hardhat test --coverage`（终端报告 + `coverage/lcov.info` + `coverage/html/index.html`）                                               | **行覆盖率与语句覆盖率** ≥ 95%（见 §14 校正 2：Hardhat 3 不产出分支覆盖率）  |
+| M-2 | 授权拦截完整性 | Solidity 测试，`expectRevert` 断言自定义 error                                                                                              | 非白名单、重复投票、阶段错误、金额不符、非管理员 → 全部 revert，0 例外       |
+| M-3 | 重入攻击对照   | 攻击合约对 `VulnerableRefund` 成功、对 `Voting` revert                                                                                      | 两条断言均通过（§5.5）                                                       |
+| M-4 | 长序列属性测试 | `VotingProperties.t.sol`：1000 轮确定性投票序列，每轮后断言全部不变量（见 §14 校正 7：Hardhat 3 的 invariant 运行器不调用任何目标，不可用） | 反例 0 个，且经变异测试证明该测试能失败                                      |
+| M-5 | Gas 成本       | `npx hardhat test --gas-stats --gas-stats-json gas-stats.json`                                                                              | 记录 `vote` / `refund` 的 min/avg/median/max，写入 README                    |
+| M-6 | 索引一致性     | 灌入 200 票后请求 `/api/results`，比对 `onChain` 与 `indexed`                                                                               | **偏差 0 条**；此即唯一可称为"准确率"的量：`一致记录数 / 总记录数 = 200/200` |
 
 **关于简历表述的建议**：把"准确率达 99%"替换为可直接复现的描述，例如「合约测试覆盖率 96%、1000 轮不变量测试 0 反例、索引器与链上状态一致性偏差 0/200」。带具体分母的数字才经得起追问；而"99%"既无法定义分子，也无法现场复现。
 
@@ -396,8 +408,8 @@ loop:
 | R2  | 插件生态缺口（如需要额外的检查/报告插件）                                     | 中   | 优先用原生能力；确需插件时先核对 peer 范围是否含 `^3`                                                                                                                                              |
 | R3  | Sepolia faucet 领币可能排队或限流                                             | 中   | M0 即开始申领储备；本地 Hardhat 网络始终是主开发环境，部署只是最后一步                                                                                                                             |
 | R4  | IPFS 网关限流（实测 429），pinning 服务可用性待定（Storacha TLS 不通）        | 中   | M0 实测候选服务；前端强制网关失败兜底，不阻塞投票主流程                                                                                                                                            |
-| R5  | TypeScript 7.0.2 与 typed-lint/框架插件的兼容性未知                           | 中   | 固定 5.9.3（§5.1）                                                                                                                                                                                 |
-| R6  | wagmi 3.x + React 19 + Vite 8 + Tailwind 4 是较新组合，文档可能滞后           | 中   | 前端问题不阻塞合约与索引器交付；必要时降级到更成熟的组合版本                                                                                                                                       |
+| R5  | TypeScript 7.0.2 与 typed-lint/框架插件的兼容性未知                           | 中   | 固定 6.0.3（§5.1）                                                                                                                                                                                 |
+| R6  | wagmi 3.x + React 19 + Next.js 16 + Tailwind 4 是较新组合，文档可能滞后       | 中   | 已在本机实测通过类型检查、生产构建与全部 API 路由；必要时降级到更成熟的组合版本                                                                                                                    |
 | R7  | 质押资金未领取时永久锁定                                                      | 低   | `sweepUnclaimed()` + 30 天宽限期（§5.6），并在 README 列为已知中心化风险                                                                                                                           |
 | R8  | 时间预算紧张                                                                  | 高   | 里程碑可独立交付（§9）；M1 为不可妥协的核心                                                                                                                                                        |
 
@@ -527,19 +539,65 @@ allowBuilds:
 
 四个变体全部为测试夹具（`contracts/contracts/test/`），通过 `coverage.skipFiles` 排除在覆盖率分母之外，绝不进入部署路径。
 
-## 15. M1 实测结果
+## 15. 实测结果
 
 | 指标         | 结果                                                                                                                               |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
 | M-1 覆盖率   | `contracts/Voting.sol` 行覆盖率 **100.00%**，语句覆盖率 **100.00%**                                                                |
 | M-2 授权拦截 | 非白名单、重复投票、阶段错误（4 种）、质押金额错误、未知候选人、零地址、非管理员 → 全部 revert，无例外                             |
 | M-3 重入对照 | 四组矩阵全部按预期（见校正 8）                                                                                                     |
-| M-4 不变量   | 1000 轮确定性投票序列 + 256 轮 fuzz，0 反例；且经变异测试证明可失败（见校正 7）                                                    |
+| M-4 属性测试 | 1000 轮确定性投票序列 + 256 轮 fuzz，0 反例；且经变异测试证明可失败（见校正 7）                                                    |
 | M-5 Gas      | `vote` 中位 **109,256**（min 109,256 / avg 119,250 / max 143,456）；`refund` **37,920**；部署 **1,249,757**；运行时代码 5,298 字节 |
-| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 = **49 个，全部通过**                                                                       |
+| M-6 一致性   | 链上 **200** 票 == 索引 **200** 票，3 名候选人逐一比对，**0 处偏差**                                                               |
+| M-6b 幂等性  | 游标回退到 0 强制重放：**404 行全部命中重复，插入 0 行**，票数仍为 200（未翻倍）                                                   |
+| M-7 构建     | Next.js 生产构建成功：1 个页面 + 5 个动态 Route Handler 全部产出                                                                   |
+| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 36 个 = **85 个，全部通过**                                                    |
+
+### M-6 的 API 层观测（实测响应）
+
+```json
+{
+  "consistent": true,
+  "mode": "dual-source",
+  "onChainTotal": 200,
+  "indexedTotal": 200,
+  "discrepancies": [],
+  "onChain": { "source": "chain", "total": 200, "candidates": [ … ] },
+  "indexed": { "source": "index", "total": 200, "candidates": [ … ] }
+}
+```
+
+`/api/health` 同时报告 `lastIndexedBlock` / `chainHead` / `lagBlocks`；实测本地环境为 `406 / 406 / 0`。
+
+### 一个值得记录的观测
+
+重置游标后，**应用进程内的后台索引循环会抢先把游标推回链头**（`web/src/instrumentation.ts` 生效，实测 `drain` 因此看到 `rounds: 0`）。这不是缺陷，但它意味着：**测量幂等性时必须先停掉应用**，否则测到的是后台循环的重放而不是 `drain` 的重放。这条已写入 README 的复现步骤。
 
 ### 遗留的复现风险
 
 - **GitHub 连通性**：`forge-std` 的 git 依赖在弱网下可能安装失败（校正 3）。
-- **工具链版本漂移**：`hardhat`, `viem`, `@nomicfoundation/*` 均以精确版本固定；任一升级需重跑 M-1 … M-6。
+- **工具链版本漂移**：`hardhat`, `next`, `viem`, `@nomicfoundation/*` 均以精确版本固定；任一升级需重跑 M-1 … M-7。
 - **Hardhat invariant 测试不可用**：若未来版本修复了 target 调用，应考虑用真正的 invariant 测试替换 `VotingProperties.t.sol` 的 1000 轮序列（保留后者作为确定性回归）。升级 Hardhat 后必须重跑校正 7 中的必假不变量探测。
+
+---
+
+## 16. 架构重构记录：三层 → 两层
+
+**触发**：实施 M3 后确认目标结构应为「合约层 + Next 层」。
+
+**变更**：
+
+| 之前                                                                | 之后                                                                                     |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `contracts/` + `indexer/` + `packages/shared/` + `web/`（Vite SPA） | `contracts/` + `web/`（Next.js 16）                                                      |
+| 索引器 = 独立 Express 进程，`:3001`                                 | 索引器 = Next 应用内的 `src/lib/indexer/`，由 Route Handler 与 `instrumentation.ts` 驱动 |
+| API = Express 5 + `express-rate-limit` + zod                        | API = 5 个 Route Handler                                                                 |
+| ABI 生成到 `packages/shared/src/`                                   | ABI 生成到 `web/src/lib/contracts/`                                                      |
+| MySQL 是必需依赖                                                    | MySQL 是**可选**依赖：无 `DATABASE_URL` 时全部读取回退为直接读链                         |
+| 前端读票数走索引                                                    | 票数与我的状态直接读链，索引只用于列表与历史                                             |
+
+**保留下来的东西（有意为之）**：`plan.ts` 的纯函数式分块/重组判定、`decode.ts` 的事件解码、`sync.ts` 的事务+游标+幂等写入，以及它们的 36 个单测——这些逻辑与 HTTP 框架无关，是被移植而非重写的。M-1…M-6b 的全部实测值在重构后重新跑过并且不变。
+
+**新增的验证**：M-7（Next 生产构建）、全部 5 个 API 路由的实测响应（含 400 / 404 / 503 分支）、以及"无 `DATABASE_URL` 时降级为 `chain-only`"这一路径。
+
+**被删除的代码**：`indexer/src/api/server.ts` 的 Express 接线（其 `compareTally` / `readIndexedTally` 逻辑保留在 `web/src/lib/report.ts`）、Vite 配置与 `index.html`、`packages/shared` 包本身。旧实现完整保留在 git 历史（提交 `926c1de`）中。

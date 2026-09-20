@@ -1,5 +1,5 @@
-import type { ApiCandidate } from "../lib/api.js";
-import { useCandidateMetadata } from "../hooks/useCandidateMetadata.js";
+import type { ApiCandidate } from "../lib/types";
+import { useCandidateMetadata } from "../hooks/useCandidateMetadata";
 
 interface Props {
   candidate: ApiCandidate;

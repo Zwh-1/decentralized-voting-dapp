@@ -21,7 +21,7 @@ const DEFAULT_GATEWAYS = [
   "https://gateway.pinata.cloud/ipfs/",
 ];
 
-const configured = import.meta.env.VITE_IPFS_GATEWAY as string | undefined;
+const configured = process.env.NEXT_PUBLIC_IPFS_GATEWAY;
 
 const GATEWAYS = configured === undefined ? DEFAULT_GATEWAYS : [configured, ...DEFAULT_GATEWAYS];
 

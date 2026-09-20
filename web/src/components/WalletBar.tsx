@@ -1,6 +1,6 @@
 import { useAccount, useChainId, useConnect, useDisconnect, useSwitchChain } from "wagmi";
 
-import { shortenAddress } from "../lib/voting.js";
+import { shortenAddress } from "../lib/voting";
 
 const CHAIN_NAMES: Record<number, string> = {
   31337: "本地 Hardhat",

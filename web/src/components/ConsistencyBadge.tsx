@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import type { ResultsResponse } from "../lib/api.js";
+import type { ResultsResponse } from "../lib/types";
 
 interface Props {
   results: ResultsResponse | undefined;

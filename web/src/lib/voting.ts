@@ -1,4 +1,4 @@
-import { getDeployment, votingAbi, VotingPhase } from "@voting/shared";
+import { getDeployment, votingAbi, VotingPhase } from "./contracts";
 
 export { votingAbi, VotingPhase };
 

@@ -1,19 +1,24 @@
 // SPDX-License-Identifier: MIT
 /**
- * Publishes the compiled contract interface into `@voting/shared`:
+ * Publishes the compiled contract interface into the web app:
  *
  *   * `voting-abi.ts`   — the ABI, plus the `VotingPhase` enum mirror
  *   * `deployments.ts`  — chain id -> deployed address, read from ./deployments
+ *   * `index.ts`        — a single entry point that re-exports both
  *
- * Both files are committed. That is deliberate: it lets the indexer and the
- * frontend typecheck and build without a full Hardhat compile, while CI re-runs
- * this script and fails on any diff so the committed copy cannot go stale.
+ * They land in `web/src/lib/contracts/`, which keeps the repository at two
+ * layers (`contracts/` and `web/`) instead of introducing a third package that
+ * exists only to hold generated types.
+ *
+ * All three files are committed. That is deliberate: it lets the web app
+ * typecheck and build without a full Hardhat compile, while CI re-runs this
+ * script and fails on any diff so the committed copy cannot go stale.
  */
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const contractsDir = path.resolve(import.meta.dirname, "..");
-const sharedSrc = path.resolve(contractsDir, "..", "packages", "shared", "src");
+const generatedDir = path.resolve(contractsDir, "..", "web", "src", "lib", "contracts");
 
 interface Artifact {
   abi: unknown[];
@@ -31,7 +36,7 @@ interface DeploymentRecord {
 
 const BANNER = `// SPDX-License-Identifier: MIT
 // GENERATED FILE — DO NOT EDIT BY HAND.
-// Regenerate with: pnpm --filter @voting/contracts export-abi
+// Regenerate with: pnpm export-abi
 `;
 
 async function readArtifact(): Promise<Artifact> {
@@ -87,6 +92,8 @@ async function readDeployments(): Promise<DeploymentRecord[]> {
   return records;
 }
 
+await mkdir(generatedDir, { recursive: true });
+
 const artifact = await readArtifact();
 
 const abiFile = `${BANNER}
@@ -95,7 +102,7 @@ export const votingAbi = ${JSON.stringify(artifact.abi, null, 2)} as const;
 
 ${PHASE_ENUM}`;
 
-await writeFile(path.join(sharedSrc, "voting-abi.ts"), abiFile, "utf8");
+await writeFile(path.join(generatedDir, "voting-abi.ts"), abiFile, "utf8");
 
 const records = await readDeployments();
 
@@ -140,9 +147,21 @@ export function getDeployment(chainId: number): Deployment | undefined {
 }
 `;
 
-await writeFile(path.join(sharedSrc, "deployments.ts"), deploymentsFile, "utf8");
+await writeFile(path.join(generatedDir, "deployments.ts"), deploymentsFile, "utf8");
 
-console.log(`Wrote ${path.relative(process.cwd(), path.join(sharedSrc, "voting-abi.ts"))}`);
-console.log(
-  `Wrote ${path.relative(process.cwd(), path.join(sharedSrc, "deployments.ts"))} (${records.length} deployment(s))`,
-);
+const indexPath = `${BANNER}
+export { votingAbi, VotingPhase } from "./voting-abi";
+export {
+  CHAIN_IDS,
+  deployments,
+  getDeployment,
+  type Deployment,
+} from "./deployments";
+`;
+
+await writeFile(path.join(generatedDir, "index.ts"), indexPath, "utf8");
+
+for (const file of ["voting-abi.ts", "deployments.ts", "index.ts"]) {
+  console.log(`Wrote ${path.relative(process.cwd(), path.join(generatedDir, file))}`);
+}
+console.log(`(${records.length} deployment(s) registered)`);

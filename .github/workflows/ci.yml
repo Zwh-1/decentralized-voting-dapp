@@ -63,16 +63,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Regenerate and compare
-        # The committed ABI in @voting/shared is what the indexer and frontend
-        # compile against. Regenerating it and requiring a clean diff is what
-        # stops it from silently going stale.
+        # The committed ABI in web/src/lib/contracts is what the app compiles
+        # against. Regenerating it and requiring a clean diff is what stops it
+        # from silently going stale.
         run: |
           pnpm run build:contracts
           pnpm run export-abi
-          git diff --exit-code -- packages/shared/src
+          git diff --exit-code -- web/src/lib/contracts
 
-  indexer:
-    name: Indexer (schema, typecheck, tests)
+  web:
+    name: Web (typecheck, tests, schema, build)
     runs-on: ubuntu-latest
 
     services:
@@ -90,6 +90,8 @@ jobs:
           --health-retries=20
 
     env:
+      # The app is designed to run without a database, but CI exercises the
+      # indexed path so the schema and the dual-source comparison are covered.
       DATABASE_URL: mysql://root:root@127.0.0.1:3306/voting
       RPC_URL: http://127.0.0.1:8545
       CHAIN_ID: "31337"
@@ -108,35 +110,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        run: pnpm --filter @voting/indexer typecheck
+        run: pnpm run typecheck
 
       - name: Unit tests
+        # The indexer's decision logic and log decoding, tested with fakes and
+        # no chain or database in play.
         run: pnpm run test:indexer
 
       - name: Apply the schema to a real MySQL
-        # Proves schema.sql is valid MySQL 8.4 and that the migration is
+        # Proves the schema is valid MySQL 8.4 and that the migration is
         # genuinely idempotent by running it twice.
         run: |
           pnpm run indexer:migrate
           pnpm run indexer:migrate
-
-  web:
-    name: Frontend (typecheck, build)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Typecheck
-        run: pnpm run typecheck
 
       - name: Build
         run: pnpm run build:web

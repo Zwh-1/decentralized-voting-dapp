@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * Deploys `Voting` and records the address per chain so the indexer and the
- * frontend can pick it up through `@voting/shared`.
+ * frontend can pick it up through `web/src/lib/contracts`.
  *
  *   pnpm --filter @voting/contracts deploy:local     # against `hardhat node`
  *   pnpm --filter @voting/contracts deploy:sepolia   # real testnet
@@ -42,4 +42,6 @@ await writeFile(outFile, `${JSON.stringify(deployment, null, 2)}\n`, "utf8");
 
 console.log(`Voting deployed at ${voting.address} (chain ${chainId})`);
 console.log(`Recorded deployment in ${outFile}`);
-console.log("Run `pnpm --filter @voting/contracts export-abi` to publish it to @voting/shared.");
+console.log(
+  "Run `pnpm --filter @voting/contracts export-abi` to publish it to web/src/lib/contracts.",
+);

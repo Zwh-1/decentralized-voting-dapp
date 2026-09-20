@@ -3,28 +3,33 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Voting DApp frontend: Vite + React + wagmi + Tailwind",
+  "description": "Next.js app: the ballot UI plus the read-only indexer and its API routes",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --import tsx test/**/*.test.ts",
+    "migrate": "node --env-file-if-exists=.env --import tsx scripts/migrate.ts",
+    "drain": "node --env-file-if-exists=.env --import tsx scripts/drain.ts",
+    "check-consistency": "node --env-file-if-exists=.env --import tsx scripts/check-consistency.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "5.103.1",
-    "@voting/shared": "workspace:*",
+    "mysql2": "3.24.4",
+    "next": "16.3.5",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "viem": "2.56.8",
     "wagmi": "3.7.7"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "4.3.3",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "^22.20.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "@vitejs/plugin-react": "6.1.1",
     "tailwindcss": "4.3.3",
-    "typescript": "~6.0.3",
-    "vite": "8.3.0"
+    "tsx": "4.20.6",
+    "typescript": "~6.0.3"
   }
 }

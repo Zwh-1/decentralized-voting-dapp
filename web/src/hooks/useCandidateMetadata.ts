@@ -1,10 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import {
-  fetchCandidateMetadata,
-  type CandidateMetadata,
-  type MetadataResult,
-} from "../lib/ipfs.js";
+import { fetchCandidateMetadata, type CandidateMetadata, type MetadataResult } from "../lib/ipfs";
 
 /**
  * Loads candidate metadata from IPFS.
