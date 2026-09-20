@@ -1,6 +1,6 @@
 import type { ApiCandidate } from "../lib/types";
 import { useCandidateMetadata } from "../hooks/useCandidateMetadata";
-import type { MetadataResult } from "../lib/ipfs";
+import { isRetryableMetadata, type MetadataResult } from "../lib/ipfs";
 
 interface Props {
   candidate: ApiCandidate;
@@ -113,6 +113,11 @@ export function CandidateCard({
             {candidate.metadataCid}
           </dd>
         </div>
+        {/*
+          The IPFS status row. The retry control is a sibling of the <dd>, not a
+          child: the drill reads the <dd>'s text as the card's stated outcome, and
+          a button inside it would append its own label to that sentence.
+        */}
         <div className="flex gap-2">
           <dt className="shrink-0 text-slate-400">IPFS</dt>
           <dd className="text-slate-600">
@@ -121,6 +126,24 @@ export function CandidateCard({
               isError: metadata.isError,
             })}
           </dd>
+          {/*
+            Only for failures the network caused. A malformed CID is decided here,
+            so offering to ask again would offer something that cannot change, and
+            a resolved CID can never come back different. The data attribute is
+            what the browser drill asserts on, so that check does not depend on
+            this wording (ADR-0018).
+          */}
+          {isRetryableMetadata(metadata.data) && (
+            <button
+              type="button"
+              data-metadata-retry="true"
+              onClick={() => void metadata.refetch()}
+              disabled={metadata.isFetching}
+              className="shrink-0 self-start rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
+            >
+              {metadata.isFetching ? "重试中…" : "重试"}
+            </button>
+          )}
         </div>
       </dl>
 

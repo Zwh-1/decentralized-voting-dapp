@@ -15,7 +15,13 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 
-import { fetchCandidateMetadata, isPlausibleCid } from "../src/lib/ipfs";
+import {
+  fetchCandidateMetadata,
+  isPlausibleCid,
+  isRetryableMetadata,
+  metadataStaleTime,
+  type MetadataResult,
+} from "../src/lib/ipfs";
 
 /** A syntactically valid CIDv0: `Qm` plus 44 base58 characters. */
 const CID_V0 = `Qm${"a".repeat(44)}`;
@@ -230,5 +236,72 @@ describe("fetchCandidateMetadata", () => {
     await fetchCandidateMetadata(CID_V1_DAG_PB);
 
     assert.equal(sawSignal, true, "without a signal a stalled gateway would block forever");
+  });
+});
+
+/**
+ * Caching and retry are decided per result, not per query.
+ *
+ * The query function resolves its failures instead of rejecting them, so TanStack
+ * Query sees every outcome as successful data. With a single `staleTime` the
+ * argument "metadata is content addressed, so a successful result can never
+ * change" was therefore applied to failures too, and one throttled gateway pinned
+ * its answer for the session. These tests pin the split.
+ */
+describe("metadataStaleTime", () => {
+  it("keeps a resolved answer indefinitely", () => {
+    assert.equal(
+      metadataStaleTime({ status: "ok", metadata: { name: "Ada" } }),
+      Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("keeps a verdict this code reached locally, because asking again cannot change it", () => {
+    assert.equal(metadataStaleTime({ status: "invalid-cid" }), Number.POSITIVE_INFINITY);
+  });
+
+  it("expires a failure the network caused", () => {
+    const unreachable = metadataStaleTime({ status: "unreachable", attempts: 3 });
+    const noMetadata = metadataStaleTime({ status: "no-metadata", attempts: 3, answered: 1 });
+
+    assert.equal(unreachable, noMetadata);
+    assert.equal(Number.isFinite(unreachable), true, "a transient failure must not be permanent");
+    assert.equal(unreachable > 0, true, "and must not be refetched on every render");
+  });
+
+  it("has nothing to reuse before the first result", () => {
+    assert.equal(metadataStaleTime(undefined), 0);
+  });
+});
+
+describe("isRetryableMetadata", () => {
+  it("offers a retry only where another attempt could differ", () => {
+    assert.equal(isRetryableMetadata({ status: "ok", metadata: { name: "Ada" } }), false);
+    assert.equal(isRetryableMetadata({ status: "invalid-cid" }), false);
+    assert.equal(isRetryableMetadata({ status: "unreachable", attempts: 1 }), true);
+    assert.equal(isRetryableMetadata({ status: "no-metadata", attempts: 1, answered: 1 }), true);
+    assert.equal(isRetryableMetadata(undefined), false);
+  });
+
+  it("agrees with metadataStaleTime about which failures are transient", () => {
+    // The two are read in different places — one by the query cache, one by the
+    // card that renders the button — so a drift between them would show as a
+    // retry button on a card whose answer is cached forever.
+    const results: MetadataResult[] = [
+      { status: "ok", metadata: { name: "Ada" } },
+      { status: "invalid-cid" },
+      { status: "unreachable", attempts: 2 },
+      { status: "no-metadata", attempts: 2, answered: 2 },
+    ];
+
+    for (const result of results) {
+      const cachedForever = metadataStaleTime(result) === Number.POSITIVE_INFINITY;
+
+      assert.equal(
+        isRetryableMetadata(result),
+        !cachedForever && !(metadataStaleTime(result) === 0),
+        `disagreement for ${result.status}`,
+      );
+    }
   });
 });

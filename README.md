@@ -89,7 +89,7 @@ flowchart LR
 | M-6e | 浏览器端写入路径   | 注入钱包后驱动真实 DOM：未白名单账户按钮禁用并说明理由；**已白名单账户可点且确认上链**；**退款可点，链上 `stakeOf` 读回 0**；全程无"提交中…"假状态                                      | `pnpm ui:drill`                                      |
 | M-6f | 分块大小无关性     | `CHUNK_BLOCKS` = 1 / 7 / 2000 三种取值完整重建，投影逐位相同（`1` 时为 406 轮、插入 404、重复 0）                                                                                       | 见[分块大小不影响结果](#m-6b-附加分块大小不影响结果) |
 | M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                    | `pnpm build:web`                                     |
-| —    | 测试总数           | **164 个**（合约 41 Solidity + 23 TypeScript，索引器 100）                                                                                                                              | `pnpm test`                                          |
+| —    | 测试总数           | **170 个**（合约 41 Solidity + 23 TypeScript，索引器 106）                                                                                                                              | `pnpm test`                                          |
 
 ### M-3：四组重入对照矩阵
 
@@ -199,7 +199,7 @@ pnpm web:dev
 git clone <repo> && cd decentralized-voting-dapp
 pnpm install --frozen-lockfile   # 53.8s
 pnpm run typecheck
-pnpm test                        # 合约 64 + 索引器 100，0 失败
+pnpm test                        # 合约 64 + 索引器 106，0 失败
 pnpm coverage                    # Voting.sol 100.00 / 100.00
 pnpm export-abi && git diff --exit-code -- web/src/lib/contracts
 pnpm run build:web
@@ -269,7 +269,7 @@ cd .. && pnpm run seed:local                           # 部署 + 200 票（约 
 
 ```bash
 pnpm typecheck            # Next.js 层类型检查
-pnpm test                 # 合约 64 个 + 索引器 100 个
+pnpm test                 # 合约 64 个 + 索引器 106 个
 pnpm coverage             # Voting.sol 行/语句覆盖率
 pnpm gas                  # gas 统计表
 pnpm build:web            # Next.js 生产构建
@@ -671,7 +671,9 @@ CONFIRMATIONS=5
 
 把后两者合并曾导致一个可达的网关被报成"不可达"。CID 校验接受 CIDv0（`Qm…`，46 字符）与任意 codec 的 CIDv1 base32 形式（`b` + 58 字符，共 59），包括 raw codec 的 `bafk…`；把"合法但少见"的 CID 报成"格式无效"，等于告诉用户数据坏了，而实际是校验太窄。
 
-要把元数据真正固定下来，需要一个带密钥的 pinning 服务（Pinata / web3.storage 等）。设置 `NEXT_PUBLIC_IPFS_GATEWAY` 可指定专用网关。
+**尚未验证的边界（诚实说明）**：成功路径（`status: "ok"`）**从未在真实网关上发生过**。播种数据里的 CID（`bafyseededcandidate0`）是伪造的，仓库里没有任何真实 CID 指向真实的候选人元数据 JSON，因此这条分支只有单测覆盖。此外，瞬态失败分支的"重试"按钮也**未在浏览器中渲染过**：用 CDP 把文档里的占位 CID 替换为合规形状 CID 的探针未能改变客户端实际使用的 CID（标签仍为 `CID 格式无效，无法解析`）。要真正关闭这两个缺口，需要一个带密钥的 pinning 服务（Pinata / web3.storage 等）；设置 `NEXT_PUBLIC_IPFS_GATEWAY` 可指定专用网关（注意它是**构建期**内联的，改了要重新构建）。
+
+**失败不会被永久缓存**：`ok` 与 `invalid-cid` 永久缓存（前者的内容由 CID 唯一确定，后者由 `isPlausibleCid` 在发请求前本地判定），而 `unreachable` 与 `no-metadata` 在 30 秒后过期，并且卡片上会给出"重试"按钮——因为公共网关的限流是这类失败的常态，而一次限流不该变成关于候选人数据的永久结论（ADR-0018）。
 
 > **尚未验证的边界**：成功路径（`status: "ok"`）**从未在真实网关上发生过**。播种数据里的 CID（`bafyseededcandidate0`）是伪造的，仓库里没有任何真实 CID 指向真实的候选人元数据 JSON，因此 `ok` 分支只有 stub 测试覆盖。要真正走通它，需要往链上放一个真实的 CID——那需要一个 pinning 服务。
 
@@ -727,8 +729,8 @@ CONFIRMATIONS=5
 │   │   │   └── contracts/         # ABI 与部署地址（由 export-abi 生成）
 │   │   └── instrumentation.ts     # 启动后台索引循环
 │   ├── scripts/                   # migrate / drain / check-consistency / reorg-drill / refund-drill
-│   └── test/                      # 100 个单测，不需要链或数据库
-├── docs/aegis/                    # 设计规格、基线、17 条 ADR、实测校正记录
+│   └── test/                      # 106 个单测，不需要链或数据库
+├── docs/aegis/                    # 设计规格、基线、18 条 ADR、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）
 └── .github/workflows/ci.yml       # 5 条流水线
 ```

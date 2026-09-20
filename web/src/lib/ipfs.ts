@@ -82,6 +82,70 @@ export type MetadataResult =
    */
   | { status: "no-metadata"; attempts: number; answered: number };
 
+/**
+ * How long a transient metadata failure may be reused before asking again.
+ *
+ * Short enough that a reader who hits a throttled gateway is not stuck with that
+ * answer, long enough that a page which cannot reach any gateway does not retry
+ * on every render.
+ */
+const TRANSIENT_FAILURE_MS = 30_000;
+
+/**
+ * Whether another attempt could produce a different answer.
+ *
+ * The distinction is between a verdict this code reached locally and one the
+ * network handed back. `invalid-cid` is the former: the CID's shape is a property
+ * of the string, so asking again cannot change it, and caching it is correct.
+ * `unreachable` and `no-metadata` are the latter, and public gateways are
+ * unreliable by this module's own premise — measured during development as
+ * HTTP 429 from both `ipfs.io` and `dweb.link`.
+ *
+ * The `never` check means a new `MetadataResult` member cannot be added without
+ * deciding which kind it is; the previous version of this decision did not exist
+ * at all, and every failure was cached as though it were permanent.
+ */
+export function isRetryableMetadata(result: MetadataResult | undefined): boolean {
+  if (result === undefined) {
+    return false;
+  }
+
+  switch (result.status) {
+    case "ok":
+      return false;
+    case "invalid-cid":
+      return false;
+    case "unreachable":
+    case "no-metadata":
+      return true;
+    default: {
+      const exhaustive: never = result;
+
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * How long a result stays fresh, in the sense TanStack Query uses.
+ *
+ * `ok` is immune to change because metadata is content addressed: the bytes a CID
+ * names are fixed by the CID, so re-fetching them can only waste a request. That
+ * argument was already written down where this was configured — but it was
+ * applied to *every* result, including the failures, which the query function
+ * resolves rather than rejects. One throttled gateway therefore pinned
+ * "no usable candidate metadata" to the candidate for the rest of the session,
+ * and the card offered no way out. A failure the network caused now expires; a
+ * verdict this code reached locally does not.
+ */
+export function metadataStaleTime(result: MetadataResult | undefined): number {
+  if (result === undefined) {
+    return 0;
+  }
+
+  return isRetryableMetadata(result) ? TRANSIENT_FAILURE_MS : Number.POSITIVE_INFINITY;
+}
+
 export async function fetchCandidateMetadata(cid: string): Promise<MetadataResult> {
   if (!isPlausibleCid(cid)) {
     return { status: "invalid-cid" };

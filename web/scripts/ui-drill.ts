@@ -95,6 +95,8 @@ interface PageState {
   stakeRow: string | null;
   refundReason: string | null;
   ipfsLabels: string[];
+  /** Per IPFS row, in the same order as `ipfsLabels`: does it offer a retry? */
+  ipfsRetries: boolean[];
   cardCount: number;
   connected: boolean;
   hasProvider: boolean;
@@ -183,9 +185,19 @@ const READ_PAGE = `(() => {
   // One IPFS row per candidate card. Read the <dd> next to the <dt>IPFS</dt>
   // rather than searching innerText, so a card that renders nothing at all shows
   // up as an empty string instead of being silently absent from the results.
-  const ipfsLabels = [...document.querySelectorAll('dt')]
-    .filter((dt) => dt.textContent.trim() === 'IPFS')
-    .map((dt) => dt.parentElement?.querySelector('dd')?.textContent.trim() ?? '');
+  // The retry control is a sibling of the <dd>, so this text stays the card's
+  // stated outcome and does not grow a button label.
+  const ipfsRows = [...document.querySelectorAll('dt')].filter(
+    (dt) => dt.textContent.trim() === 'IPFS',
+  );
+  const ipfsLabels = ipfsRows.map(
+    (dt) => dt.parentElement?.querySelector('dd')?.textContent.trim() ?? '',
+  );
+  // Whether the card offers to ask again. A data attribute rather than the button
+  // text, which reads "重试" or "重试中…" depending on state.
+  const ipfsRetries = ipfsRows.map(
+    (dt) => dt.parentElement?.querySelector('[data-metadata-retry]') !== null,
+  );
   // The number of cards, counted independently of the IPFS rows so the two can be
   // compared. Deliberately NOT derived from the vote buttons: their text changes
   // with the phase ("投一票" becomes "你已投给该候选人" once you have voted), so a
@@ -200,6 +212,7 @@ const READ_PAGE = `(() => {
     stakeRow: rowAfter('押金'),
     refundReason,
     ipfsLabels,
+    ipfsRetries,
     cardCount,
     connected: buttons.some((b) => b.text === '断开'),
     hasProvider: typeof window.ethereum !== 'undefined',
@@ -563,6 +576,28 @@ async function main(): Promise<number> {
       before.ipfsLabels.length === before.cardCount && before.ipfsLabels.every(knownMetadataLabel),
       `cards=${before.cardCount} labels=${JSON.stringify(before.ipfsLabels)}`,
     );
+    // The card offers to ask again only where another attempt could differ. A
+    // malformed CID is decided by `isPlausibleCid` before any request, so a retry
+    // there would offer something that cannot change; `ok` is content addressed
+    // and can never come back different either. ADR-0018.
+    const deterministic = before.ipfsLabels.map(
+      (label) => label === "已解析" || label === "CID 格式无效，无法解析",
+    );
+    check(
+      "a metadata outcome that cannot change offers no retry",
+      before.ipfsRetries.every((offered, i) => !deterministic[i] || !offered),
+      `labels=${JSON.stringify(before.ipfsLabels)} retries=${JSON.stringify(before.ipfsRetries)}`,
+    );
+    check(
+      "a retry is offered only for a failure the network caused",
+      before.ipfsRetries.every(
+        (offered, i) =>
+          !offered ||
+          /^\d+ 个网关均不可达/.test(before.ipfsLabels[i]!) ||
+          /^网关可访问（\d+\/\d+ 个已作答）/.test(before.ipfsLabels[i]!),
+      ),
+      `retries=${JSON.stringify(before.ipfsRetries)} labels=${JSON.stringify(before.ipfsLabels)}`,
+    );
 
     if (VOTE) {
       console.log("\nvote");
@@ -691,7 +726,12 @@ async function main(): Promise<number> {
         message.kind === "exception" || message.level === "error" || message.level === "warning",
     );
     check(
-      "the page raised no exception and logged nothing above info level",
+      // Scoped to this configuration on purpose. The drill injects `window.ethereum`,
+      // so wagmi never falls back to its HTTP transport. A page with no wallet does,
+      // and polls the RPC URL: measured as two log entries every ~4s in headless
+      // Chrome, which denies the local-network permission without prompting. The
+      // assertion says what it actually verified. See ADR-0018.
+      "with the injected wallet, the page raised no exception and logged nothing above info level",
       noisy.length === 0,
       noisy.length === 0
         ? `${browserMessages.length} message(s), none above info`
