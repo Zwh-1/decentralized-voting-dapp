@@ -825,6 +825,22 @@ UI 侧的措辞暴露了同一个歧义：那一行的标签是"索引高度"，
 
 > 附带记录：本轮曾想借"有索引但从未同步"的状态验证该分支，第一次实验被污染——另一个仍在运行的实例（`INDEXER_ENABLED=true`）把游标重新推回了 406。停掉它、确认四个端口都无监听后重做，才得到上表第二行。这与 README 对 `drain` 的告警同源。
 
+### 校正 19：部署前预检只数"变量在不在"，而真实的失败是"填了但不能用"
+
+校正 18 修的是索引侧的公布语义。本轮准备 D3（Sepolia 真机部署）时拿到了一份真实的 `contracts/.env`：`SEPOLIA_PRIVATE_KEY` 为空，而 `VOTING_OWNER` 里是一个 66 字符的 `0x`+64 位十六进制值——**私钥的形状，不是地址的形状**。
+
+实测（修复前，`deploy:local`）：退出码 1，输出 `InvalidAddressError: Address "0x7077…" is invalid.`，**该值被原样打进终端**，堆栈指向 viem 的 `encodeAddress`；报错全文**没有出现 `VOTING_OWNER`**。单独实测 viem 的消息形状：221 字符，**含值、不含变量名**。
+
+两个网络路径都放过了这个值：`deploy:local` 提前返回、什么都不检查；`deploy:sepolia` 只数两个必需变量在不在。于是"填了但不能用"这一状态从未被任何检查覆盖，而它恰好是手编 `.env` 最常到达的状态。
+
+**修正**：把预检抽成 `contracts/scripts/preflight.ts`，导出纯函数 `configurationProblems(networkName, env)` 使其可被单测；检查的是**可用**而非**存在**——RPC 端点须为 http(s) URL、私钥须为 `0x`+64 位十六进制、`VOTING_OWNER`（若设置）须为 `0x`+40 位十六进制；报告**只给形状不给值**（"this value is 66 characters"）；凭证按是否本地网络把关，而 `VOTING_OWNER` 作为部署输入在**任何**网络都校验；keystore 提示只给真正的秘密（把地址指向 `keystore set` 会加密一个公开值，且 `deploy.ts` 读的是 `process.env`，反而取不到）。
+
+**实施中我自己写错的一版**：最初把 `VOTING_OWNER` 的校验也挂在"是否本地网络"上，结果 `deploy:local` 依旧把值送给 viem 并回显——跑真实路径才发现。契约是"部署输入在任何网络都生效"，现由一条专门的测试钉住。
+
+实测（修复后）：`deploy:sepolia` 报 `needs 2 configuration fixes`，同时指名 `SEPOLIA_PRIVATE_KEY`（未设置）与 `VOTING_OWNER`（66 字符），全文不含该值；`deploy:local` 报 `needs 1 configuration fix` 且不再到达 viem；`VOTING_OWNER` 未设置时 `deploy:local` 正常部署（`0xccf176…`、区块 407、owner 默认部署者），随后已把链与部署记录还原。合约侧 nodejs 单测 8 → **23**（15 例新测试，其中一例专门断言值及其前 4 位都不得出现在报告里），合约总数 49 → **64**，全项目 144 → **159**。见 ADR-0016。
+
+另一个本轮的环境结论与代码无关：本机到 `api.etherscan.io` 不通（DNS 可解析、TCP 超时，HTTP 000），而同一时刻 Sepolia 的 RPC 端点可达；因此 D3 的**部署**不受影响，**源码验证**需要一个通路（并且 Node 默认不读 `HTTPS_PROXY`，实测需 `NODE_USE_ENV_PROXY=1`）。已记入 README。
+
 ## 15. 实测结果
 
 | 指标         | 结果                                                                                                                                                                                                                                                                                                                                                                         |
@@ -843,7 +859,7 @@ UI 侧的措辞暴露了同一个歧义：那一行的标签是"索引高度"，
 | M-6e 浏览器  | 注入 EIP-1193 provider 后驱动真实 DOM：未白名单账户投票按钮**全部禁用**且给出理由；已白名单账户按钮**全部可点**，点击后到达"已确认"、卡片变为"你已投给该候选人"；`--refund` 场景退款按钮可点、点击后**从链上读回 `stakeOf=0`**、按钮随即禁用；三场景均断言 DOM 中**不存在**"提交中…"。`pnpm ui:drill` 退出码 0（只读 12、`--vote` 16、`--refund` 18 项断言，均在快照内实测） |
 | M-7 构建     | Next.js 生产构建成功：1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                                                                                                                                                                                             |
 | M4 部署边界  | 部署脚本指向**真实** Sepolia（实测区块 11,742,273）：解析网络、由私钥推导部署账户、owner 默认取部署者、构造并广播交易 → 失败于 `gas required exceeds allowance (0)`，**唯一缺口是测试 ETH**；`verify:sepolia` 在**无** `SEPOLIA_PRIVATE_KEY` 时仍连上 Sepolia 并走到"该链无部署记录"守卫。失败的部署不写入 `deployments/`                                                    |
-| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 95 个 = **144 个，全部通过**                                                                                                                                                                                                                                                                                             |
+| 测试总数     | Solidity 41 个 + TypeScript(viem) 23 个 + 索引器单测 95 个 = **159 个，全部通过**                                                                                                                                                                                                                                                                                            |
 
 ### M-6 的 API 层观测（实测响应）
 

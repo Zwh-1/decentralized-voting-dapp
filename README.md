@@ -89,7 +89,7 @@ flowchart LR
 | M-6e | 浏览器端写入路径   | 注入钱包后驱动真实 DOM：未白名单账户按钮禁用并说明理由；**已白名单账户可点且确认上链**；**退款可点，链上 `stakeOf` 读回 0**；全程无"提交中…"假状态                                      | `pnpm ui:drill`                                      |
 | M-6f | 分块大小无关性     | `CHUNK_BLOCKS` = 1 / 7 / 2000 三种取值完整重建，投影逐位相同（`1` 时为 406 轮、插入 404、重复 0）                                                                                       | 见[分块大小不影响结果](#m-6b-附加分块大小不影响结果) |
 | M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                    | `pnpm build:web`                                     |
-| —    | 测试总数           | **144 个**（合约 41 Solidity + 8 TypeScript，索引器 95）                                                                                                                                | `pnpm test`                                          |
+| —    | 测试总数           | **159 个**（合约 41 Solidity + 23 TypeScript，索引器 95）                                                                                                                               | `pnpm test`                                          |
 
 ### M-3：四组重入对照矩阵
 
@@ -199,7 +199,7 @@ pnpm web:dev
 git clone <repo> && cd decentralized-voting-dapp
 pnpm install --frozen-lockfile   # 53.8s
 pnpm run typecheck
-pnpm test                        # 合约 49 + 索引器 95，0 失败
+pnpm test                        # 合约 64 + 索引器 95，0 失败
 pnpm coverage                    # Voting.sol 100.00 / 100.00
 pnpm export-abi && git diff --exit-code -- web/src/lib/contracts
 pnpm run build:web
@@ -269,7 +269,7 @@ cd .. && pnpm run seed:local                           # 部署 + 200 票（约 
 
 ```bash
 pnpm typecheck            # Next.js 层类型检查
-pnpm test                 # 合约 49 个 + 索引器 95 个
+pnpm test                 # 合约 64 个 + 索引器 95 个
 pnpm coverage             # Voting.sol 行/语句覆盖率
 pnpm gas                  # gas 统计表
 pnpm build:web            # Next.js 生产构建
@@ -548,6 +548,15 @@ pnpm --filter @voting/contracts verify:sepolia           # Etherscan 源码验�
 
 `verify:sepolia` 的构造函数参数是从部署记录里读回来的，不是重新手打的——`Voting` 的构造函数接收初始 owner，参数写错会表现为"验证失败"，但真实原因是拼写；读回记录直接消除了这个失败模式。
 
+> **如果 `verify:sepolia` 报连接超时。** 这可能是网络问题，而不是配置问题：本机（中国电信线路）实测 `api.etherscan.io` 的 DNS 能解析、TCP 连接却超时（HTTP 000），同一时刻 Sepolia 的 RPC 端点返回 302/200。区分方法：`curl -sS -o NUL -w '%{http_code}' https://api.etherscan.io/`，超时即为此症。此时需要一个能到达 Etherscan 的通路（本地代理），并注意 **Node 默认不读 `HTTPS_PROXY`**——实测：只设 `HTTPS_PROXY` 时 Node 直连成功，加上 `NODE_USE_ENV_PROXY=1` 才会走代理并如预期失败。因此：
+>
+> ```bash
+> NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://127.0.0.1:7890 \
+>   pnpm --filter @voting/contracts verify:sepolia
+> ```
+>
+> 部署本身不需要 Etherscan，只需 `SEPOLIA_RPC_URL` 与 `SEPOLIA_PRIVATE_KEY`。
+
 ### 让本地索引跟上 Sepolia
 
 只需要改链相关的项，`DATABASE_URL` 保持你上面已经配好的那个值不变：
@@ -679,7 +688,8 @@ CONFIRMATIONS=5
 │   │   ├── VotingProperties.t.sol # 2 个：1000 轮属性测试与 fuzz（M-4）
 │   │   └── test/                  # 仅测试用夹具，绝不部署
 │   ├── test/Voting.ts             # 8 个 viem + node:test 消费方测试
-│   ├── scripts/                   # deploy / seed-local / export-abi / verify
+│   ├── test/preflight.ts          # 15 个：部署前配置校验（含“不得回显值”）
+│   ├── scripts/                   # deploy / seed-local / export-abi / verify / preflight
 │   └── hardhat.config.ts
 ├── web/                           # Next.js 层：界面 + 只读索引器 + REST API
 │   ├── src/

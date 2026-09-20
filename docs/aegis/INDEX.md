@@ -22,3 +22,4 @@ Entries are workspace records, not authoritative runtime decisions.
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0013-health-fields-name-what-they-compute.md                          | ADR-0013 - 观测字段必须与该字段真正计算的东西同名，\"存在\"与\"正在运行\"分开报告 |
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0014-three-state-reads-and-independent-prefetch.md                    | ADR-0014 - 读取失败不得渲染成具体值，页面预取的三项读取各自结算                   |
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0015-lag-is-null-when-there-is-no-index-to-be-behind.md               | ADR-0015 - `lagBlocks` 只在滞后量成立时给出数字                                   |
+| 2026-09-20 | adr      | docs/aegis/adr/ADR-0016-deploy-preflight-checks-usability-and-never-echoes-a-value.md    | ADR-0016 - 部署前检查的是"可用"而不只是"存在"，且绝不回显值                       |

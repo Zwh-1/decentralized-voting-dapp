@@ -14,6 +14,8 @@ import path from "node:path";
 
 import { network } from "hardhat";
 
+import { preflight } from "./preflight";
+
 /**
  * The network named by `--network`, resolved before any connection is opened.
  *
@@ -24,47 +26,6 @@ function requestedNetwork(): string {
   const index = process.argv.indexOf("--network");
 
   return index === -1 ? "hardhat" : (process.argv[index + 1] ?? "hardhat");
-}
-
-const LOCAL_NETWORKS = new Set(["hardhat", "localhost"]);
-
-/**
- * Fails with the project's own instructions rather than Hardhat's generic
- * "Configuration Variable not found", and names every missing variable at once
- * instead of one per attempt.
- */
-function preflight(networkName: string): void {
-  if (LOCAL_NETWORKS.has(networkName)) {
-    return;
-  }
-
-  const required = [
-    [
-      "SEPOLIA_RPC_URL",
-      "a Sepolia JSON-RPC endpoint, e.g. https://ethereum-sepolia-rpc.publicnode.com",
-    ],
-    ["SEPOLIA_PRIVATE_KEY", "a DEDICATED throwaway deployer key funded with test ETH"],
-  ] as const;
-
-  const missing = required.filter(([name]) => {
-    const value = process.env[name];
-
-    return value === undefined || value.length === 0;
-  });
-
-  if (missing.length === 0) {
-    return;
-  }
-
-  throw new Error(
-    `Deploying to "${networkName}" needs ${missing.length} more configuration ${
-      missing.length === 1 ? "variable" : "variables"
-    }:\n` +
-      missing.map(([name, what]) => `  ${name} — ${what}`).join("\n") +
-      "\n\nEither export them, or store them encrypted:\n" +
-      missing.map(([name]) => `  npx hardhat keystore set ${name}`).join("\n") +
-      "\n\nSee contracts/.env.example for the full list.",
-  );
 }
 
 const networkName = requestedNetwork();
