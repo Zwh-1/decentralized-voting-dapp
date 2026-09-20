@@ -146,11 +146,13 @@ pnpm install
 docker compose up -d mysql
 ```
 
-连接串为 `mysql://voting:voting@127.0.0.1:3307/voting`。或者用你自己的 MySQL，手动建库：
+连接串为 `mysql://voting:voting@127.0.0.1:3307/voting`（`web/.env.example` 里已经写好这一行，取消注释即可）。或者用你自己的 MySQL，手动建库：
 
 ```sql
 CREATE DATABASE voting CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
+
+> **这条 Docker 路径的实测程度**：`docker compose config` 校验通过（YAML、compose schema、`3307:3306` 端口映射与环境变量均正确），但**容器本身没有真正跑起来**——本机 Docker 引擎始终未就绪（API 持续返回 500）。因此本文档中所有 M-1…M-6b 的实测数据都是在**本机已装的 MySQL 8.4.4**（3306）上跑出来的，不是这个容器。用你自己的 MySQL 走的是同一条已验证路径。
 
 ### 3. 配置应用
 
