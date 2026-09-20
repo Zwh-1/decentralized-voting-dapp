@@ -94,6 +94,8 @@ interface PageState {
   whitelistRow: string | null;
   stakeRow: string | null;
   refundReason: string | null;
+  ipfsLabels: string[];
+  cardCount: number;
   connected: boolean;
   hasProvider: boolean;
   connectError: string | null;
@@ -178,12 +180,27 @@ const READ_PAGE = `(() => {
         .filter(Boolean)
         .join(' ') || null
     : null;
+  // One IPFS row per candidate card. Read the <dd> next to the <dt>IPFS</dt>
+  // rather than searching innerText, so a card that renders nothing at all shows
+  // up as an empty string instead of being silently absent from the results.
+  const ipfsLabels = [...document.querySelectorAll('dt')]
+    .filter((dt) => dt.textContent.trim() === 'IPFS')
+    .map((dt) => dt.parentElement?.querySelector('dd')?.textContent.trim() ?? '');
+  // The number of cards, counted independently of the IPFS rows so the two can be
+  // compared. Deliberately NOT derived from the vote buttons: their text changes
+  // with the phase ("投一票" becomes "你已投给该候选人" once you have voted), so a
+  // button-text filter yields a different count per scenario.
+  const cardCount = [...document.querySelectorAll('dt')].filter(
+    (dt) => dt.textContent.trim() === '元数据 CID',
+  ).length;
   return {
     buttons,
     hasSubmittingLabel: text.includes('提交中…'),
     whitelistRow: rowAfter('白名单'),
     stakeRow: rowAfter('押金'),
     refundReason,
+    ipfsLabels,
+    cardCount,
     connected: buttons.some((b) => b.text === '断开'),
     hasProvider: typeof window.ethereum !== 'undefined',
     connectError: document.querySelector('.text-rose-600')?.textContent?.trim() ?? null,
@@ -474,6 +491,21 @@ async function main(): Promise<number> {
       "the 押金 row matches stakeOf",
       before.stakeRow === `${formatEth(stake)} ETH`,
       `row=${JSON.stringify(before.stakeRow)} stake=${stake}`,
+    );
+    // Every metadata outcome the card can render, spelled out. A blank cell or an
+    // unrecognised phrase fails here: `MetadataResult` gained a member in this
+    // round of work, and the guards it used to be rendered with failed silently.
+    const knownMetadataLabel = (label: string): boolean =>
+      label === "已解析" ||
+      label === "CID 格式无效，无法解析" ||
+      label === "读取中…" ||
+      label === "读取元数据时发生了未预期的错误" ||
+      /^\d+ 个网关均不可达，已降级显示编号$/.test(label) ||
+      /^网关可访问（\d+\/\d+ 个已作答），但没有返回可用的候选人元数据$/.test(label);
+    check(
+      "every candidate card states its metadata outcome in words",
+      before.ipfsLabels.length === before.cardCount && before.ipfsLabels.every(knownMetadataLabel),
+      `cards=${before.cardCount} labels=${JSON.stringify(before.ipfsLabels)}`,
     );
 
     if (VOTE) {

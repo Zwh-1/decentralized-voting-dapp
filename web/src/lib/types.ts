@@ -66,7 +66,23 @@ export interface HealthResponse {
   chainId: number;
   contract: string;
   confirmations: number;
-  indexEnabled: boolean;
+  /**
+   * Whether an index exists at all, i.e. whether `DATABASE_URL` is set.
+   *
+   * Named for what it computes. It was called `indexEnabled`, which invited the
+   * reading "the indexer is running" — so a health response read `true` while
+   * `INDEXER_ENABLED=false` had deliberately stopped the background loop. The two
+   * are now separate fields.
+   */
+  indexConfigured: boolean;
+  /**
+   * Whether the background loop that advances the index is turned on.
+   *
+   * `false` means the index only moves when something calls `pnpm indexer:drain`
+   * or `POST /api/index/sync`. Without this the state was unreportable: a reader
+   * could see the height but not whether it would ever advance on its own.
+   */
+  indexerLoopEnabled: boolean;
   lastIndexedBlock: string | null;
   chainHead: string | null;
   lagBlocks: string | null;
@@ -74,11 +90,11 @@ export interface HealthResponse {
    * Why the index could not be read, or null when there is no such problem —
    * including when no index is configured at all.
    *
-   * Distinct from `indexEnabled`, which says an index is *expected*. A configured
-   * index whose database is down still leaves the app serving from the chain, so
-   * this is a degradation to report rather than a failure to raise: without it the
-   * outage would be invisible, and with it the reader knows which subsystem to
-   * look at.
+   * Distinct from `indexConfigured`, which says an index is *expected*. A
+   * configured index whose database is down still leaves the app serving from the
+   * chain, so this is a degradation to report rather than a failure to raise:
+   * without it the outage would be invisible, and with it the reader knows which
+   * subsystem to look at.
    */
   indexError: string | null;
 }

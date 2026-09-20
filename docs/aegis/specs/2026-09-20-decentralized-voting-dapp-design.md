@@ -315,13 +315,13 @@ loop:
 
 ### 6.3 REST API（Next.js Route Handlers）
 
-| 端点                       | 说明                                                               |
-| -------------------------- | ------------------------------------------------------------------ |
-| `GET /api/health`          | `{ chainHead, lastIndexedBlock, lagBlocks, indexEnabled, phase }`  |
-| `GET /api/candidates`      | 候选人列表 + 聚合票数 + 元数据 CID + `source`（`chain` / `index`） |
-| `GET /api/results`         | **同时返回链上 `results()` 与 MySQL 聚合结果，以及四值 `status`**  |
-| `GET /api/voters/:address` | 该地址是否已投、投给谁、质押金额、是否已退还                       |
-| `POST /api/index/sync`     | 推进索引一步（先修重组，再索引下一段已确认区块）                   |
+| 端点                       | 说明                                                                 |
+| -------------------------- | -------------------------------------------------------------------- |
+| `GET /api/health`          | `{ chainHead, lastIndexedBlock, lagBlocks, indexConfigured, phase }` |
+| `GET /api/candidates`      | 候选人列表 + 聚合票数 + 元数据 CID + `source`（`chain` / `index`）   |
+| `GET /api/results`         | **同时返回链上 `results()` 与 MySQL 聚合结果，以及四值 `status`**    |
+| `GET /api/voters/:address` | 该地址是否已投、投给谁、质押金额、是否已退还                         |
+| `POST /api/index/sync`     | 推进索引一步（先修重组，再索引下一段已确认区块）                     |
 
 **`/api/results` 的双源返回是本设计的关键设计**：它把"链上与链下是否一致"从一句口头承诺变成每次请求都可见的运行时事实，同时为 §8 的索引一致性指标提供了测量入口。
 
@@ -675,13 +675,13 @@ CI 的"后台起节点 + 就绪轮询"机制在 `bash` 下单独实测通过：�
 
 **修正后的实测**（三种状态逐一跑过，本地链 406 块、200 票）：
 
-| 端点                   | 索引正常                               | 索引挂了                                                                   | 无索引                          |
-| ---------------------- | -------------------------------------- | -------------------------------------------------------------------------- | ------------------------------- |
-| `/api/health`          | 200 `ok`，`indexError: null`           | 200 `degraded`，`indexError: "connect ECONNREFUSED …"`，`chainHead: "406"` | 200 `ok`，`indexEnabled: false` |
-| `/api/candidates`      | 200 `source: "index"`                  | 200 `source: "chain"`，tally 67/67/66                                      | 200 `source: "chain"`           |
-| `/api/results`         | 200 `consistent` 200/200               | 200 `unavailable`，`indexedTotal: null`                                    | 200 `unavailable`               |
-| `/api/voters/<addr>`   | 200 `source: "index"`，有 `voteTxHash` | 200 `source: "chain"`，`whitelisted: true`（此前为 `null`）                | 200 `source: "chain"`           |
-| `POST /api/index/sync` | 200 `idle`                             | 503 `sync_failed`（写索引，无库不可写）                                    | 200 `enabled: false`            |
+| 端点                   | 索引正常                               | 索引挂了                                                                   | 无索引                             |
+| ---------------------- | -------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------- |
+| `/api/health`          | 200 `ok`，`indexError: null`           | 200 `degraded`，`indexError: "connect ECONNREFUSED …"`，`chainHead: "406"` | 200 `ok`，`indexConfigured: false` |
+| `/api/candidates`      | 200 `source: "index"`                  | 200 `source: "chain"`，tally 67/67/66                                      | 200 `source: "chain"`              |
+| `/api/results`         | 200 `consistent` 200/200               | 200 `unavailable`，`indexedTotal: null`                                    | 200 `unavailable`                  |
+| `/api/voters/<addr>`   | 200 `source: "index"`，有 `voteTxHash` | 200 `source: "chain"`，`whitelisted: true`（此前为 `null`）                | 200 `source: "chain"`              |
+| `POST /api/index/sync` | 200 `idle`                             | 503 `sync_failed`（写索引，无库不可写）                                    | 200 `enabled: false`               |
 
 页面在索引挂掉时不再出现"服务端无法读取链上数据"，而是正常渲染链上 tally 与 `status: "unavailable"`。
 
@@ -722,25 +722,56 @@ UI 相应分成两句：不可达时说"3 个网关均不可达"，可达但内�
 
 索引器单测 66 → **81**，总数 **115** → **130**。
 
+### 校正 15：`/api/health` 的 `indexEnabled` 名不副实，且"后台循环是否在跑"无处可查
+
+在本轮用 `INDEXER_ENABLED=false` 启动应用、随后读 `/api/health` 时，得到 `"indexEnabled": true`。据此差点做出"索引循环在运行、快照内的链变更可能已写入库"的错误判断——而循环当时是关着的（库后来确认为 `votes=200 refunds=0 cursor=406`，未被污染）。
+
+原因是那个字段名与实际计算不符：
+
+```ts
+export function isIndexEnabled(config: ServerConfig): boolean {
+  return config.databaseUrl !== null; // 有没有配置库，而不是循环有没有开
+}
+```
+
+也就是说它回答的是"**是否存在一个索引**"，却叫 `indexEnabled`；而真正控制后台循环的 `config.indexerEnabled`（`INDEXER_ENABLED` 环境变量）**在健康响应里根本没有出现**。读者能看到索引高度，却无法知道它会不会自行前进。
+
+UI 侧的措辞暴露了同一个歧义：那一行的标签是"索引高度"，`indexEnabled` 为假时显示"未启用"。按"是否存在索引"来读是自洽的，按字段名来读就是错的。
+
+**修正**：把字段改名为 `indexConfigured`（与其计算一致），并新增 `indexerLoopEnabled`（取自 `config.indexerEnabled`），使两种状态都可报告。UI 相应改用 `indexConfigured`，并在 `indexerLoopEnabled === false` 时明确提示：
+
+> 后台索引循环已关闭（INDEXER_ENABLED=false），高度不会自行前进；用下面的按钮手动同步。
+
+否则读者会看着"落后区块"不断增大而无从判断原因。两种配置均实测：
+
+| 启动方式                | `/api/health`                                                          |
+| ----------------------- | ---------------------------------------------------------------------- |
+| `INDEXER_ENABLED=false` | `indexConfigured: true`、`indexerLoopEnabled: false`，页面显示上述提示 |
+| 默认                    | `indexConfigured: true`、`indexerLoopEnabled: true`，页面不显示提示    |
+
+新增一个 `data.test.ts` 用例专门钉住二者的区分。索引器单测 81 → **82**，总数 **130** → **131**。
+
+顺带按实测更正三处陈旧的演练断言计数：ADR-0009 与本文档 §15 原写"7 / 11 / 17"，在快照内重测后为**只读 12、`--vote` 16、`--refund` 18**。本轮还向演练新增了一条断言（要求每个候选人卡片以已知措辞说明其元数据状态）；新增时用错了分母（拿按按钮文字过滤出的数量作基数，而该文字随阶段变化），被断言自己在 `--refund` 场景下抓出并修正——改为与卡片数比较。
+
 ## 15. 实测结果
 
-| 指标         | 结果                                                                                                                                                                                                                                                                                                                                 |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| M-1 覆盖率   | `contracts/Voting.sol` 行覆盖率 **100.00%**，语句覆盖率 **100.00%**                                                                                                                                                                                                                                                                  |
-| M-2 授权拦截 | 非白名单、重复投票、阶段错误（4 种）、质押金额错误、未知候选人、零地址、非管理员 → 全部 revert，无例外                                                                                                                                                                                                                               |
-| M-3 重入对照 | 四组矩阵全部按预期（见校正 8）                                                                                                                                                                                                                                                                                                       |
-| M-4 属性测试 | 1000 轮确定性投票序列 + 256 轮 fuzz，0 反例；且经变异测试证明可失败（见校正 7）                                                                                                                                                                                                                                                      |
-| M-5 Gas      | `vote` 中位 **109,256**（min 109,256 / avg 119,250 / max 143,456）；`refund` **37,920**；部署 **1,249,757**；运行时代码 5,298 字节                                                                                                                                                                                                   |
-| M-6 一致性   | 链上 **200** 票 == 索引 **200** 票，3 名候选人逐一比对，**0 处偏差**                                                                                                                                                                                                                                                                 |
-| M-6 落后对账 | `CONFIRMATIONS=5`、链上 200 / 索引 197（`unindexedBlocks 5`、`pendingVotesAddedBack 3`）→ 判定 `consistent`；**同样的落后叠加删掉 1 行**（索引 196）→ 判定 `divergent`、退出码 1，差异指向 `candidateId 2`（`pending: 1`）。**故障没有被"还在确认窗口内"掩盖过去**                                                                   |
-| M-6 负向对照 | 从 `votes` 删除 1 行后：`status: "divergent"`、200 vs 199、定位到 `candidateId 2`（67 vs 66、`pending: 0`）、CLI 退出码 1、HTTP 500                                                                                                                                                                                                  |
-| M-6b 幂等性  | 游标回退到 0 强制重放：**404 行全部命中重复，插入 0 行**，票数仍为 200（未翻倍）                                                                                                                                                                                                                                                     |
-| M-6c 重组    | `evm_revert` 把真实链头 407→406：索引报告 `rewound`（`rewoundTo 406, discardedFrom 407`）、孤立事件行 201→200、票数保持 200                                                                                                                                                                                                          |
-| M-6d 退款    | 真实退款 0.001 ETH：入库 `amount_wei` 与链上 `stakeOf` 逐位相同（`DECIMAL(38,0)` 无精度丢失）、票数保持 200、回退后索引撤销退款行与阶段行                                                                                                                                                                                            |
-| M-6e 浏览器  | 注入 EIP-1193 provider 后驱动真实 DOM：未白名单账户投票按钮**全部禁用**且给出理由；已白名单账户按钮**全部可点**，点击后到达"已确认"、卡片变为"你已投给该候选人"；`--refund` 场景退款按钮可点、点击后**从链上读回 `stakeOf=0`**、按钮随即禁用；三场景均断言 DOM 中**不存在**"提交中…"。`pnpm ui:drill` 退出码 0（7 / 11 / 17 项断言） |
-| M-7 构建     | Next.js 生产构建成功：1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                                                                                                                                                     |
-| M4 部署边界  | 部署脚本指向**真实** Sepolia（实测区块 11,742,273）：解析网络、由私钥推导部署账户、owner 默认取部署者、构造并广播交易 → 失败于 `gas required exceeds allowance (0)`，**唯一缺口是测试 ETH**；`verify:sepolia` 在**无** `SEPOLIA_PRIVATE_KEY` 时仍连上 Sepolia 并走到"该链无部署记录"守卫。失败的部署不写入 `deployments/`            |
-| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 81 个 = **130 个，全部通过**                                                                                                                                                                                                                                                     |
+| 指标         | 结果                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M-1 覆盖率   | `contracts/Voting.sol` 行覆盖率 **100.00%**，语句覆盖率 **100.00%**                                                                                                                                                                                                                                                                                                          |
+| M-2 授权拦截 | 非白名单、重复投票、阶段错误（4 种）、质押金额错误、未知候选人、零地址、非管理员 → 全部 revert，无例外                                                                                                                                                                                                                                                                       |
+| M-3 重入对照 | 四组矩阵全部按预期（见校正 8）                                                                                                                                                                                                                                                                                                                                               |
+| M-4 属性测试 | 1000 轮确定性投票序列 + 256 轮 fuzz，0 反例；且经变异测试证明可失败（见校正 7）                                                                                                                                                                                                                                                                                              |
+| M-5 Gas      | `vote` 中位 **109,256**（min 109,256 / avg 119,250 / max 143,456）；`refund` **37,920**；部署 **1,249,757**；运行时代码 5,298 字节                                                                                                                                                                                                                                           |
+| M-6 一致性   | 链上 **200** 票 == 索引 **200** 票，3 名候选人逐一比对，**0 处偏差**                                                                                                                                                                                                                                                                                                         |
+| M-6 落后对账 | `CONFIRMATIONS=5`、链上 200 / 索引 197（`unindexedBlocks 5`、`pendingVotesAddedBack 3`）→ 判定 `consistent`；**同样的落后叠加删掉 1 行**（索引 196）→ 判定 `divergent`、退出码 1，差异指向 `candidateId 2`（`pending: 1`）。**故障没有被"还在确认窗口内"掩盖过去**                                                                                                           |
+| M-6 负向对照 | 从 `votes` 删除 1 行后：`status: "divergent"`、200 vs 199、定位到 `candidateId 2`（67 vs 66、`pending: 0`）、CLI 退出码 1、HTTP 500                                                                                                                                                                                                                                          |
+| M-6b 幂等性  | 游标回退到 0 强制重放：**404 行全部命中重复，插入 0 行**，票数仍为 200（未翻倍）                                                                                                                                                                                                                                                                                             |
+| M-6c 重组    | `evm_revert` 把真实链头 407→406：索引报告 `rewound`（`rewoundTo 406, discardedFrom 407`）、孤立事件行 201→200、票数保持 200                                                                                                                                                                                                                                                  |
+| M-6d 退款    | 真实退款 0.001 ETH：入库 `amount_wei` 与链上 `stakeOf` 逐位相同（`DECIMAL(38,0)` 无精度丢失）、票数保持 200、回退后索引撤销退款行与阶段行                                                                                                                                                                                                                                    |
+| M-6e 浏览器  | 注入 EIP-1193 provider 后驱动真实 DOM：未白名单账户投票按钮**全部禁用**且给出理由；已白名单账户按钮**全部可点**，点击后到达"已确认"、卡片变为"你已投给该候选人"；`--refund` 场景退款按钮可点、点击后**从链上读回 `stakeOf=0`**、按钮随即禁用；三场景均断言 DOM 中**不存在**"提交中…"。`pnpm ui:drill` 退出码 0（只读 12、`--vote` 16、`--refund` 18 项断言，均在快照内实测） |
+| M-7 构建     | Next.js 生产构建成功：1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                                                                                                                                                                                             |
+| M4 部署边界  | 部署脚本指向**真实** Sepolia（实测区块 11,742,273）：解析网络、由私钥推导部署账户、owner 默认取部署者、构造并广播交易 → 失败于 `gas required exceeds allowance (0)`，**唯一缺口是测试 ETH**；`verify:sepolia` 在**无** `SEPOLIA_PRIVATE_KEY` 时仍连上 Sepolia 并走到"该链无部署记录"守卫。失败的部署不写入 `deployments/`                                                    |
+| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 82 个 = **131 个，全部通过**                                                                                                                                                                                                                                                                                             |
 
 ### M-6 的 API 层观测（实测响应）
 

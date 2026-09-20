@@ -257,7 +257,7 @@ export async function getHealth(): Promise<HealthResponse> {
   const state = getServerState();
   await ready(state);
 
-  const indexEnabled = isIndexEnabled(state.config);
+  const indexConfigured = isIndexEnabled(state.config);
 
   let lastIndexedBlock: bigint | null = null;
   if (state.pool !== null) {
@@ -283,7 +283,8 @@ export async function getHealth(): Promise<HealthResponse> {
     chainId: state.config.chainId,
     contract: state.config.votingAddress,
     confirmations: state.config.confirmations,
-    indexEnabled,
+    indexConfigured,
+    indexerLoopEnabled: state.config.indexerEnabled,
     lastIndexedBlock: lastIndexedBlock?.toString() ?? null,
     chainHead: chainHead?.toString() ?? null,
     lagBlocks:

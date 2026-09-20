@@ -239,7 +239,7 @@ describe("getHealth", () => {
 
     assert.equal(health.status, "ok");
     assert.equal(health.indexError, null);
-    assert.equal(health.indexEnabled, false);
+    assert.equal(health.indexConfigured, false);
   });
 
   it("reports a schema-application failure rather than throwing", async () => {
@@ -249,5 +249,18 @@ describe("getHealth", () => {
 
     assert.equal(health.status, "degraded");
     assert.match(String(health.indexError), /ECONNREFUSED/);
+  });
+
+  it("separates 'an index exists' from 'the loop that advances it is on'", async () => {
+    // These were one field once. `isIndexEnabled` computes `databaseUrl !== null`,
+    // so it reported `true` while `INDEXER_ENABLED=false` had deliberately stopped
+    // the loop, and a reader could not tell whether the height would ever move on
+    // its own.
+    install({ pool: livePool(), config: { indexerEnabled: false } });
+
+    const health = await getHealth();
+
+    assert.equal(health.indexConfigured, true, "DATABASE_URL is set, so an index exists");
+    assert.equal(health.indexerLoopEnabled, false, "but the background loop is switched off");
   });
 });

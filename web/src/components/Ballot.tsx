@@ -238,13 +238,18 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
           <Row label="数据来源">{tally.data?.source === "index" ? "MySQL 索引" : "链上直读"}</Row>
           <Row label="票数合计">{totalVotes}</Row>
           <Row label="索引高度">
-            {health.data === undefined || !health.data.indexEnabled
+            {health.data === undefined || !health.data.indexConfigured
               ? "未启用"
               : `${health.data.lastIndexedBlock ?? "—"} / 链头 ${health.data.chainHead ?? "—"}`}
           </Row>
           <Row label="落后区块">{health.data?.lagBlocks ?? "—"}</Row>
+          {health.data?.indexConfigured === true && health.data.indexerLoopEnabled === false && (
+            <p className="mt-2 text-xs text-slate-500">
+              后台索引循环已关闭（INDEXER_ENABLED=false），高度不会自行前进；用下面的按钮手动同步。
+            </p>
+          )}
 
-          {health.data?.indexEnabled === true && (
+          {health.data?.indexConfigured === true && (
             <button
               type="button"
               onClick={() => void syncNow()}
