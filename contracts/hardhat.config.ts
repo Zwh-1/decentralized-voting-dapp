@@ -2,11 +2,18 @@ import { configVariable, defineConfig } from "hardhat/config";
 
 import hardhatNetworkHelpers from "@nomicfoundation/hardhat-network-helpers";
 import hardhatNodeTestRunner from "@nomicfoundation/hardhat-node-test-runner";
+import hardhatVerify from "@nomicfoundation/hardhat-verify";
 import hardhatViem from "@nomicfoundation/hardhat-viem";
 import hardhatViemAssertions from "@nomicfoundation/hardhat-viem-assertions";
 
 export default defineConfig({
-  plugins: [hardhatViem, hardhatViemAssertions, hardhatNodeTestRunner, hardhatNetworkHelpers],
+  plugins: [
+    hardhatViem,
+    hardhatViemAssertions,
+    hardhatNodeTestRunner,
+    hardhatNetworkHelpers,
+    hardhatVerify,
+  ],
 
   solidity: {
     version: "0.8.37",
@@ -62,5 +69,20 @@ export default defineConfig({
     // Test-only fixtures must not inflate or dilute the production coverage
     // number: VulnerableRefund.sol exists solely as the attack counterpart.
     skipFiles: ["**/test/**", "**/*.t.sol"],
+  },
+
+  verify: {
+    // Etherscan only: one deterministic provider is easier to reason about than
+    // three that can disagree about the same bytecode. Sourcify is off for that
+    // reason, not because it is unusable.
+    //
+    // The key is resolved lazily, so `hardhat test` and `hardhat build` keep
+    // working without it; only verification requires it.
+    etherscan: {
+      apiKey: configVariable("ETHERSCAN_API_KEY"),
+    },
+    sourcify: {
+      enabled: false,
+    },
   },
 });

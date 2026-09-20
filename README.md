@@ -15,6 +15,7 @@
 - [实测指标](#实测指标)
 - [快速开始](#快速开始)
 - [验证与复现](#验证与复现)
+- [Sepolia 部署与验证（M4）](#sepolia-部署与验证m4)
 - [设计取舍与已知局限](#设计取舍与已知局限)
 - [安全说明](#安全说明)
 - [仓库结构](#仓库结构)
@@ -229,6 +230,73 @@ curl http://127.0.0.1:3000/api/health      # 索引高度、链头、落后区�
 curl http://127.0.0.1:3000/api/candidates  # 候选人及票数（含数据来源）
 curl http://127.0.0.1:3000/api/voters/0x…  # 某地址的白名单/投票/退款状态
 ```
+
+---
+
+## Sepolia 部署与验证（M4）
+
+### 前置条件
+
+1. 一个有测试 ETH 的**专用**部署账户（不要用持有真实资产的私钥）。
+2. 一个 Sepolia RPC 端点（公共端点即可，无需 API key）。
+3. 一个免费的 Etherscan API key：<https://etherscan.io/myapikey>（仅验证需要）。
+
+凭证不会入库。二选一：
+
+```bash
+# 方式一：加密存储（推荐）
+npx hardhat keystore set SEPOLIA_RPC_URL
+npx hardhat keystore set SEPOLIA_PRIVATE_KEY
+npx hardhat keystore set ETHERSCAN_API_KEY
+
+# 方式二：明文环境变量
+cp contracts/.env.example contracts/.env   # 然后填写（.env 已被 gitignore）
+```
+
+### 部署
+
+```bash
+pnpm --filter @voting/contracts deploy:sepolia
+```
+
+脚本会打印网络、部署者、owner、合约地址与区块浏览器链接，并把记录写入 `contracts/deployments/11155111.json`。**若该链上已有不同地址的记录，它会明确告警**——那份记录是应用与验证脚本读取地址的来源，静默覆盖会让已建好的索引指向错误的合约。
+
+随后发布地址与源码：
+
+```bash
+pnpm export-abi                                          # 写入 web/src/lib/contracts
+pnpm --filter @voting/contracts verify:sepolia           # Etherscan 源码验证
+```
+
+`verify:sepolia` 的构造函数参数是从部署记录里读回来的，不是重新手打的——`Voting` 的构造函数接收初始 owner，参数写错会表现为"验证失败"，但真实原因是拼写；读回记录直接消除了这个失败模式。
+
+### 让本地索引跟上 Sepolia
+
+```bash
+# web/.env
+DATABASE_URL=mysql://root:root@127.0.0.1:3306/voting
+RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
+CHAIN_ID=11155111
+CONFIRMATIONS=5
+```
+
+`CONFIRMATIONS` 在真实网络上**不要设成 0**：那会让索引在重组发生时已经写入了可能被回滚的区块。
+
+### 已验证到什么程度（诚实说明）
+
+本机**没有** Sepolia 部署账户，因此以下几项已实测、以下几项未实测：
+
+| 项                                                           | 状态                                                         |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| 缺凭证时的报错（逐条列出缺哪个变量与补救命令）               | **已实测**                                                   |
+| 只设置部分凭证时只报告缺的那一个                             | **已实测**                                                   |
+| `deploy:local` 全流程，含覆盖既有记录时的告警                | **已实测**                                                   |
+| Sepolia 网络配置与公共 RPC 连通性（成功取到 chain 11155111） | **已实测**                                                   |
+| Etherscan 验证任务的注册与 Etherscan 配置解析                | **已实测**（`verify` 任务存在，缺 key / 缺记录时按预期失败） |
+| 真实的 Sepolia 部署交易                                      | **未实测**——需要一个有测试 ETH 的私钥                        |
+| 真实的 Etherscan 源码验证                                    | **未实测**——需要一个 Etherscan API key                       |
+
+上表最后两行是 D3 交付边界的唯一缺口：脚本与验证路径都已就绪，且可测的部分逐条测过；但没有凭证时无法伪造一次真实部署。
 
 ---
 
