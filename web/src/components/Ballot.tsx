@@ -101,6 +101,18 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
     query: { enabled: contractKnown && address !== undefined },
   });
 
+  // `isWhitelisted` is a public mapping getter, so the UI can answer "may this
+  // address vote?" from the chain itself. Without it the vote button was enabled
+  // for any connected account and only the contract rejected the transaction,
+  // which surfaced as a revert instead of a stated reason.
+  const whitelisted = useReadContract({
+    address: contractAddress,
+    abi: votingAbi,
+    functionName: "isWhitelisted",
+    args: [address ?? ZERO_ADDRESS],
+    query: { enabled: contractKnown && address !== undefined },
+  });
+
   // ---- writes ----
   const { writeContract, data: hash, isPending, error: writeError } = useWriteContract();
   const receipt = useWaitForTransactionReceipt({ hash });
@@ -120,6 +132,7 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
   const myCandidateId = votedFor.data === undefined ? undefined : Number(votedFor.data);
   const myStake = stakeOf.data ?? 0n;
   const hasVotedValue = hasVoted.data === true;
+  const isWhitelistedValue = whitelisted.data === true;
 
   const canRefund =
     mounted && isConnected && contractKnown && currentPhase === VotingPhase.Ended && myStake > 0n;
@@ -136,7 +149,11 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
             ? "投票已结束，现在可以取回押金。"
             : hasVotedValue
               ? "每个地址只能投一票。"
-              : undefined;
+              : whitelisted.data === undefined
+                ? "正在读取白名单状态…"
+                : whitelisted.data === false
+                  ? "这个地址不在白名单里，合约会拒绝投票。"
+                  : undefined;
 
   function vote(candidateId: number) {
     writeContract({
@@ -230,6 +247,15 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
             {myCandidateId === undefined || myCandidateId === 0 ? "—" : `候选人 #${myCandidateId}`}
           </Row>
           <Row label="押金">{mounted && isConnected ? `${formatEth(myStake)} ETH` : "—"}</Row>
+          <Row label="白名单">
+            {!mounted || !isConnected
+              ? "—"
+              : whitelisted.data === undefined
+                ? "读取中…"
+                : whitelisted.data
+                  ? "是"
+                  : "否"}
+          </Row>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
@@ -288,8 +314,20 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
               key={candidate.id}
               candidate={candidate}
               totalVotes={totalVotes}
-              canVote={votingOpen && isConnected && !hasVotedValue && contractKnown}
-              isSubmitting={isPending || receipt.isPending}
+              canVote={
+                votingOpen && isConnected && !hasVotedValue && contractKnown && isWhitelistedValue
+              }
+              isSubmitting={
+                // `receipt.isLoading`, not `receipt.isPending`. wagmi disables the
+                // receipt query when there is no hash (`enabled: Boolean(hash && …)`),
+                // and a disabled TanStack query still reports `status: "pending"`. So
+                // `receipt.isPending` was permanently true until the first transaction
+                // was sent — every vote button read "提交中…" and, since the button is
+                // disabled while submitting, stayed unclickable even with a wallet
+                // connected. `isLoading` is `isPending && isFetching`, i.e. true only
+                // while a receipt is genuinely in flight.
+                isPending || receipt.isLoading
+              }
               isMine={myCandidateId === candidate.id}
               {...(disabledReason !== undefined ? { disabledReason } : {})}
               onVote={vote}

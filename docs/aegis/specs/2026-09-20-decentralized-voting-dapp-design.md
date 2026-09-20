@@ -593,6 +593,29 @@ allowBuilds:
 
 `START_BLOCK` 仍可覆盖，且**显式的 `0` 被当作有效值**而不是"未设置"（有单测固定这条语义）。
 
+### 校正 11：写入路径的前端部分此前完全没有验证，而两个缺陷正长在那里
+
+§15 原先只登记了类型检查、生产构建、服务端渲染与 API 实测响应——**没有一处运行浏览器**。补上这一面后立刻发现两个缺陷，它们都不改变任何接口、类型或构建产物，只改变"用户实际能不能完成这件事"：
+
+**缺陷一：投票按钮永远点不动。** `isSubmitting={isPending || receipt.isPending}`。没有交易哈希时 wagmi 禁用收据查询（`enabled: Boolean(hash && …)`），而被禁用的 TanStack Query **仍然报告 `status: "pending"`**，所以 `receipt.isPending` 恒为 true。于是按钮标签恒为"提交中…"，且 `disabled={!canVote || isSubmitting}` 恒成立——**连上钱包也无法投票**，核心写入路径是死的，而所有既有验证都是绿的。
+
+**缺陷二：未白名单账户也能点。** `canVote` 只检查阶段、连接状态与是否已投票，从不查白名单。按钮亮着，点下去必然被合约 revert 拒绝。合约其实**公开了** `mapping(address => bool) public isWhitelisted`，UI 完全可以自行判断。
+
+修复：`isSubmitting` 改用 `receipt.isLoading`（`isPending && isFetching`，只在收据确实在请求中时为真）；`canVote` 加入读链的 `isWhitelisted` 并给出具体理由；"我的状态"面板新增"白名单"一行。
+
+新增 `pnpm ui:drill` 把这一面固定下来。它用 DevTools Protocol 驱动 headless Chrome，**不引入任何浏览器自动化依赖**（Node 22+ 自带 `WebSocket`）；注入的 provider 把 `eth_sendTransaction` 转发给本地节点由解锁账户签名，全程不接触私钥。它断言 **UI 按钮的可用性与链上 `isWhitelisted && !hasVoted && phase == Voting` 逐一相符**，因此无论账户能否投票都是有效断言。
+
+实测（两场景退出码均为 0）：
+
+| 场景                             | 链上状态                             | 结果                                                                                                                          |
+| -------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| 未白名单账户（只读）             | `isWhitelisted=false hasVoted=false` | 3 个按钮全部禁用，理由"这个地址不在白名单里，合约会拒绝投票。"，"我的状态"白名单显示"否"                                      |
+| 已白名单账户（`--vote`，快照内） | `isWhitelisted=true hasVoted=false`  | 3 个按钮全部可点；点击后交易到达"已确认"，卡片变为"你已投给该候选人"（交易 `0x14d9380e…`，区块 408，索引侧 tally 67→68 同步） |
+
+演练跑在一次快照里，结束时回退。这次回退**顺带触发了一次真实的索引器重组自愈**：链头 408→406，游标与票数自动从 408/201 撤销回 406/200，两侧重新 `consistent`——此前该路径只有合成演练覆盖。
+
+已知边界：演练只覆盖**投票**一条写入路径，`refund` / `endVoting` / `setWhitelist` 仍无浏览器端覆盖；注入的是模拟 provider，与真实钱包在账户切换、链切换、拒绝签名等交互上存在差异，这些路径未覆盖。
+
 ## 15. 实测结果
 
 | 指标         | 结果                                                                                                                                                                                                                                                                                                                      |
@@ -608,6 +631,7 @@ allowBuilds:
 | M-6b 幂等性  | 游标回退到 0 强制重放：**404 行全部命中重复，插入 0 行**，票数仍为 200（未翻倍）                                                                                                                                                                                                                                          |
 | M-6c 重组    | `evm_revert` 把真实链头 407→406：索引报告 `rewound`（`rewoundTo 406, discardedFrom 407`）、孤立事件行 201→200、票数保持 200                                                                                                                                                                                               |
 | M-6d 退款    | 真实退款 0.001 ETH：入库 `amount_wei` 与链上 `stakeOf` 逐位相同（`DECIMAL(38,0)` 无精度丢失）、票数保持 200、回退后索引撤销退款行与阶段行                                                                                                                                                                                 |
+| M-6e 浏览器  | 注入 EIP-1193 provider 后驱动真实 DOM：未白名单账户 3 个投票按钮**全部禁用**且给出理由；已白名单账户 3 个按钮**全部可点**，点击后交易到达"已确认"、卡片变为"你已投给该候选人"；两场景均断言 DOM 中**不存在**"提交中…"。`pnpm ui:drill` 退出码 0（7 / 11 项断言）                                                          |
 | M-7 构建     | Next.js 生产构建成功：1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                                                                                                                                          |
 | M4 部署边界  | 部署脚本指向**真实** Sepolia（实测区块 11,742,273）：解析网络、由私钥推导部署账户、owner 默认取部署者、构造并广播交易 → 失败于 `gas required exceeds allowance (0)`，**唯一缺口是测试 ETH**；`verify:sepolia` 在**无** `SEPOLIA_PRIVATE_KEY` 时仍连上 Sepolia 并走到"该链无部署记录"守卫。失败的部署不写入 `deployments/` |
 | 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 57 个 = **106 个，全部通过**                                                                                                                                                                                                                                          |

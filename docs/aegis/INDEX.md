@@ -15,3 +15,4 @@ Entries are workspace records, not authoritative runtime decisions.
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0006-two-layers-and-optional-mysql.md                  | ADR-0006 - 收缩为合约层 + Next.js 两层，并把 MySQL 降级为可选依赖   |
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0007-property-tests-instead-of-the-invariant-runner.md | ADR-0007 - 用确定性属性测试替代 Hardhat 3 不可用的 invariant 运行器 |
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0008-reconcile-unindexed-range-before-verdict.md       | ADR-0008 - 一致性检查必须先对账未索引区间，再判定分歧               |
+| 2026-09-20 | adr      | docs/aegis/adr/ADR-0009-ui-eligibility-from-chain-not-query-status.md     | ADR-0009 - 投票按钮可用性由链上状态推导，进行态不得取自被禁用的查询 |
