@@ -105,6 +105,25 @@ function livePool() {
   };
 }
 
+/**
+ * A live index whose cursor row is absent, i.e. migrated but never synced.
+ *
+ * Distinct from `deadPool()`: the read succeeds and the answer is "nothing has
+ * been indexed yet", which is a fact about the deployment rather than a failure
+ * to observe one.
+ */
+function emptyCursorPool() {
+  return {
+    async query(sql: string): Promise<unknown[]> {
+      if (sql.includes("FROM sync_cursor")) {
+        return [[]];
+      }
+
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  };
+}
+
 function install(options: {
   pool?: unknown;
   chainFails?: boolean;
@@ -273,5 +292,57 @@ describe("getHealth", () => {
 
     assert.equal(health.indexConfigured, false);
     assert.equal(health.indexerLoopEnabled, false);
+  });
+
+  it("reports no lag figure when there is no index to be behind", async () => {
+    // The chain is healthy here, so a figure was computable — and was published:
+    // with a 406-block chain at 0 confirmations this read `406`, the whole chain.
+    // A reader saw `索引高度 未启用` next to `落后区块 406`, i.e. a lag for an index
+    // that does not exist.
+    install({ pool: null, config: { databaseUrl: null, confirmations: 0 } });
+
+    const health = await getHealth();
+
+    assert.equal(health.chainHead, "406", "the chain was readable and must still be reported");
+    assert.equal(health.indexConfigured, false);
+    assert.equal(health.lastIndexedBlock, null);
+    assert.equal(
+      health.lagBlocks,
+      null,
+      "an index-less deployment has no index lag, so it must not publish one",
+    );
+  });
+
+  it("reports no lag figure when the cursor could not be read", async () => {
+    // Same defect, harder to notice: the index is configured, so a lag figure
+    // looks legitimate, but the read that would produce it failed. It fell back to
+    // "nothing has been indexed", which on a real chain reports millions of blocks
+    // behind for an outage that may have started one second ago.
+    install({ pool: deadPool(), config: { confirmations: 0 } });
+
+    const health = await getHealth();
+
+    assert.equal(health.indexConfigured, true, "an index is configured...");
+    assert.match(String(health.indexError), /ECONNREFUSED/, "...and it is what failed");
+    assert.equal(health.lastIndexedBlock, null);
+    assert.equal(
+      health.lagBlocks,
+      null,
+      "a lag we could not read must not be rendered as the number we assume",
+    );
+  });
+
+  it("still reports the lag for a migrated index that has never synced", async () => {
+    // The case the fix must not swallow: `lastIndexedBlock: null` here is a fact,
+    // not an absence of one, and every safe block genuinely is unindexed. Nulling
+    // the figure wherever the cursor is null would hide real work from the reader.
+    install({ pool: emptyCursorPool(), config: { confirmations: 0 } });
+
+    const health = await getHealth();
+
+    assert.equal(health.indexConfigured, true);
+    assert.equal(health.lastIndexedBlock, null, "the cursor row exists but is empty");
+    // Blocks 0..406 inclusive, all of them safe to index at 0 confirmations.
+    assert.equal(health.lagBlocks, "407", "all 407 safe blocks are unindexed");
   });
 });

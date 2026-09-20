@@ -260,9 +260,16 @@ export async function getHealth(): Promise<HealthResponse> {
   const indexConfigured = isIndexEnabled(state.config);
 
   let lastIndexedBlock: bigint | null = null;
+  // `lastIndexedBlock === null` does not mean "the lag is unknown". A configured
+  // index that has been migrated but never synced also has no cursor row, and
+  // there "every safe block so far is unindexed" is the real answer. Telling the
+  // two apart is what keeps the `lagBlocks` figure below honest, so track the
+  // read itself rather than inferring it from the value.
+  let cursorKnown = false;
   if (state.pool !== null) {
     try {
       lastIndexedBlock = await readCursor(state.pool);
+      cursorKnown = true;
       recordIndexSuccess(state);
     } catch (error) {
       // Reported, not raised: the chain half of this response is still true, and
@@ -291,8 +298,15 @@ export async function getHealth(): Promise<HealthResponse> {
     indexerLoopEnabled: indexConfigured && state.config.indexerEnabled,
     lastIndexedBlock: lastIndexedBlock?.toString() ?? null,
     chainHead: chainHead?.toString() ?? null,
+    // Null whenever a lag figure would be a claim this response cannot support:
+    // no index exists, or the cursor could not be read. Both cases used to report
+    // `safeHead + 1` — the same number an empty cursor legitimately reports — so a
+    // deployment with no index at all, and one whose database was unreachable,
+    // each published a concrete "lag" that described neither. An empty cursor on
+    // a live index still reports the real figure, because there the answer really
+    // is "every safe block so far is unindexed".
     lagBlocks:
-      chainHead === null
+      chainHead === null || !cursorKnown
         ? null
         : lagBlocks({
             chainHead,

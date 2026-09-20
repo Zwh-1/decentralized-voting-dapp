@@ -90,6 +90,17 @@ export interface HealthResponse {
   indexerLoopEnabled: boolean;
   lastIndexedBlock: string | null;
   chainHead: string | null;
+  /**
+   * How many safe-to-index blocks are not in the index yet, or null when that is
+   * not a question this deployment can answer.
+   *
+   * Null in three cases, which must not be confused with each other: the chain
+   * could not be read; no index is configured, so there is no index to be behind;
+   * or the index exists but its cursor could not be read. `lastIndexedBlock:
+   * null` alongside a number here does **not** mean the same thing — a migrated
+   * but never-synced index has no cursor either, and there "everything so far is
+   * unindexed" is the true answer, so the figure is reported.
+   */
   lagBlocks: string | null;
   /**
    * Why the index could not be read, or null when there is no such problem —
