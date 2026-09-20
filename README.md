@@ -88,7 +88,7 @@ flowchart LR
 | M-6d | 真实退款入库       | `0.001 ETH` 全额入库（`amount_wei` 逐位相同、无精度丢失）、**票数不变**、回退后索引撤销退款与阶段行                                                                                     | `pnpm indexer:refund-drill`      |
 | M-6e | 浏览器端写入路径   | 注入钱包后驱动真实 DOM：未白名单账户按钮禁用并说明理由；**已白名单账户可点且确认上链**；**退款可点，链上 `stakeOf` 读回 0**；全程无"提交中…"假状态                                      | `pnpm ui:drill`                  |
 | M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                    | `pnpm build:web`                 |
-| —    | 测试总数           | **115 个**（合约 41 Solidity + 8 TypeScript，索引器 66）                                                                                                                                | `pnpm test`                      |
+| —    | 测试总数           | **130 个**（合约 41 Solidity + 8 TypeScript，索引器 81）                                                                                                                                | `pnpm test`                      |
 
 ### M-3：四组重入对照矩阵
 
@@ -198,7 +198,7 @@ pnpm web:dev
 git clone <repo> && cd decentralized-voting-dapp
 pnpm install --frozen-lockfile   # 53.8s
 pnpm run typecheck
-pnpm test                        # 合约 49 + 索引器 66，0 失败
+pnpm test                        # 合约 49 + 索引器 81，0 失败
 pnpm coverage                    # Voting.sol 100.00 / 100.00
 pnpm export-abi && git diff --exit-code -- web/src/lib/contracts
 pnpm run build:web
@@ -268,7 +268,7 @@ cd .. && pnpm run seed:local                           # 部署 + 200 票（约 
 
 ```bash
 pnpm typecheck            # Next.js 层类型检查
-pnpm test                 # 合约 49 个 + 索引器 66 个
+pnpm test                 # 合约 49 个 + 索引器 81 个
 pnpm coverage             # Voting.sol 行/语句覆盖率
 pnpm gas                  # gas 统计表
 pnpm build:web            # Next.js 生产构建
@@ -583,7 +583,25 @@ CONFIRMATIONS=5
 
 公共网关不可靠：开发期间 `ipfs.io` 与 `dweb.link` 均返回过 HTTP 429。因此前端实现了**多网关轮询 + 单请求超时 + CID 格式本地校验**，并把"元数据不可用"作为一种正常状态渲染，降级显示候选人编号。
 
+这个回退不是纸面设计，对着真实网关实测过（本机，2026-09-20）：
+
+| 网关                   | 结果                                                                   |
+| ---------------------- | ---------------------------------------------------------------------- |
+| `dweb.link`            | **HTTP 000**（不可达）                                                 |
+| `ipfs.io`              | **HTTP 000**（不可达）                                                 |
+| `gateway.pinata.cloud` | **HTTP 200**，但正文是 `hello world`（`text/plain`），不是候选人元数据 |
+
+也就是说默认顺序里的前两个在本机根本连不上，第三个才作答——**没有回退，候选人卡片会全部显示编号**。同一次实测得到 `{"status":"no-metadata","attempts":3,"answered":1}`：三个网关都试了，**只有一个真的作答**。失败状态因此按"失败的是谁"分开，不合并成一个计数：
+
+- `invalid-cid`——本地就判为不可能解析，**一个请求都不发**（实测 0 ms）；
+- `unreachable`——一个网关都没联系上（网络问题）；
+- `no-metadata`——联系上了，但没有任何一个给出可用的元数据（内容问题）。
+
+把后两者合并曾导致一个可达的网关被报成"不可达"。CID 校验接受 CIDv0（`Qm…`，46 字符）与任意 codec 的 CIDv1 base32 形式（`b` + 58 字符，共 59），包括 raw codec 的 `bafk…`；把"合法但少见"的 CID 报成"格式无效"，等于告诉用户数据坏了，而实际是校验太窄。
+
 要把元数据真正固定下来，需要一个带密钥的 pinning 服务（Pinata / web3.storage 等）。设置 `NEXT_PUBLIC_IPFS_GATEWAY` 可指定专用网关。
+
+> **尚未验证的边界**：成功路径（`status: "ok"`）**从未在真实网关上发生过**。播种数据里的 CID（`bafyseededcandidate0`）是伪造的，仓库里没有任何真实 CID 指向真实的候选人元数据 JSON，因此 `ok` 分支只有 stub 测试覆盖。要真正走通它，需要往链上放一个真实的 CID——那需要一个 pinning 服务。
 
 ### 7. 后台索引循环依赖长驻进程
 
@@ -635,8 +653,8 @@ CONFIRMATIONS=5
 │   │   │   └── contracts/         # ABI 与部署地址（由 export-abi 生成）
 │   │   └── instrumentation.ts     # 启动后台索引循环
 │   ├── scripts/                   # migrate / drain / check-consistency / reorg-drill / refund-drill
-│   └── test/                      # 66 个单测，不需要链或数据库
-├── docs/aegis/                    # 设计规格、基线、11 条 ADR、实测校正记录
+│   └── test/                      # 81 个单测，不需要链或数据库
+├── docs/aegis/                    # 设计规格、基线、12 条 ADR、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）
 └── .github/workflows/ci.yml       # 5 条流水线
 ```

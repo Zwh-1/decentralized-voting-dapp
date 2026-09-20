@@ -1,5 +1,6 @@
 import type { ApiCandidate } from "../lib/types";
 import { useCandidateMetadata } from "../hooks/useCandidateMetadata";
+import type { MetadataResult } from "../lib/ipfs";
 
 interface Props {
   candidate: ApiCandidate;
@@ -13,6 +14,47 @@ interface Props {
 
 function share(count: number, total: number): number {
   return total === 0 ? 0 : Math.round((count / total) * 100);
+}
+
+/**
+ * The one line the card shows about its IPFS metadata.
+ *
+ * A `switch` with a `never` check rather than a row of `&&` guards, because the
+ * guards fail silently: adding a member to `MetadataResult` without adding a
+ * branch here would leave the cell blank and nothing would say so. This way the
+ * build breaks instead.
+ *
+ * Every branch also names a distinct cause, so the reader is never told the wrong
+ * thing failed (ADR-0012) — and the fallback is a sentence rather than an empty
+ * string, so the cell is never blank.
+ */
+function metadataLabel(
+  result: MetadataResult | undefined,
+  query: { isPending: boolean; isError: boolean },
+): string {
+  if (result === undefined) {
+    if (query.isError) {
+      return "读取元数据时发生了未预期的错误";
+    }
+
+    return query.isPending ? "读取中…" : "元数据状态未知";
+  }
+
+  switch (result.status) {
+    case "ok":
+      return "已解析";
+    case "invalid-cid":
+      return "CID 格式无效，无法解析";
+    case "unreachable":
+      return `${result.attempts} 个网关均不可达，已降级显示编号`;
+    case "no-metadata":
+      return `网关可访问（${result.answered}/${result.attempts} 个已作答），但没有返回可用的候选人元数据`;
+    default: {
+      const exhaustive: never = result;
+
+      return exhaustive;
+    }
+  }
 }
 
 export function CandidateCard({
@@ -74,11 +116,10 @@ export function CandidateCard({
         <div className="flex gap-2">
           <dt className="shrink-0 text-slate-400">IPFS</dt>
           <dd className="text-slate-600">
-            {metadata.isPending && "读取中…"}
-            {metadata.data?.status === "ok" && `已解析`}
-            {metadata.data?.status === "invalid-cid" && "CID 格式无效，无法解析"}
-            {metadata.data?.status === "unreachable" &&
-              `${metadata.data.attempts} 个网关均不可达，已降级显示编号`}
+            {metadataLabel(metadata.data, {
+              isPending: metadata.isPending,
+              isError: metadata.isError,
+            })}
           </dd>
         </div>
       </dl>

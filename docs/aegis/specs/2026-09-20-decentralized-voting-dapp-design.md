@@ -687,6 +687,41 @@ CI 的"后台起节点 + 就绪轮询"机制在 `bash` 下单独实测通过：�
 
 新增 `web/test/data.test.ts`（9 个用例）钉住这些行为：索引挂掉时 tally 走链、`getResults` 不宣称结论、`getVoter` 保留链上答案、链不可达时**必须抛出**而不是返回 `hasVoted: false`、`getHealth` 报出 `indexError`。索引器单测因此从 57 增至 **66**，总数 **115**。
 
+### 校正 14：IPFS 网关回退一次都没跑过；而它跑起来后会误报失败原因
+
+`web/src/lib/ipfs.ts`（约 99 行）是整个 IPFS 层，它的存在理由就是"公共网关会限流，所以要逐个回退"。审计发现：
+
+**没有测试文件。** 索引器原有 7 个测试文件覆盖 plan/decode/sync/report/config/client-api，唯独 `ipfs.ts` 没有。且播种数据里的 CID 是 `bafyseededcandidate0`——被 `isPlausibleCid` 在发出任何请求之前就判为非法，所以**回退循环、超时和 `unreachable` 三条路径从未执行过一次**，无论在测试里还是对着真实网关。
+
+**修正 1：`isPlausibleCid` 只认 `bafy` 前缀，会误判合法 CID。** CIDv1 的 base32 形式是 `b` 前缀 + 58 个 base32 字符（共 59），其中第 2–4 位编码 codec：dag-pb/dag-json 是 `bafy`，**raw codec 是 `bafk`**。原检查 `/^bafy[a-z2-7]{55}$/` 会把 `bafk…` 判为非法，而调用方把"非法 CID"渲染成 **"CID 格式无效，无法解析"**——即告诉用户他们的数据是坏的，实际是检查本身太窄。改为 `/^b[a-z2-7]{58}$/`，并在注释里写明为何不锁死 codec 前缀。
+
+**修正 2（对着真实网关跑出来的）：可达的网关被报成"不可达"。** 写探针直接调用真实模块访问真实网关，实测：
+
+| CID                                                                                       | 结果                                                                                                        |
+| ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `QmT78zSuBmuS4z925WZfrqQ1qHaJ56DQaTfyMUF7F8ff5o`（真实存在，内容是 `hello world` 纯文本） | 修改前 `{"status":"unreachable","attempts":3}`；修改后 `{"status":"no-metadata","attempts":3,"answered":1}` |
+| 同为上者，耗时                                                                            | 12,591 ms（两个网关各耗尽 6 s 超时）                                                                        |
+| `bafyseededcandidate0`（格式非法）                                                        | `{"status":"invalid-cid"}`，**0 ms**，未发出任何请求                                                        |
+
+逐个网关实测本机可达性：`dweb.link` **HTTP 000**、`ipfs.io` **HTTP 000**、`gateway.pinata.cloud` **HTTP 200**（正文 `hello world`，`content-type: text/plain`）。也就是说默认顺序里前两个在本机根本不可达，第三个作答了——**回退不是理论**。
+
+但这也暴露了原实现的错报：`attempts` 把"没联系上""非 2xx""2xx 但正文不是元数据"三种情况合并，于是 pinata 明明回答了 200，UI 却会渲染 **"3 个网关均不可达"**。这与本轮一直在修的是同一类问题：**对失败原因的错误归因**，而这次是真实网络给出的证据。修复方式是把"是否真的作答"单独计数，并新增 `no-metadata` 状态：
+
+```ts
+| { status: "ok"; metadata }
+| { status: "invalid-cid" }
+| { status: "unreachable"; attempts }                 // 一个都没联系上
+| { status: "no-metadata"; attempts; answered }       // 联系上了，但没给出可用元数据
+```
+
+UI 相应分成两句：不可达时说"3 个网关均不可达"，可达但内容不可用时说"网关可访问（1/3 个已作答），但没有返回可用的候选人元数据"。这恰好把模块自己注释里的原则（"格式错误的 CID 和不可达的网关是不同的问题，不该在用户看来一样"）向下再落实一层。
+
+**修正 3：新增 `web/test/ipfs.test.ts`，15 个用例。** 覆盖 CID 校验（含 `bafk` raw 形式必须被接受，以及 7 种必须被拒绝的形式且**不得发出请求**）、回退顺序、非 2xx、网络异常、2xx 但正文非元数据、全部耗尽、`no-metadata` 与 `unreachable` 的区分、只保留文档化字段、以及确实传递了 abort signal。
+
+**边界（仍然没做到的事）**：回退逻辑现在有了单测，也对着真实网关跑过，但**成功路径（`status: "ok"`）从未在真实网关上发生过**——播种数据里的 CID 是伪造的，仓库里没有任何一个真实 CID 指向真实的候选人元数据 JSON。所以 `ok` 分支只有 stub 测试覆盖。这一点在 README 里如实写明，不当作已验证。
+
+索引器单测 66 → **81**，总数 **115** → **130**。
+
 ## 15. 实测结果
 
 | 指标         | 结果                                                                                                                                                                                                                                                                                                                                 |
@@ -705,7 +740,7 @@ CI 的"后台起节点 + 就绪轮询"机制在 `bash` 下单独实测通过：�
 | M-6e 浏览器  | 注入 EIP-1193 provider 后驱动真实 DOM：未白名单账户投票按钮**全部禁用**且给出理由；已白名单账户按钮**全部可点**，点击后到达"已确认"、卡片变为"你已投给该候选人"；`--refund` 场景退款按钮可点、点击后**从链上读回 `stakeOf=0`**、按钮随即禁用；三场景均断言 DOM 中**不存在**"提交中…"。`pnpm ui:drill` 退出码 0（7 / 11 / 17 项断言） |
 | M-7 构建     | Next.js 生产构建成功：1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                                                                                                                                                     |
 | M4 部署边界  | 部署脚本指向**真实** Sepolia（实测区块 11,742,273）：解析网络、由私钥推导部署账户、owner 默认取部署者、构造并广播交易 → 失败于 `gas required exceeds allowance (0)`，**唯一缺口是测试 ETH**；`verify:sepolia` 在**无** `SEPOLIA_PRIVATE_KEY` 时仍连上 Sepolia 并走到"该链无部署记录"守卫。失败的部署不写入 `deployments/`            |
-| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 66 个 = **115 个，全部通过**                                                                                                                                                                                                                                                     |
+| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 81 个 = **130 个，全部通过**                                                                                                                                                                                                                                                     |
 
 ### M-6 的 API 层观测（实测响应）
 
