@@ -88,7 +88,7 @@ flowchart LR
 | M-6d | 真实退款入库       | `0.001 ETH` 全额入库（`amount_wei` 逐位相同、无精度丢失）、**票数不变**、回退后索引撤销退款与阶段行                                                                                     | `pnpm indexer:refund-drill`      |
 | M-6e | 浏览器端写入路径   | 注入钱包后驱动真实 DOM：未白名单账户按钮禁用并说明理由；**已白名单账户可点且确认上链**；**退款可点，链上 `stakeOf` 读回 0**；全程无"提交中…"假状态                                      | `pnpm ui:drill`                  |
 | M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                    | `pnpm build:web`                 |
-| —    | 测试总数           | **131 个**（合约 41 Solidity + 8 TypeScript，索引器 82）                                                                                                                                | `pnpm test`                      |
+| —    | 测试总数           | **132 个**（合约 41 Solidity + 8 TypeScript，索引器 83）                                                                                                                                | `pnpm test`                      |
 
 ### M-3：四组重入对照矩阵
 
@@ -198,7 +198,7 @@ pnpm web:dev
 git clone <repo> && cd decentralized-voting-dapp
 pnpm install --frozen-lockfile   # 53.8s
 pnpm run typecheck
-pnpm test                        # 合约 49 + 索引器 82，0 失败
+pnpm test                        # 合约 49 + 索引器 83，0 失败
 pnpm coverage                    # Voting.sol 100.00 / 100.00
 pnpm export-abi && git diff --exit-code -- web/src/lib/contracts
 pnpm run build:web
@@ -268,7 +268,7 @@ cd .. && pnpm run seed:local                           # 部署 + 200 票（约 
 
 ```bash
 pnpm typecheck            # Next.js 层类型检查
-pnpm test                 # 合约 49 个 + 索引器 82 个
+pnpm test                 # 合约 49 个 + 索引器 83 个
 pnpm coverage             # Voting.sol 行/语句覆盖率
 pnpm gas                  # gas 统计表
 pnpm build:web            # Next.js 生产构建
@@ -318,19 +318,27 @@ curl http://127.0.0.1:3000/api/results
 
 索引的两种缺失方式都会被实际跑过，而不是只写在文档里。下表是逐个端点的实测响应（本地链 406 块、200 票）：
 
-| 端点                   | 索引正常                                                                                            | 索引**挂了**（`DATABASE_URL` 指向死端口）                                                  | 无索引（未设 `DATABASE_URL`）                                     |
-| ---------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| `/api/health`          | 200，`status: "ok"`，`indexConfigured: true`，`indexerLoopEnabled: true`，`lastIndexedBlock: "406"` | 200，`status: "degraded"`，**`indexError: "connect ECONNREFUSED …"`**，`chainHead: "406"`  | 200，`status: "ok"`，`indexConfigured: false`，`indexError: null` |
-| `/api/candidates`      | 200，`source: "index"`，tally 67/67/66                                                              | 200，**`source: "chain"`**，tally 67/67/66                                                 | 200，`source: "chain"`，tally 67/67/66                            |
-| `/api/results`         | 200，`status: "consistent"`，200/200                                                                | 200，**`status: "unavailable"`**，`indexedTotal: null`                                     | 200，`status: "unavailable"`，`indexedTotal: null`                |
-| `/api/voters/<addr>`   | 200，`source: "index"`，带 `voteTxHash`                                                             | 200，**`source: "chain"`**，`whitelisted`/`hasVoted`/`votedFor` 仍正确，`voteTxHash: null` | 200，`source: "chain"`，同上                                      |
-| `POST /api/index/sync` | 200，`status: "idle"`                                                                               | 503 `sync_failed`（这是**写**索引，没有库就写不了）                                        | 200，`enabled: false`                                             |
+| 端点                   | 索引正常                                                                                            | 索引**挂了**（`DATABASE_URL` 指向死端口）                                                  | 无索引（未设 `DATABASE_URL`）                                                                  |
+| ---------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `/api/health`          | 200，`status: "ok"`，`indexConfigured: true`，`indexerLoopEnabled: true`，`lastIndexedBlock: "406"` | 200，`status: "degraded"`，**`indexError: "connect ECONNREFUSED …"`**，`chainHead: "406"`  | 200，`status: "ok"`，`indexConfigured: false`，`indexerLoopEnabled: false`，`indexError: null` |
+| `/api/candidates`      | 200，`source: "index"`，tally 67/67/66                                                              | 200，**`source: "chain"`**，tally 67/67/66                                                 | 200，`source: "chain"`，tally 67/67/66                                                         |
+| `/api/results`         | 200，`status: "consistent"`，200/200                                                                | 200，**`status: "unavailable"`**，`indexedTotal: null`                                     | 200，`status: "unavailable"`，`indexedTotal: null`                                             |
+| `/api/voters/<addr>`   | 200，`source: "index"`，带 `voteTxHash`                                                             | 200，**`source: "chain"`**，`whitelisted`/`hasVoted`/`votedFor` 仍正确，`voteTxHash: null` | 200，`source: "chain"`，同上                                                                   |
+| `POST /api/index/sync` | 200，`status: "idle"`                                                                               | 503 `sync_failed`（这是**写**索引，没有库就写不了）                                        | 200，`enabled: false`                                                                          |
 
 三条要点：
 
 - **`unavailable` 不等于"一致"。** 三种状态下 `discrepancies` 都是 `[]`，但只有索引正常时才给出 `consistent`。没有任何可以比较的东西时，这个接口不会宣称比过了。
 - **挂了与没配走同一条路。** 只处理"没配"意味着一次数据库宕机会把链仍能回答的问题变成 503，页面还会告诉读者"服务端无法读取**链上**数据"——而链是好的。挂掉的索引通过 `indexError` 依然可见，所以这不是把故障藏起来。
-- **"存在索引"与"索引在自行前进"是两件事**，所以是 `indexConfigured` 与 `indexerLoopEnabled` 两个字段。前者算的是 `DATABASE_URL !== null`，后者来自 `INDEXER_ENABLED`。`INDEXER_ENABLED=false` 是一个被支持的部署方式：此时索引高度不会自行变化，但 `POST /api/index/sync` 照常有效（它把关的是有没有库，不是循环开没开），页面也会把这一点写明。实测该组合下 `/api/health` 返回 `indexConfigured: true`/`indexerLoopEnabled: false`，而手动同步返回 `{"enabled":true,"status":"idle"}` HTTP 200。
+- **"存在索引"与"索引在自行前进"是两件事**，所以是 `indexConfigured` 与 `indexerLoopEnabled` 两个字段：前者问的是 `DATABASE_URL !== null`，后者问的是**有没有一个循环会去推进它**，因此等于"存在索引 **且** `INDEXER_ENABLED` 不为 `false`"。三个组合都实测过：
+
+  | 情形                    | `indexConfigured` | `indexerLoopEnabled` | 含义                                                                                                                                                                  |
+  | ----------------------- | ----------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | 默认                    | `true`            | `true`               | 索引存在且自行前进                                                                                                                                                    |
+  | `INDEXER_ENABLED=false` | `true`            | `false`              | 索引存在，但只能手动推进；页面写明这一点，`POST /api/index/sync` 照常有效（它把关的是有没有库，不是循环开没开），实测返回 `{"enabled":true,"status":"idle"}` HTTP 200 |
+  | 未设 `DATABASE_URL`     | `false`           | `false`              | 没有索引，也就谈不上有循环在推进它                                                                                                                                    |
+
+  最后一行是有意为之：`INDEXER_ENABLED` 默认为真，若直接上报这个原始开关，就会在**没有任何索引可供推进**时报出"循环开着"，等于宣称一个并不存在的索引器。因此该字段上报的是有效状态，而不是那个原始配置项。
 
 #### M-6 的负向对照（这个检查确实会报警）
 
@@ -654,7 +662,7 @@ CONFIRMATIONS=5
 │   │   │   └── contracts/         # ABI 与部署地址（由 export-abi 生成）
 │   │   └── instrumentation.ts     # 启动后台索引循环
 │   ├── scripts/                   # migrate / drain / check-consistency / reorg-drill / refund-drill
-│   └── test/                      # 82 个单测，不需要链或数据库
+│   └── test/                      # 83 个单测，不需要链或数据库
 ├── docs/aegis/                    # 设计规格、基线、13 条 ADR、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）
 └── .github/workflows/ci.yml       # 5 条流水线

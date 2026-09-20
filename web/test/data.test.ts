@@ -263,4 +263,15 @@ describe("getHealth", () => {
     assert.equal(health.indexConfigured, true, "DATABASE_URL is set, so an index exists");
     assert.equal(health.indexerLoopEnabled, false, "but the background loop is switched off");
   });
+
+  it("never claims a running loop when there is no index to advance", async () => {
+    // `INDEXER_ENABLED` defaults to true, so reporting the raw flag would answer
+    // `true` here — for a loop that has nothing to advance and never runs.
+    install({ pool: null, config: { databaseUrl: null, indexerEnabled: true } });
+
+    const health = await getHealth();
+
+    assert.equal(health.indexConfigured, false);
+    assert.equal(health.indexerLoopEnabled, false);
+  });
 });

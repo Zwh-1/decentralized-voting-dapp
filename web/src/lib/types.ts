@@ -76,11 +76,16 @@ export interface HealthResponse {
    */
   indexConfigured: boolean;
   /**
-   * Whether the background loop that advances the index is turned on.
+   * Whether a background loop will advance that index on its own.
    *
+   * True only when an index exists *and* `INDEXER_ENABLED` is not `false`.
    * `false` means the index only moves when something calls `pnpm indexer:drain`
-   * or `POST /api/index/sync`. Without this the state was unreportable: a reader
-   * could see the height but not whether it would ever advance on its own.
+   * or `POST /api/index/sync`. Without this field the state was unreportable: a
+   * reader could see the height but not whether it would ever move by itself.
+   *
+   * Never `true` while `indexConfigured` is `false`: `INDEXER_ENABLED` defaults to
+   * true, and reporting that default for a loop with nothing to advance would
+   * claim a running indexer that does not exist.
    */
   indexerLoopEnabled: boolean;
   lastIndexedBlock: string | null;

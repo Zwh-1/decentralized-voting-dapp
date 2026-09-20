@@ -744,12 +744,13 @@ UI 侧的措辞暴露了同一个歧义：那一行的标签是"索引高度"，
 
 否则读者会看着"落后区块"不断增大而无从判断原因。两种配置均实测：
 
-| 启动方式                | `/api/health`                                                          |
-| ----------------------- | ---------------------------------------------------------------------- |
-| `INDEXER_ENABLED=false` | `indexConfigured: true`、`indexerLoopEnabled: false`，页面显示上述提示 |
-| 默认                    | `indexConfigured: true`、`indexerLoopEnabled: true`，页面不显示提示    |
+| 启动方式                | `/api/health`                                                           |
+| ----------------------- | ----------------------------------------------------------------------- |
+| `INDEXER_ENABLED=false` | `indexConfigured: true`、`indexerLoopEnabled: false`，页面显示上述提示  |
+| 默认                    | `indexConfigured: true`、`indexerLoopEnabled: true`，页面不显示提示     |
+| 未设 `DATABASE_URL`     | `indexConfigured: false`、`indexerLoopEnabled: false`，页面显示"未启用" |
 
-新增一个 `data.test.ts` 用例专门钉住二者的区分。索引器单测 81 → **82**，总数 **130** → **131**。
+`indexerLoopEnabled` 上报的是**有效状态**（`indexConfigured && INDEXER_ENABLED`），而不是原始的配置开关：后者默认为真，在没有索引可推进时仍会报出"循环开着"，等于宣称一个并不存在的索引器——与本节要修的毛病同源。三个组合（默认 / `INDEXER_ENABLED=false` / 未设 `DATABASE_URL`）均实测。新增两个 `data.test.ts` 用例分别钉住"有索引但循环关闭"与"无索引绝不宣称循环在跑"。索引器单测 81 → **83**，总数 **130** → **132**。
 
 顺带按实测更正三处陈旧的演练断言计数：ADR-0009 与本文档 §15 原写"7 / 11 / 17"，在快照内重测后为**只读 12、`--vote` 16、`--refund` 18**。本轮还向演练新增了一条断言（要求每个候选人卡片以已知措辞说明其元数据状态）；新增时用错了分母（拿按按钮文字过滤出的数量作基数，而该文字随阶段变化），被断言自己在 `--refund` 场景下抓出并修正——改为与卡片数比较。
 
@@ -771,7 +772,7 @@ UI 侧的措辞暴露了同一个歧义：那一行的标签是"索引高度"，
 | M-6e 浏览器  | 注入 EIP-1193 provider 后驱动真实 DOM：未白名单账户投票按钮**全部禁用**且给出理由；已白名单账户按钮**全部可点**，点击后到达"已确认"、卡片变为"你已投给该候选人"；`--refund` 场景退款按钮可点、点击后**从链上读回 `stakeOf=0`**、按钮随即禁用；三场景均断言 DOM 中**不存在**"提交中…"。`pnpm ui:drill` 退出码 0（只读 12、`--vote` 16、`--refund` 18 项断言，均在快照内实测） |
 | M-7 构建     | Next.js 生产构建成功：1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                                                                                                                                                                                             |
 | M4 部署边界  | 部署脚本指向**真实** Sepolia（实测区块 11,742,273）：解析网络、由私钥推导部署账户、owner 默认取部署者、构造并广播交易 → 失败于 `gas required exceeds allowance (0)`，**唯一缺口是测试 ETH**；`verify:sepolia` 在**无** `SEPOLIA_PRIVATE_KEY` 时仍连上 Sepolia 并走到"该链无部署记录"守卫。失败的部署不写入 `deployments/`                                                    |
-| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 82 个 = **131 个，全部通过**                                                                                                                                                                                                                                                                                             |
+| 测试总数     | Solidity 41 个 + TypeScript(viem) 8 个 + 索引器单测 83 个 = **132 个，全部通过**                                                                                                                                                                                                                                                                                             |
 
 ### M-6 的 API 层观测（实测响应）
 

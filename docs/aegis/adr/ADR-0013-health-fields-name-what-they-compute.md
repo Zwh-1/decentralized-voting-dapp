@@ -10,8 +10,8 @@ Date: `2026-09-20`
 - 代码事实：`web/src/lib/config.ts` 的 `isIndexEnabled(config)` 实现为 `return config.databaseUrl !== null;`，即"是否配置了数据库"，而非"索引是否在运行"。`data.ts` 将其结果放进 `HealthResponse.indexEnabled`。
 - 代码事实：真正控制后台循环的 `config.indexerEnabled`（来自 `INDEXER_ENABLED` 环境变量，`config.ts:131`）在 `HealthResponse` 中**没有任何字段**。`data.ts:446` 的循环守卫读取它，但该状态不外露。
 - 代码事实（UI）：`Ballot.tsx` 用 `indexEnabled` 决定"索引高度"一行显示高度还是"未启用"，并据此决定是否显示"立即同步索引"按钮。按"是否存在索引"读是自洽的，按字段名读则不是。
-- 实测（修复后两种配置）：`INDEXER_ENABLED=false` → `indexConfigured: true`、`indexerLoopEnabled: false`，页面显示"后台索引循环已关闭…"；默认 → `indexConfigured: true`、`indexerLoopEnabled: true`，页面不显示该提示。
-- 新增 `data.test.ts` 用例断言 `indexConfigured === true` 与 `indexerLoopEnabled === false` 可同时成立。
+- 实测（修复后三种配置）：`INDEXER_ENABLED=false` → `indexConfigured: true`、`indexerLoopEnabled: false`，页面显示"后台索引循环已关闭…"；默认 → `indexConfigured: true`、`indexerLoopEnabled: true`，页面不显示该提示；未设 `DATABASE_URL` → `indexConfigured: false`、`indexerLoopEnabled: false`。第三种最初上报 `indexerLoopEnabled: true`（原始开关的默认值），据此收紧为有效状态。
+- 新增 `data.test.ts` 用例断言 `indexConfigured === true` 与 `indexerLoopEnabled === false` 可同时成立；另断言 `indexConfigured === false` 时 `indexerLoopEnabled` 必为 `false`。
 
 ## Context
 
@@ -31,7 +31,7 @@ Date: `2026-09-20`
 ## Decision
 
 1. **字段与其计算同名。** `HealthResponse.indexEnabled` 改名为 `indexConfigured`，与 `isIndexEnabled` 真正的计算（`databaseUrl !== null`）一致。
-2. **"存在"与"正在运行"分开报告。** 新增 `HealthResponse.indexerLoopEnabled: boolean`，取自 `config.indexerEnabled`。两者可以任意组合，且都由接口回答。
+2. **"存在"与"正在运行"分开报告。** 新增 `HealthResponse.indexerLoopEnabled: boolean`，取 **`indexConfigured && config.indexerEnabled`**。刻意不直接上报 `config.indexerEnabled`：该开关默认为真，于是在没有索引可推进时会报出"循环开着"，等于宣称一个并不存在的索引器——与被修的毛病同源。因此它上报的是有效状态，且永不在 `indexConfigured === false` 时为真。
 3. **不可自行前进的状态要在界面上说出来。** 当 `indexConfigured === true` 且 `indexerLoopEnabled === false` 时，UI 在索引高度旁明确提示循环已关闭、高度不会自行前进、可用按钮手动同步。只报告数字而不解释它为何不动，等同于让读者自己猜。
 4. **`indexError` 保持独立。** 它回答第三个问题（索引是否可读），三者互不替代：可以存在且正在运行但读不到，也可以存在且可读但循环关闭。
 
@@ -50,11 +50,11 @@ Date: `2026-09-20`
 - 正面：`config.indexerEnabled` 从"只被内部守卫读取"变为对外可观测，使该项配置可被验证。
 - 代价：`HealthResponse.indexEnabled` 被移除，属破坏性变更。仓库内唯一消费者是同一个 `web/` 应用（`Ballot.tsx` 两处）与其测试，已同步。
 - 代价：响应多一个字段；UI 多一个条件提示。
-- 索引器单测 81 → 82，总数 130 → 131。
+- 索引器单测 81 → 83，总数 130 → 132（本轮先加 1 例区分"存在"与"运行"，再实测无索引态时发现 `indexerLoopEnabled: true` 的矛盾，收紧语义后又加 1 例钉住"无索引绝不宣称循环在跑"）。
 
 ## Compatibility Boundary
 
-`GET /api/health` 移除 `indexEnabled`，新增 `indexConfigured` 与 `indexerLoopEnabled`。取值语义随之明确：`indexConfigured === databaseUrl !== null`（与旧 `indexEnabled` 完全相同的计算），`indexerLoopEnabled === INDEXER_ENABLED !== "false"`。任何按旧字段名读取的消费者需要改名；按旧语义读取的消费者行为不变。其余字段（`status`、`chainHead`、`lastIndexedBlock`、`lagBlocks`、`indexError`）不变。UI 的可见变化只有一处：循环关闭时新增一段说明文字。这些都不是对外发布的包。
+`GET /api/health` 移除 `indexEnabled`，新增 `indexConfigured` 与 `indexerLoopEnabled`。取值语义随之明确：`indexConfigured === databaseUrl !== null`（与旧 `indexEnabled` 完全相同的计算），`indexerLoopEnabled === indexConfigured && INDEXER_ENABLED !== "false"`（因此 `indexConfigured === false` 时它必为 `false`）。任何按旧字段名读取的消费者需要改名；按旧语义读取的消费者行为不变。其余字段（`status`、`chainHead`、`lastIndexedBlock`、`lagBlocks`、`indexError`）不变。UI 的可见变化只有一处：循环关闭时新增一段说明文字。这些都不是对外发布的包。
 
 ## Retirement Impact
 

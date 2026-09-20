@@ -284,7 +284,11 @@ export async function getHealth(): Promise<HealthResponse> {
     contract: state.config.votingAddress,
     confirmations: state.config.confirmations,
     indexConfigured,
-    indexerLoopEnabled: state.config.indexerEnabled,
+    // The flag alone is not the answer. `INDEXER_ENABLED` defaults to true, so
+    // with no database configured it would report `true` for a loop that has
+    // nothing to advance and never runs — the same "the name claims more than the
+    // code does" trap this pair of fields exists to close.
+    indexerLoopEnabled: indexConfigured && state.config.indexerEnabled,
     lastIndexedBlock: lastIndexedBlock?.toString() ?? null,
     chainHead: chainHead?.toString() ?? null,
     lagBlocks:
