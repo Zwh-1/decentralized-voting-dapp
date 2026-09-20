@@ -19,6 +19,7 @@
 - [设计取舍与已知局限](#设计取舍与已知局限)
 - [安全说明](#安全说明)
 - [仓库结构](#仓库结构)
+- [参与贡献与安全](#参与贡献与安全)
 
 ---
 
@@ -397,6 +398,13 @@ CONFIRMATIONS=5
 `voting-abi.ts`、`deployments.ts` 与 `index.ts` 由 `pnpm export-abi` 生成并**入库提交**，这样应用无需先编译合约即可类型检查与构建。CI 中的 `abi-drift` 作业会重新生成并要求 `git diff` 为空，因此这份副本不可能悄悄过期。
 
 之所以不单独建一个 `packages/shared` 包，是因为它的唯一内容是生成物；放进 `web/` 让仓库保持"合约层 + Next 层"两层的结构。
+
+---
+
+## 参与贡献与安全
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) —— 环境、命令、**五条不可破坏的不变量**，以及为什么 `hardhat.config.ts` 里"缺失"的 invariant 配置块不应该被"修复"。
+- [`SECURITY.md`](SECURITY.md) —— 已声明的设计取舍（哪些不是漏洞）、已被测试覆盖的攻击面，以及漏洞报告方式。
 
 ---
 
