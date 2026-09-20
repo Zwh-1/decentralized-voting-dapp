@@ -8,7 +8,8 @@ Date: `2026-09-20`
 - Design Spec §15「浏览器端写入路径的两个缺陷」；实测：注入钱包连接后，未白名单账户 `isWhitelisted=false` 的 3 个按钮**全部可点**，点击必然 revert
 - 实测：修复前，无论钱包是否连接，每个投票按钮的文本都是"提交中…"；`pnpm ui:drill` 修复后断言"没有任何按钮停留在提交中…"在两个场景下均通过
 - 实测：修复后已白名单账户 `isWhitelisted=true hasVoted=false` 下 3 个按钮**全部可点**，点击后交易到达"已确认"，卡片变为"你已投给该候选人"（交易 `0x14d9380e…` 区块 408，索引侧 tally 67→68 同步）
-- `pnpm ui:drill` 两个场景各 7 / 11 项断言全部通过，退出码均为 0
+- `pnpm ui:drill` 三个场景各 7 / 11 / 17 项断言全部通过，退出码均为 0
+- 退款场景实测：点击前 `chainSaysRefundable=true (phase=2 stake=1000000000000000) enabled=true`；点击后**从链上读回 `stakeOf=0`**、按钮自行禁用且说明"没有可取回的押金。"、押金行回落 `0 ETH`
 
 ## Context
 
@@ -25,7 +26,8 @@ Date: `2026-09-20`
 1. **"进行中"以 `isLoading` 判定，不以 `isPending` 判定。** `receipt.isLoading` 是 `isPending && isFetching`，只在收据确实在请求中时为真；`isPending` 对"被禁用的查询"同样为真，因此不能用来表示"正在发生"。凡是用 TanStack 查询状态驱动 UI 进行态的地方，一律按此区分。
 2. **提现按钮的可用性由链上状态推导，不由索引推导。** `canVote` 加入 `isWhitelisted`（`useReadContract`，直接读 `Voting.isWhitelisted`），并在未通过时给出**具体理由**（"这个地址不在白名单里，合约会拒绝投票。"）。不采用 `/api/voters/[address]`，因为索引是可选的、且可能落后——用可能过期的数据去**阻止**一笔合法交易，比让用户多一次 revert 更糟。链是唯一事实源（ADR-0001）。
 3. **"我的状态"面板新增"白名单"一行**，与"已投票""押金"并列，使用户在点击之前就能看到自己是否具备资格。
-4. **新增 `pnpm ui:drill`**：用 DevTools Protocol 驱动 headless Chrome，注入 EIP-1193 provider（把 `eth_sendTransaction` 转发给本地节点由其解锁账户签名，全程不接触私钥），断言 **UI 的按钮可用性与链上 `isWhitelisted && !hasVoted && phase == Voting` 逐一相符**。它不引入任何浏览器自动化依赖——Node 22+ 自带 `WebSocket`。
+4. **凡是被禁用的按钮都必须说明原因。** 同一原则应用到退款按钮：它原先只在 `phase == Ended && myStake == 0` 这一种窄情况下给出说明，投票进行中而用户持有押金时是一个灰掉且沉默的按钮。这条路径的沉默代价最高——`sweepUnclaimed()` 会把宽限期内无人认领的押金转给 owner，所以"按钮错误地禁用"等于**用户丢钱**。现在四种禁用原因都会写明。
+5. **新增 `pnpm ui:drill`**：用 DevTools Protocol 驱动 headless Chrome，注入 EIP-1193 provider（把 `eth_sendTransaction` 转发给本地节点由其解锁账户签名，全程不接触私钥），断言 **UI 的按钮可用性与链上 `isWhitelisted`/`hasVoted`/`phase`/`stakeOf` 逐一相符**，因此无论账户能否投票、能否退款都是有效断言。`--vote` 与 `--refund` 分别再走完一条真实写入路径。它不引入任何浏览器自动化依赖——Node 22+ 自带 `WebSocket`。
 
 ## Alternatives Considered
 
@@ -38,13 +40,14 @@ Date: `2026-09-20`
 ## Consequences
 
 - 正面：前端写入路径第一次有了可复现的端到端证据，且这类"只影响用户能否完成操作"的缺陷从此可被自动发现。代价：演练是手动的，不进 CI，因此不会在每次提交时自动拦截。
-- 正面：白名单状态读链而非读索引，判断不会因索引落后而错误地阻止投票。
-- 已知边界：演练覆盖的是**投票**这一条写入路径。`refund`、`endVoting`、`setWhitelist` 三个写入动作仍只有合约测试与类型检查覆盖，没有浏览器端演练。
+- 正面：白名单状态读链而非读索引，判断不会因索引落后而错误地阻止投票；退款按钮的可用性同样直接读 `stakeOf`，不经过索引。
+- 已知边界：演练覆盖**投票**与**取回押金**两条写入路径。`endVoting` 与 `setWhitelist` 是 owner 专属操作且界面未暴露，仍只有合约测试覆盖。
 - 已知边界：演练注入的是**模拟 provider**，它与真实钱包（MetaMask）在账户切换、链切换、拒绝签名等交互上存在差异；这些路径未被覆盖。
+- 正面：`--refund` 场景回退时，索引一次性撤销了**三类**投影行（`votes 201→200`、`whitelist 201→200`、`refunds 1→0`、`phases 2→1`、`cursor 410→406`），比此前的单类回退提供了更强的自愈证据。
 
 ## Compatibility Boundary
 
-无接口或数据格式变更。`Ballot.tsx` 新增一次 `isWhitelisted` 读调用（在地址已知时启用），"我的状态"面板新增一行。两者都不影响 `/api/**` 的响应结构。
+无接口或数据格式变更。`Ballot.tsx` 新增一次 `isWhitelisted` 读调用（在地址已知时启用），"我的状态"面板新增一行，并把退款按钮的禁用说明从单一条件扩展为覆盖四种原因。这些都不影响 `/api/**` 的响应结构。
 
 ## Retirement Impact
 
@@ -62,6 +65,7 @@ Date: `2026-09-20`
 - web/src/components/Ballot.tsx
 - web/scripts/ui-drill.ts
 - docs/screenshots/ui-vote-confirmed.png
+- docs/screenshots/ui-refund-confirmed.png
 - docs/aegis/specs/2026-09-20-decentralized-voting-dapp-design.md
 
 ## Boundary

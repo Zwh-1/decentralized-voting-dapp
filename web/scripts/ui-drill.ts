@@ -21,13 +21,14 @@
  * unlocked account, so no private key is handled here.
  *
  * `TEST_ACCOUNT` selects the account to connect as. The drill reads that
- * account's `isWhitelisted`, `hasVoted` and the phase straight from the chain and
- * asserts the rendered buttons match, so it is correct whether the account can
- * vote or not. With `--vote` it will additionally click through a real vote and
+ * account's `isWhitelisted`, `hasVoted`, `phase` and `stakeOf` straight from the
+ * chain and asserts the rendered buttons match, so it is correct whether the
+ * account can vote or refund, and whether it can do neither. With `--vote` it
+ * additionally clicks through a real vote; with `--refund` a real refund. Both
  * wait for the receipt.
  *
- * Read-only: it never mutates the chain. Use `--vote` only against a chain where
- * casting a vote is acceptable, or under a snapshot.
+ * Read-only by default: it never mutates the chain. Use `--vote` / `--refund`
+ * only against a chain where that is acceptable, or under a snapshot.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -38,6 +39,7 @@ import { createPublicClient, defineChain, http } from "viem";
 
 import { loadServerConfig } from "../src/lib/config";
 import { votingAbi } from "../src/lib/contracts";
+import { formatEth } from "../src/lib/voting";
 
 const CHROME_CANDIDATES = [
   process.env.CHROME_PATH,
@@ -51,6 +53,7 @@ const CHROME_CANDIDATES = [
 const DEBUG_PORT = Number(process.env.CDP_PORT ?? 9333);
 const APP_URL = process.env.APP_URL ?? "http://127.0.0.1:3100/";
 const VOTE = process.argv.includes("--vote");
+const REFUND = process.argv.includes("--refund");
 const SHOT = process.env.SHOT ?? "";
 
 const config = loadServerConfig();
@@ -60,8 +63,9 @@ const config = loadServerConfig();
 // and lets the `finally` block clean up.
 if (config.chainId !== 31337) {
   console.error(
-    `Refusing to run: this drill casts a vote when given --vote, so it is limited to the local ` +
-      `Hardhat network (31337). CHAIN_ID is ${config.chainId}.`,
+    `Refusing to run: this drill sends real transactions when given --vote or ` +
+      `--refund, so it is limited to the local Hardhat network (31337). ` +
+      `CHAIN_ID is ${config.chainId}.`,
   );
   process.exit(1);
 }
@@ -88,6 +92,8 @@ interface PageState {
   buttons: ButtonState[];
   hasSubmittingLabel: boolean;
   whitelistRow: string | null;
+  stakeRow: string | null;
+  refundReason: string | null;
   connected: boolean;
   hasProvider: boolean;
   connectError: string | null;
@@ -159,10 +165,25 @@ const READ_PAGE = `(() => {
     if (i < 0) return null;
     return panel.slice(i + label.length).split('\\n').map((s) => s.trim()).filter(Boolean)[0] ?? null;
   };
+  // The refund reason is a <span> sibling of the refund button inside the same
+  // row. Read it from the DOM rather than from a line of innerText: the reason
+  // renders on its own line, so a text search finds only the button label and
+  // the assertion would pass even with no reason at all.
+  const refundBtn = [...document.querySelectorAll('button')].find((b) =>
+    b.textContent.includes('取回押金'),
+  );
+  const refundReason = refundBtn
+    ? [...refundBtn.parentElement.querySelectorAll('span')]
+        .map((s) => s.textContent.trim())
+        .filter(Boolean)
+        .join(' ') || null
+    : null;
   return {
     buttons,
     hasSubmittingLabel: text.includes('提交中…'),
     whitelistRow: rowAfter('白名单'),
+    stakeRow: rowAfter('押金'),
+    refundReason,
     connected: buttons.some((b) => b.text === '断开'),
     hasProvider: typeof window.ethereum !== 'undefined',
     connectError: document.querySelector('.text-rose-600')?.textContent?.trim() ?? null,
@@ -310,7 +331,7 @@ async function main(): Promise<number> {
     const sessionId = await connectToPage(walletSource(config.rpcUrl, account, chainIdHex));
 
     // What the chain says, read independently of the page.
-    const [isWhitelisted, hasVoted, phase] = await Promise.all([
+    const [isWhitelisted, hasVoted, phase, stake] = await Promise.all([
       client.readContract({
         address: config.votingAddress,
         abi: votingAbi,
@@ -328,14 +349,23 @@ async function main(): Promise<number> {
         abi: votingAbi,
         functionName: "phase",
       }),
+      client.readContract({
+        address: config.votingAddress,
+        abi: votingAbi,
+        functionName: "stakeOf",
+        args: [account],
+      }),
     ]);
 
     const PHASE_VOTING = 1;
+    const PHASE_ENDED = 2;
+    const STAKE_WEI = 1_000_000_000_000_000n;
     const chainSaysVotable = isWhitelisted && !hasVoted && Number(phase) === PHASE_VOTING;
+    const chainSaysRefundable = Number(phase) === PHASE_ENDED && stake > 0n;
 
     console.log(`\naccount          ${account}`);
     console.log(
-      `chain            isWhitelisted=${isWhitelisted}  hasVoted=${hasVoted}  phase=${phase}`,
+      `chain            isWhitelisted=${isWhitelisted}  hasVoted=${hasVoted}  phase=${phase}  stakeOf=${stake} wei`,
     );
     console.log(`app              ${APP_URL}\n`);
 
@@ -421,6 +451,31 @@ async function main(): Promise<number> {
       before.walletMethods.join(", "),
     );
 
+    // The refund path. The stake is the user's own money and `sweepUnclaimed()`
+    // hands an unclaimed stake to the owner after the grace period, so a refund
+    // button that is wrongly disabled costs the user real ETH — which is why
+    // this is asserted in *both* directions, and why a disabled one must speak.
+    const refundButton = before.buttons.find((b) => b.text.includes("取回押金"));
+    const refundEnabled = refundButton !== undefined && !refundButton.disabled;
+    check("the ballot rendered a refund button", refundButton !== undefined);
+    check(
+      "the refund button is enabled exactly when the chain says the stake is refundable",
+      refundEnabled === chainSaysRefundable,
+      `chainSaysRefundable=${chainSaysRefundable} (phase=${phase} stake=${stake}) enabled=${refundEnabled}`,
+    );
+    check(
+      "a disabled refund button states why",
+      refundEnabled || (before.refundReason !== null && before.refundReason.length > 0),
+      refundEnabled
+        ? "button is enabled, so there is nothing to explain"
+        : `refundReason=${JSON.stringify(before.refundReason)}`,
+    );
+    check(
+      "the 押金 row matches stakeOf",
+      before.stakeRow === `${formatEth(stake)} ETH`,
+      `row=${JSON.stringify(before.stakeRow)} stake=${stake}`,
+    );
+
     if (VOTE) {
       console.log("\nvote");
       if (!chainSaysVotable) {
@@ -457,6 +512,71 @@ async function main(): Promise<number> {
       }
     }
 
+    if (REFUND) {
+      console.log("\nrefund");
+      if (!chainSaysRefundable) {
+        check(
+          "--refund requested, but the chain does not allow this account to refund",
+          false,
+          `phase=${phase} (needs ${PHASE_ENDED}) stake=${stake} wei (needs > 0)`,
+        );
+      } else {
+        const clicked = await evaluate<string>(
+          sessionId,
+          `(() => {
+            const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('取回押金'));
+            if (!b) return 'none';
+            if (b.disabled) return 'disabled';
+            b.click();
+            return 'clicked';
+          })()`,
+        );
+        check("clicking the enabled refund button was possible", clicked === "clicked", clicked);
+
+        let confirmed = false;
+        const deadline = Date.now() + 60_000;
+        while (Date.now() < deadline && !confirmed) {
+          await sleep(2000);
+          confirmed = await evaluate<boolean>(
+            sessionId,
+            `document.body.innerText.includes('已确认')`,
+          );
+        }
+        check("the refund reached a confirmed receipt", confirmed);
+
+        // The strongest assertion available: read the stake back off the chain
+        // rather than trusting the UI to report it.
+        const stakeAfter = await client.readContract({
+          address: config.votingAddress,
+          abi: votingAbi,
+          functionName: "stakeOf",
+          args: [account],
+        });
+        check(
+          "the chain shows the stake was returned",
+          stakeAfter === 0n,
+          `stakeOf=${stakeAfter} wei (was ${stake}, stake constant is ${STAKE_WEI})`,
+        );
+
+        const after = await evaluate<PageState>(sessionId, READ_PAGE);
+        const refundAfter = after.buttons.find((b) => b.text.includes("取回押金"));
+        check(
+          "the refund button disabled itself once the stake was gone",
+          refundAfter !== undefined && refundAfter.disabled,
+        );
+        check(
+          "the page now says there is nothing to refund",
+          after.refundReason !== null && after.refundReason.includes("没有可取回的押金"),
+          `refundReason=${JSON.stringify(after.refundReason)}`,
+        );
+        check(
+          "the 押金 row fell back to 0 ETH",
+          after.stakeRow === `${formatEth(0n)} ETH`,
+          `row=${JSON.stringify(after.stakeRow)}`,
+        );
+      }
+    }
+
     if (SHOT) {
       const shot = await send("Page.captureScreenshot", { format: "png" }, sessionId);
       writeFileSync(SHOT, Buffer.from(shot.data as string, "base64"));
@@ -464,7 +584,7 @@ async function main(): Promise<number> {
     }
 
     // Read this last, so it reflects everything the page asked the wallet for —
-    // including `eth_sendTransaction` when `--vote` ran.
+    // including `eth_sendTransaction` when `--vote` or `--refund` ran.
     const finalState = await evaluate<PageState>(sessionId, READ_PAGE);
     console.log(`\nwallet methods requested: ${finalState.walletMethods.join(", ")}`);
     return failures;

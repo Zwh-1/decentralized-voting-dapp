@@ -137,6 +137,22 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
   const canRefund =
     mounted && isConnected && contractKnown && currentPhase === VotingPhase.Ended && myStake > 0n;
 
+  // Mirrors ADR-0009: a disabled control must say why. The stake is the user's
+  // own money and `sweepUnclaimed()` hands an unclaimed stake to the owner after
+  // the grace period, so "the button is grey and silent" is the one outcome this
+  // path must never produce.
+  const refundReason = !contractKnown
+    ? `当前链（${chainId}）没有已登记的合约地址，无法取回押金。`
+    : !isConnected
+      ? "请先连接钱包。"
+      : currentPhase === undefined
+        ? "正在读取合约状态…"
+        : currentPhase === VotingPhase.Voting
+          ? "投票还在进行中，结束后才能取回押金。"
+          : myStake === 0n
+            ? "没有可取回的押金。"
+            : undefined;
+
   const disabledReason = !contractKnown
     ? `当前链（${chainId}）没有已登记的合约地址，无法投票。`
     : !isConnected
@@ -266,11 +282,9 @@ export function Ballot({ initialTally, initialResults, initialHealth, initialErr
             >
               取回押金
             </button>
-            {canRefund === false &&
-              mounted &&
-              isConnected &&
-              currentPhase === VotingPhase.Ended &&
-              myStake === 0n && <span className="text-xs text-slate-400">没有可取回的押金</span>}
+            {canRefund === false && mounted && refundReason !== undefined && (
+              <span className="text-xs text-slate-400">{refundReason}</span>
+            )}
           </div>
 
           {hash !== undefined && (
