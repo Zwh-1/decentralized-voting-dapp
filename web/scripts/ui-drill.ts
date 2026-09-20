@@ -212,6 +212,30 @@ let nextId = 1;
 const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
 let socket: WebSocket | undefined;
 
+/**
+ * What the page said while the drill was driving it.
+ *
+ * Nothing else in this project can see this. The API routes are covered by unit
+ * tests and the DOM is covered by the assertions below, but a React hydration
+ * mismatch and an uncaught client-side exception are both invisible to a Node
+ * test runner: hydration depends on a real browser reconciling server HTML
+ * against its own render, and an exception in an event handler never reaches the
+ * HTTP response. Both would leave every assertion above passing.
+ */
+interface BrowserMessage {
+  kind: "console" | "exception" | "log";
+  level: string;
+  text: string;
+}
+
+const browserMessages: BrowserMessage[] = [];
+
+function shorten(value: unknown): string {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .slice(0, 400);
+}
+
 function send(
   method: string,
   params: Record<string, unknown> = {},
@@ -272,6 +296,37 @@ async function connectToPage(source: string): Promise<string> {
     }
     if (message.method === "Page.loadEventFired" && message.sessionId)
       loaded.add(message.sessionId);
+
+    if (message.method === "Runtime.consoleAPICalled") {
+      const text = (message.params.args ?? [])
+        .map((argument: any) => argument.value ?? argument.description ?? argument.type)
+        .join(" ");
+      browserMessages.push({ kind: "console", level: message.params.type, text: shorten(text) });
+      return;
+    }
+
+    if (message.method === "Runtime.exceptionThrown") {
+      const details = message.params.exceptionDetails ?? {};
+      browserMessages.push({
+        kind: "exception",
+        level: "error",
+        text: shorten(details.exception?.description ?? details.text),
+      });
+      return;
+    }
+
+    // `Log` carries what never reaches `Runtime`: failed requests, CSP reports,
+    // and anything the browser itself refuses. A 404 for a missing asset shows up
+    // here and nowhere else.
+    if (message.method === "Log.entryAdded") {
+      const entry = message.params.entry ?? {};
+      browserMessages.push({
+        kind: "log",
+        level: entry.level,
+        text: shorten(`${entry.source}: ${entry.text}${entry.url ? ` (${entry.url})` : ""}`),
+      });
+      return;
+    }
   });
 
   const target = await send("Target.createTarget", { url: "about:blank" });
@@ -282,6 +337,7 @@ async function connectToPage(source: string): Promise<string> {
 
   await send("Page.enable", {}, sessionId);
   await send("Runtime.enable", {}, sessionId);
+  await send("Log.enable", {}, sessionId);
   await send(
     "Emulation.setDeviceMetricsOverride",
     {
@@ -619,6 +675,29 @@ async function main(): Promise<number> {
     // including `eth_sendTransaction` when `--vote` or `--refund` ran.
     const finalState = await evaluate<PageState>(sessionId, READ_PAGE);
     console.log(`\nwallet methods requested: ${finalState.walletMethods.join(", ")}`);
+
+    console.log(`\nbrowser console (${browserMessages.length} message(s)):`);
+    for (const message of browserMessages) {
+      console.log(`  [${message.kind}/${message.level}] ${message.text}`);
+    }
+
+    // The assertion this whole capture exists for. A hydration mismatch surfaces
+    // here as an error the DOM assertions cannot see, because React recovers by
+    // re-rendering on the client: the page still looks right and every check above
+    // still passes. Informational levels are deliberately not failures — React
+    // DevTools' suggestion and similar are noise, not defects.
+    const noisy = browserMessages.filter(
+      (message) =>
+        message.kind === "exception" || message.level === "error" || message.level === "warning",
+    );
+    check(
+      "the page raised no exception and logged nothing above info level",
+      noisy.length === 0,
+      noisy.length === 0
+        ? `${browserMessages.length} message(s), none above info`
+        : `${noisy.length}, first: [${noisy[0]!.kind}/${noisy[0]!.level}] ${noisy[0]!.text}`,
+    );
+
     return failures;
   } finally {
     chrome?.kill();

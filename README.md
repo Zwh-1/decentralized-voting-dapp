@@ -89,7 +89,7 @@ flowchart LR
 | M-6e | 浏览器端写入路径   | 注入钱包后驱动真实 DOM：未白名单账户按钮禁用并说明理由；**已白名单账户可点且确认上链**；**退款可点，链上 `stakeOf` 读回 0**；全程无"提交中…"假状态                                      | `pnpm ui:drill`                                      |
 | M-6f | 分块大小无关性     | `CHUNK_BLOCKS` = 1 / 7 / 2000 三种取值完整重建，投影逐位相同（`1` 时为 406 轮、插入 404、重复 0）                                                                                       | 见[分块大小不影响结果](#m-6b-附加分块大小不影响结果) |
 | M-7  | Next.js 生产构建   | 构建成功，1 个页面 + 5 个动态 Route Handler 全部产出                                                                                                                                    | `pnpm build:web`                                     |
-| —    | 测试总数           | **159 个**（合约 41 Solidity + 23 TypeScript，索引器 95）                                                                                                                               | `pnpm test`                                          |
+| —    | 测试总数           | **164 个**（合约 41 Solidity + 23 TypeScript，索引器 100）                                                                                                                              | `pnpm test`                                          |
 
 ### M-3：四组重入对照矩阵
 
@@ -199,7 +199,7 @@ pnpm web:dev
 git clone <repo> && cd decentralized-voting-dapp
 pnpm install --frozen-lockfile   # 53.8s
 pnpm run typecheck
-pnpm test                        # 合约 64 + 索引器 95，0 失败
+pnpm test                        # 合约 64 + 索引器 100，0 失败
 pnpm coverage                    # Voting.sol 100.00 / 100.00
 pnpm export-abi && git diff --exit-code -- web/src/lib/contracts
 pnpm run build:web
@@ -269,7 +269,7 @@ cd .. && pnpm run seed:local                           # 部署 + 200 票（约 
 
 ```bash
 pnpm typecheck            # Next.js 层类型检查
-pnpm test                 # 合约 64 个 + 索引器 95 个
+pnpm test                 # 合约 64 个 + 索引器 100 个
 pnpm coverage             # Voting.sol 行/语句覆盖率
 pnpm gas                  # gas 统计表
 pnpm build:web            # Next.js 生产构建
@@ -314,6 +314,22 @@ curl http://127.0.0.1:3000/api/results
 只有 `divergent` 会返回 HTTP 500、退出码 1。`lagging` 不是"其实没问题"的委婉说法，而是"得不出结论"，所以它**不会**静默通过：CLI 会把 `INCONCLUSIVE` 写到 stderr。
 
 > 退出码本身也是可依赖的：脚本用 `process.exitCode` 而不是 `process.exit()`。后者会立即终止进程，`finally` 里的 `pool.end()` 根本不会执行；Windows 上 libuv 随后在拆卸未关闭句柄时触发 `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c`，把一次正确的运行报成退出码 `0xC0000409`。对一个"契约就是退出码"的验证脚本，这是致命的。
+
+#### 一次比对必须是一个瞬间（ADR-0017）
+
+`divergent` 是这套检查唯一的报警信号（HTTP 500、`check-consistency` 退出码 1）。一个会**误报**的报警器比没有报警器更糟：读者会学会忽略它，而真正的不一致就藏在那次忽略里。
+
+这个误报真实发生过，而且是靠浏览器演练新加的"控制台不得有 error/warning"断言发现的：`--vote` 场景下 `/api/results` 返回 500，`verdict: "divergent"`、`onChainTotal 201 / indexedTotal 200`，而 **`unindexedBlocks: 0`、`pendingVotes: 0`**——检查以为索引已经追上，所以那笔它没看见的票既不在索引里，也没资格被"待补区间"补回来。
+
+三处读取各自独立地把健康的索引指认为故障：
+
+| 读取                       | 为什么会偏                                                | 实测                                                                   |
+| -------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `head`（`getBlockNumber`） | viem 默认缓存 4000ms，而 `results()` 走 `eth_call` 不缓存 | 同一客户端挖块前后 `406 → 406`（STALE）；`cacheTime: 0` 为 `407 → 408` |
+| `indexed` 与 `cursor`      | 两条独立语句，两秒一次的索引循环可在其中间提交            | 49 个非 200 响应，持续约 1.5 秒（缓存期内结论不变）                    |
+| 链上票数 与 日志枚举       | 一个读 `latest`、一个枚举到较早高度，同一笔票归属不一致   | 修复前 `checkConsistency` 的顺序即为问题本身                           |
+
+修复后，检查比较的是**一个瞬间**：先取索引的一个快照（`indexed` 与 `cursor` 同一事务，因为 `persistBatch` 本就同事务写入两者），再读链（因此 `head ≥ cursor`），链侧两项钉在同一高度。同一探针下非 200 响应 **49 → 0**。
 
 #### 三种索引状态下的 API 实测
 
@@ -494,6 +510,10 @@ TEST_ACCOUNT=0x… pnpm ui:drill --refund  # 额外真实取回押金（需 phas
 | 已投票且投票已结束（`--refund`，快照内） | `phase=Ended stakeOf=1000000000000000` | 退款按钮**可点**；点击后到达"已确认"，**从链上读回 `stakeOf=0`**，按钮随即禁用并显示"没有可取回的押金。"，押金行回落 `0 ETH` |
 
 每个场景都断言：**没有任何按钮停留在"提交中…"**，且每个按钮的可用性与链上状态逐一相符——UI 与链不会各说各话。截图见 `docs/screenshots/ui-vote-confirmed.png` 与 `docs/screenshots/ui-refund-confirmed.png`。
+
+**演练还看浏览器的控制台**：`Runtime.exceptionThrown`、`Runtime.consoleAPICalled` 与 `Log.entryAdded`（后者包含浏览器层面的失败请求，前两者看不到）。新增的断言是"页面不得抛出异常、不得记录 error/warning"，information 级别不算失败。这条断言不是形式主义——它加上去的当次运行就失败了，并因此找出了上面那条 `divergent` 误报（见 [M-6 的"一次比对必须是一个瞬间"](#一次比对必须是一个瞬间adr-0017)）。另一个由它发现的小缺陷：应用此前**没有图标**，浏览器每次访问都请求 `/favicon.ico` 并得到 404；现已补上 `web/src/app/icon.svg`。
+
+三种场景实测（均在快照内，跑完回退）：只读 **13** 项断言、`--vote` **17** 项、`--refund` **19** 项，退出码均为 0，且三者控制台消息数均为 **0**。
 
 演练跑在一次快照里，结束时回退；实测链头与索引都会自动回到基线（票 200、白名单 200、退款 0、阶段事件 1、游标 406、tally 67/67/66）。回退也**真实地触发了索引器的重组自愈**，且退款那次一次性撤销了**三类**投影行——实测 `votes 201→200`、`whitelist 201→200`、`refunds 1→0`、`phases 2→1`、`cursor 410→406`、`tally 68/67/66 → 67/67/66`。
 
@@ -701,13 +721,14 @@ CONFIRMATIONS=5
 │   │   │   ├── indexer/plan.ts    # 纯函数：分块与重组判定（可单测，无 IO）
 │   │   │   ├── indexer/decode.ts  # 事件解码
 │   │   │   ├── indexer/sync.ts    # 事务、游标、幂等
+│   │   │   ├── report.ts         # 链/索引比对与判定（同一瞬间，ADR-0017）
 │   │   │   ├── db/schema.ts       # 投影表结构（SQL 常量）
 │   │   │   ├── data.ts            # 链上/索引两侧的统一读取入口
 │   │   │   └── contracts/         # ABI 与部署地址（由 export-abi 生成）
 │   │   └── instrumentation.ts     # 启动后台索引循环
 │   ├── scripts/                   # migrate / drain / check-consistency / reorg-drill / refund-drill
-│   └── test/                      # 95 个单测，不需要链或数据库
-├── docs/aegis/                    # 设计规格、基线、15 条 ADR、实测校正记录
+│   └── test/                      # 100 个单测，不需要链或数据库
+├── docs/aegis/                    # 设计规格、基线、17 条 ADR、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）
 └── .github/workflows/ci.yml       # 5 条流水线
 ```

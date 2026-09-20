@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Voting">
+  <rect width="32" height="32" rx="7" fill="#0f172a" />
+  <path
+    d="M9 16.6l4.7 4.6L23 11.4"
+    fill="none"
+    stroke="#34d399"
+    stroke-width="3.4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

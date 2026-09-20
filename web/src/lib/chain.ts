@@ -20,7 +20,15 @@ export function buildChainClient(chainId: number, rpcUrl: string): PublicClient 
     rpcUrls: { default: { http: [rpcUrl] } },
   });
 
-  return createPublicClient({ chain, transport: http(rpcUrl) });
+  // `cacheTime: 0` because this client's whole job is to answer "what does the
+  // chain say right now", and viem otherwise caches `getBlockNumber` for 4000ms.
+  // Measured on a default client: 406 before mining a block, still 406 after it,
+  // 408 only once the 4s window expired; the same client with `cacheTime: 0`
+  // reported 407 then 408. A stale height is not a harmless display wart here —
+  // `checkConsistency` derives its unindexed range from it, so a vote mined inside
+  // the window landed in neither side of the comparison and the check reported
+  // `divergent` with HTTP 500 for as long as the cache lived. See ADR-0017.
+  return createPublicClient({ chain, transport: http(rpcUrl), cacheTime: 0 });
 }
 
 /** Adapts a viem client to the narrow interface the sync loop needs. */
@@ -40,11 +48,17 @@ export function asChainReader(client: PublicClient): ChainReader {
 export async function readOnChainTally(
   client: PublicClient,
   address: `0x${string}`,
+  blockNumber?: bigint,
 ): Promise<TallyResponse> {
   const [list, total] = (await client.readContract({
     address,
     abi: votingAbi,
     functionName: "results",
+    // Pinning matters for the consistency check: it also enumerates logs up to a
+    // height, and a tally read at "latest" while the logs stop at an earlier
+    // height would count a vote twice. A caller that pins both to one height
+    // compares two descriptions of the same instant.
+    ...(blockNumber === undefined ? {} : { blockNumber }),
   })) as readonly [readonly { id: bigint; metadataCID: string; voteCount: bigint }[], bigint];
 
   return {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import type { Pool, RowDataPacket } from "mysql2/promise";
+import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
 
 import { decodeLogs, type DecodedEvents } from "./decode";
 import { planNextRange, planReorgRewind } from "./plan";
@@ -62,8 +62,16 @@ interface CursorRow extends RowDataPacket {
   last_block: string;
 }
 
-/** Reads the persisted cursor, or null when nothing has been indexed yet. */
-export async function readCursor(pool: Pool): Promise<bigint | null> {
+/**
+ * Reads the persisted cursor, or null when nothing has been indexed yet.
+ *
+ * Accepts a connection as well as a pool: the consistency check reads the cursor
+ * and the tally it belongs to through one connection, so that the two describe
+ * the same committed moment rather than two moments a batch apart. `persistBatch`
+ * writes the events and the cursor in a single transaction, so any one snapshot
+ * holds a pair that agree.
+ */
+export async function readCursor(pool: Pool | PoolConnection): Promise<bigint | null> {
   const [rows] = await pool.query<CursorRow[]>("SELECT last_block FROM sync_cursor WHERE id = 1");
 
   const first = rows[0];

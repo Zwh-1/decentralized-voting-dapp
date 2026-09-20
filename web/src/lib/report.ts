@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import type { Pool, RowDataPacket } from "mysql2/promise";
+import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
 import type { PublicClient } from "viem";
 
 import { readOnChainTally } from "./chain";
@@ -33,7 +33,7 @@ interface TallyRow extends RowDataPacket {
 const DEFAULT_MAX_UNINDEXED_BLOCKS = 5_000;
 
 /** The indexed projection's answer to `results()`. */
-export async function readIndexedTally(pool: Pool): Promise<TallyResponse> {
+export async function readIndexedTally(pool: Pool | PoolConnection): Promise<TallyResponse> {
   const [rows] = await pool.query<TallyRow[]>(
     "SELECT candidate_id, metadata_cid, vote_count FROM candidate_tally ORDER BY candidate_id",
   );
@@ -147,11 +147,58 @@ export interface ConsistencyCheck {
 }
 
 /**
+ * The index's tally and the cursor it was committed with, read as one snapshot.
+ *
+ * These two values are meaningless apart. `candidate_tally` is a view over
+ * `votes`, and the cursor says how far the index has consumed the chain; the
+ * unindexed range is derived from the cursor and subtracted from the *difference*
+ * between the two tallies. If the indexer commits a batch between reading one and
+ * the other, the tally is the older of the two: a vote that arrived in that batch
+ * is absent from the tally *and* excluded from the range, so it is counted on
+ * neither side and the check calls a healthy index divergent. Measured on a real
+ * vote: `onChainTotal 201, indexedTotal 200, lastIndexedBlock 407,
+ * unindexedBlocks 0, pendingVotes 0, verdict divergent, HTTP 500`.
+ *
+ * A transaction is enough to close it because `persistBatch` advances the cursor
+ * in the same transaction that inserts the events. Under MySQL's default
+ * REPEATABLE READ the first read fixes the snapshot, so both reads here see one
+ * committed state. See ADR-0017.
+ */
+export async function readIndexSnapshot(
+  pool: Pool,
+): Promise<{ indexed: TallyResponse; cursor: bigint | null }> {
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const indexed = await readIndexedTally(connection);
+    const cursor = await readCursor(connection);
+
+    await connection.commit();
+
+    return { indexed, cursor };
+  } finally {
+    connection.release();
+  }
+}
+
+/**
  * The whole M-6 check: read both sides, account for the unindexed range, and
  * classify the result.
  *
  * Lives here rather than in the route so the UI and `check-consistency` cannot
  * drift into computing different verdicts from the same data.
+ *
+ * The order of the reads is part of the answer, not an implementation detail:
+ *
+ * 1. the index snapshot, so the tally and the cursor agree;
+ * 2. the chain *after* it, so the height is at least the cursor the index just
+ *    reported — the indexer can only have consumed blocks that exist;
+ * 3. the tally and the logs both pinned to that one height, so the chain side is a
+ *    single description of one instant rather than two a block apart.
+ *
+ * Each of those three was a separate way to accuse a healthy index. See ADR-0017.
  */
 export async function checkConsistency(input: {
   client: PublicClient;
@@ -159,10 +206,10 @@ export async function checkConsistency(input: {
   address: `0x${string}`;
   maxUnindexedBlocks?: number;
 }): Promise<ConsistencyCheck> {
-  const onChain = await readOnChainTally(input.client, input.address);
-  const indexed = await readIndexedTally(input.pool);
-  const cursor = await readCursor(input.pool);
+  const { indexed, cursor } = await readIndexSnapshot(input.pool);
+
   const head = await input.client.getBlockNumber();
+  const onChain = await readOnChainTally(input.client, input.address, head);
 
   const fromBlock = cursor === null ? 0n : cursor + 1n;
   const unindexedBlocks = head >= fromBlock ? Number(head - fromBlock + 1n) : 0;

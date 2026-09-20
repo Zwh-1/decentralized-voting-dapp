@@ -23,3 +23,4 @@ Entries are workspace records, not authoritative runtime decisions.
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0014-three-state-reads-and-independent-prefetch.md                    | ADR-0014 - 读取失败不得渲染成具体值，页面预取的三项读取各自结算                   |
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0015-lag-is-null-when-there-is-no-index-to-be-behind.md               | ADR-0015 - `lagBlocks` 只在滞后量成立时给出数字                                   |
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0016-deploy-preflight-checks-usability-and-never-echoes-a-value.md    | ADR-0016 - 部署前检查的是"可用"而不只是"存在"，且绝不回显值                       |
+| 2026-09-20 | adr      | docs/aegis/adr/ADR-0017-the-consistency-check-compares-one-instant.md                    | ADR-0017 - 一致性检查必须比较同一个瞬间（封存快照、单一高度、不缓存的高度）       |
