@@ -137,6 +137,10 @@ decentralized-voting-dapp/
 | 2026-09-20 | §3（第 30 行）、§6（第 96-101 行） | ADR 不存在；所有者为"尚未创建"的空壳                                                                      | §12 的 ADR 信号已落地为 9 条 accepted ADR（`docs/aegis/adr/ADR-0001` … `ADR-0009`）；§6 的每个所有者面均已存在并指向具体文件                                                                                                                             |
 | 2026-09-20 | §6.2（第 292-315 行）              | 游标为空时从区块 0 开始扫描                                                                               | 默认从**合约部署区块**开始：`deploy.ts` 把 `blockNumber` 记入 `contracts/deployments/<chainId>.json`，`export-abi` 带入前端注册表，`config.ts` 在没有 `START_BLOCK` 时取它。公共 RPC 裁剪历史，从 0 扫描会在 2000 个区块后永久卡死。见规格校正 10        |
 | 2026-09-20 | §4.3 M-3（前端）                   | 只做类型检查、生产构建、SSR 与 API 实测，未做浏览器端交互验证，投票按钮的可用性只检查阶段/连接/是否已投票 | 补上浏览器端演练 `pnpm ui:drill`，覆盖**投票**与**取回押金**两条写入路径：以链上 `isWhitelisted`/`stakeOf` 推导按钮可用性并给出理由，"进行态"改用 `receipt.isLoading`（`isPending` 对被禁用的查询恒为真，曾使按钮永远不可点）。见 ADR-0009 与规格校正 11 |
+| 2026-09-20 | §4.3 M-6（一致性）                 | "偏差 0/200"只在本机手动流程中验证过，CI 里没有任何步骤触碰链或索引器                                     | 新增 `indexer-e2e` 作业：起本地链、`seed:local`、建表、drain、比对一致性，并强制游标归零重放验证幂等（M-6b），以 `CONFIRMATIONS=0` 运行。同时把 `web` 作业误导性的注释改为准确边界。见 ADR-0010 与规格校正 12                                            |
+| 2026-09-20 | §14 校正 10（部署记录）            | `blockNumber` 只由 `deploy.ts` 写入；`seed-local.ts` 写同一文件却不写该字段，地址大小写也与提交版本不同   | 两个写入方统一 schema 与地址大小写（小写）；`seed-local.ts` 改用 `sendDeploymentTransaction` 取得创建区块。此前按 README 只跑 `seed:local` 会静默抹掉 `blockNumber`，使索引回退到区块 0。见 ADR-0010 与规格校正 12                                       |
+| 2026-09-20 | §4.3 M-0（abi-drift）              | 被字节级 diff 守护的生成产物里含不可复现字段 `deployedAt`（无任何消费方），本地播种后必然产生无语义漂移   | `export-abi` 不再发布该字段（JSON 记录中保留作溯源）。守护的有效性现在等价于"产物与提交一致"，验证方式为哈希不变。见 ADR-0010 与规格校正 12                                                                                                              |
+| 2026-09-20 | §15（测试计数）                    | 文档四处称索引器 41 个单测                                                                                | 实为 **57**（41 是 Solidity 数量）。逐文件：plan 18 / decode 9 / sync 9 / report 10 / client-api 7 / config 4                                                                                                                                            |
 
 **未受影响的 Non-negotiables**：§4.2 全部 4 条、§5.2 全部 5 条（链上唯一事实源、后端不持私钥、幂等消费、一人一票、事件与游标同事务）在重构后**逐条重新验证通过**（见 Spec §15 的 M-1 … M-6b）。
 
@@ -144,25 +148,27 @@ decentralized-voting-dapp/
 
 **权威面状态更新**（取代 §3）：
 
-| 面                    | 状态                                                                               |
-| --------------------- | ---------------------------------------------------------------------------------- |
-| Design Spec           | 已存在，已按实施校正（§14）与重构记录（§16）更新                                   |
-| ADR                   | 已存在：9 条 accepted ADR（`docs/aegis/adr/`），经 `aegis-workspace.py check` 通过 |
-| 代码与测试            | 已存在：106 个测试全部通过                                                         |
-| README（面向 GitHub） | 已存在                                                                             |
-| CI                    | 已存在：4 条流水线（contracts / abi-drift / web / format）                         |
+| 面                    | 状态                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| Design Spec           | 已存在，已按实施校正（§14）与重构记录（§16）更新                                    |
+| ADR                   | 已存在：10 条 accepted ADR（`docs/aegis/adr/`），经 `aegis-workspace.py check` 通过 |
+| 代码与测试            | 已存在：106 个测试全部通过                                                          |
+| README（面向 GitHub） | 已存在                                                                              |
+| CI                    | 已存在：5 条流水线（contracts / abi-drift / web / indexer-e2e / format）            |
 
 **权威缺口已收口**：ADR 目录已创建，§12 登记的 ADR 信号已全部落地为 accepted 决策，编号与主题对应如下。此前记录的"已由代码固化但未写成 ADR"的基线漂移随之关闭。
 
-| Spec §12 信号          | 对应 ADR                                                     |
-| ---------------------- | ------------------------------------------------------------ |
-| ADR-1 链上唯一事实源   | `ADR-0001-chain-is-the-only-source-of-truth.md`              |
-| ADR-2 Hardhat 3 而非 2 | `ADR-0002-hardhat-3-over-hardhat-2.md`                       |
-| ADR-3 明票上链         | `ADR-0003-public-ballots-no-vote-privacy.md`                 |
-| ADR-4 IPFS 仅存元数据  | `ADR-0004-ipfs-for-metadata-only.md`                         |
-| ADR-5 质押构造重入面   | `ADR-0005-stake-creates-a-real-reentrancy-surface.md`        |
-| —（重构新增）          | `ADR-0006-two-layers-and-optional-mysql.md`                  |
-| —（M-4 方法新增）      | `ADR-0007-property-tests-instead-of-the-invariant-runner.md` |
-| —（M-6 判定新增）      | `ADR-0008-reconcile-unindexed-range-before-verdict.md`       |
+| Spec §12 信号           | 对应 ADR                                                                    |
+| ----------------------- | --------------------------------------------------------------------------- |
+| ADR-1 链上唯一事实源    | `ADR-0001-chain-is-the-only-source-of-truth.md`                             |
+| ADR-2 Hardhat 3 而非 2  | `ADR-0002-hardhat-3-over-hardhat-2.md`                                      |
+| ADR-3 明票上链          | `ADR-0003-public-ballots-no-vote-privacy.md`                                |
+| ADR-4 IPFS 仅存元数据   | `ADR-0004-ipfs-for-metadata-only.md`                                        |
+| ADR-5 质押构造重入面    | `ADR-0005-stake-creates-a-real-reentrancy-surface.md`                       |
+| —（重构新增）           | `ADR-0006-two-layers-and-optional-mysql.md`                                 |
+| —（M-4 方法新增）       | `ADR-0007-property-tests-instead-of-the-invariant-runner.md`                |
+| —（M-6 判定新增）       | `ADR-0008-reconcile-unindexed-range-before-verdict.md`                      |
+| —（M-3 前端新增）       | `ADR-0009-ui-eligibility-from-chain-not-query-status.md`                    |
+| —（M-6 覆盖与产物新增） | `ADR-0010-one-record-one-schema-no-volatile-fields-in-guarded-artifacts.md` |
 
 注意 Spec §12 原表把"两层结构"记为 ADR-2 的主题之一，实际落地时它独立为 `ADR-0006`，而 `ADR-0002` 保持为"Hardhat 3 vs Hardhat 2"。上表为准。

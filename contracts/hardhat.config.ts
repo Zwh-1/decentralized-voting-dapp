@@ -54,11 +54,17 @@ export default defineConfig({
 
   networks: {
     // A `hardhat node` process, used for the end-to-end verification and for
-    // local development. No secrets involved.
+    // local development. No secrets involved, so this stays a plain env var
+    // rather than a Configuration Variable.
+    //
+    // `LOCALHOST_RPC_URL` exists so a second, throwaway chain can run on another
+    // port without disturbing one already in use — which is what lets the
+    // end-to-end verification (deploy, seed, index, compare) be rehearsed
+    // against a fresh chain while a working one keeps its state.
     localhost: {
       type: "http",
       chainType: "l1",
-      url: "http://127.0.0.1:8545",
+      url: process.env.LOCALHOST_RPC_URL ?? "http://127.0.0.1:8545",
     },
 
     // Secrets are never committed: resolved through Configuration Variables

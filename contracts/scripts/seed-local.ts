@@ -19,7 +19,9 @@ import { network } from "hardhat";
 import { createWalletClient, defineChain, http, parseEther, toHex, keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-const RPC_URL = process.env.RPC_URL ?? "http://127.0.0.1:8545";
+// `LOCALHOST_RPC_URL` first, so one variable retargets both the Hardhat network
+// this script borrows its funded accounts from and the transport it sends on.
+const RPC_URL = process.env.LOCALHOST_RPC_URL ?? process.env.RPC_URL ?? "http://127.0.0.1:8545";
 const VOTER_COUNT = Number(process.env.VOTER_COUNT ?? 200);
 const CANDIDATE_COUNT = 3;
 const STAKE = 1_000_000_000_000_000n; // 0.001 ether, must equal Voting.STAKE
@@ -40,8 +42,18 @@ const transport = http(RPC_URL);
 
 console.log(`Seeding chain ${chainId} at ${RPC_URL}`);
 
-const voting = await viem.deployContract("Voting", [deployer.account.address]);
-console.log(`Voting deployed at ${voting.address}`);
+// `sendDeploymentTransaction` rather than `deployContract`: the deployment
+// transaction's receipt is the only way to learn the creation block, and the
+// record written below has to carry it. `deploy.ts` writes the same file, and a
+// record without `blockNumber` makes the index start at block 0 — which strands
+// it permanently on any RPC that prunes history (see the design spec, 校正 10).
+const { contract: voting, deploymentTransaction } = await viem.sendDeploymentTransaction("Voting", [
+  deployer.account.address,
+]);
+const deploymentReceipt = await publicClient.waitForTransactionReceipt({
+  hash: deploymentTransaction.hash,
+});
+console.log(`Voting deployed at ${voting.address} in block ${deploymentReceipt.blockNumber}`);
 
 for (let i = 0; i < CANDIDATE_COUNT; i += 1) {
   await voting.write.addCandidate([`bafyseededcandidate${i}`]);
@@ -92,7 +104,9 @@ for (const voter of voters) {
 }
 
 const [candidates, total] = await voting.read.results();
-const blockNumber = await publicClient.getBlockNumber();
+// The chain head after seeding — deliberately not the same thing as the
+// deployment block recorded below.
+const headBlock = await publicClient.getBlockNumber();
 
 const outDir = path.resolve(import.meta.dirname, "..", "deployments");
 await mkdir(outDir, { recursive: true });
@@ -101,10 +115,15 @@ await writeFile(
   `${JSON.stringify(
     {
       chainId,
-      voting: voting.address,
-      owner: deployer.account.address,
-      deployer: deployer.account.address,
+      // Must match `deploy.ts` byte for byte, including case: this is the same
+      // record, and the generated registry derived from it is what CI diffs.
+      voting: voting.address.toLowerCase(),
+      owner: deployer.account.address.toLowerCase(),
+      deployer: deployer.account.address.toLowerCase(),
       deployedAt: new Date().toISOString(),
+      // Must match `deploy.ts`. This field is what tells the indexer where to
+      // begin; omitting it here silently sent the index back to block 0.
+      blockNumber: Number(deploymentReceipt.blockNumber),
     },
     null,
     2,
@@ -126,7 +145,7 @@ console.log(
         voteCount: Number(candidate.voteCount),
       })),
       expectedTally: tally,
-      headBlock: Number(blockNumber),
+      headBlock: Number(headBlock),
     },
     null,
     2,

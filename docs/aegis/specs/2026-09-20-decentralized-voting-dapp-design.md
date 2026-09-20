@@ -628,6 +628,30 @@ allowBuilds:
 
 已知边界：`endVoting` / `setWhitelist` 仍无浏览器端覆盖；注入的是模拟 provider，与真实钱包在账户切换、链切换、拒绝签名等交互上存在差异，这些路径未覆盖。
 
+### 校正 12：CI 从未验证过本项目最核心的那个结论，而部署记录有两个互相不一致的写入方
+
+本轮做的是第一次对 M0 交付物（CI）本身的审计，以及为它补上真正缺少的那一环。
+
+**其一，CI 里没有任何一步碰链或索引器。** `web` 作业的注释声称它 "exercises the indexed path so the schema and the dual-source comparison are covered"，但把整个 workflow 搜一遍 `drain|check-consistency|seed|deploy|hardhat node` —— 零命中。该作业里唯一接触数据库的步骤只是把 schema 应用两遍。也就是说，"索引一致性偏差 0/200"这个头号结论**没有任何 CI 覆盖**，而绿色徽章会被读成它已被验证。修正分两步：把该注释改成准确的边界说明，并新增 `indexer-e2e` 作业真正覆盖它。
+
+没有顺手塞一个无法运行的作业：GitHub Actions 在开发环境中跑不了，而 `deploy:local` 当时硬编码 8545，要在本机验证这套组合就得先拆掉那条被多项测量依赖的基线链。因此先解决第 5 条（端口可配置），使端到端流程能在**第二条链**上排练，再写作业。
+
+**其二，`deployments/<chainId>.json` 被两个脚本写入，而两者 schema 不一致。** `seed-local.ts` 不写 `blockNumber`——正是校正 10 为"索引从部署区块开始"引入的字段。按 README 的快速开始只跑 `pnpm seed:local`，记录就会丢掉它，`export-abi` 随之生成 `blockNumber: undefined`，`resolveStartBlock` 回退到 `undefined`。406 块的本地链看不出任何异常，缺陷只在换到真实链（公共 RPC 裁剪历史）时才发作。同一文件上还有第二处不一致：两个脚本都写校验和格式的地址，而仓库提交的是小写。
+
+**其三，`deployedAt` 混进了被字节级守护的产物。** `abi-drift` 用 `git diff --exit-code` 判定生成产物是否与提交一致，这要求产物可由可复现输入重建；而 `deployedAt` 是时间戳，任何一次本地播种都会改变它。一个会在语义无变化时报红的检查，最终会被当成噪音绕过。`git grep` 证实该字段在整个仓库中没有任何消费方。
+
+三处修正合并为 ADR-0010。可执行的验证是一个哈希：全新链上 `seed:local && export-abi`，生成文件 SHA256 与"由已提交记录生成"的完全一致。
+
+**新增能力**：`LOCALHOST_RPC_URL`（默认 8545）使本地链端口可配置，Hardhat 的 `localhost` 网络与 `seed-local.ts` 都认它。它的用途是让完整端到端流程能在第二条链上排练，而不必停掉正在使用的那条。
+
+**新增 CI 作业 `indexer-e2e`**：起本地链、`seed:local`、建表、`drain`、比对一致性，并把游标归零强制重放验证幂等（M-6b），以 `CONFIRMATIONS=0` 运行——整条链对整份索引，落后不算通过。它与 `web` 作业的边界互不掩盖：`web` 只验证 schema 对真实 MySQL 有效且迁移幂等，不碰链。
+
+实测（全新链 + 全新库，即该作业的等价序列）：`migrate` → 7 张表；`drain` → `seen 404 / inserted 404 / duplicatesIgnored 0`；`check-consistency` → `consistent`、`onChainTotal 200`、`indexedTotal 200`、`discrepancies []`；强制重放 → `seen 404 / inserted 0 / duplicatesIgnored 404`，投影仍为 `votes=200 cursor=406 tally=67,67,66`。同一流程在**另一条全新链**上复现出与基线逐项相同的投影，这也顺带证明了 `seed-local.ts` 完全确定性（同一地址、同一链头 406、同一 tally）。
+
+CI 的"后台起节点 + 就绪轮询"机制在 `bash` 下单独实测通过：后台进程拿到 PID、轮询首次即就绪、`curl` JSON-RPC 读回链头、进程可终止、失败日志捕获 71 行。
+
+顺带纠正四处测试计数错误：文档四处写"索引器 41 个单测"，实际是 **57**（41 是 Solidity 的数量，被抄到了索引器那一格）。逐文件核对：plan 18、decode 9、sync 9、report 10、client-api 7、config 4。
+
 ## 15. 实测结果
 
 | 指标         | 结果                                                                                                                                                                                                                                                                                                                                 |

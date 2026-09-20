@@ -93,9 +93,13 @@ const chainId = await publicClient.getChainId();
 
 const deployment = {
   chainId,
-  voting: voting.address,
-  owner,
-  deployer: deployer.account.address,
+  // Lower case on purpose. `seed-local.ts` writes the same file, and the
+  // generated registry in `web/src/lib/contracts` is guarded by a byte-exact
+  // diff in CI — so both writers must agree on one form, and this is the form
+  // the committed record already uses.
+  voting: voting.address.toLowerCase(),
+  owner: owner.toLowerCase(),
+  deployer: deployer.account.address.toLowerCase(),
   deployedAt: new Date().toISOString(),
   /**
    * The block the contract was created in.

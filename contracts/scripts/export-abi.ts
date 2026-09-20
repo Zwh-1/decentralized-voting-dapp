@@ -113,12 +113,17 @@ const records = await readDeployments();
 
 const entries = records
   .map(
+    // `deployedAt` is deliberately not published here. It is a timestamp, so any
+    // local `deploy:local` or `seed:local` changes it, and this file is guarded
+    // by a byte-exact diff in CI. Carrying a volatile field into that artifact
+    // meant a contributor saw the drift check fail with no semantic change —
+    // which teaches people to ignore it. Every field below is reproducible from
+    // the chain alone.
     (record) => `  ${record.chainId}: {
     chainId: ${record.chainId},
     voting: "${record.voting}",
     owner: "${record.owner}",
     deployer: "${record.deployer}",
-    deployedAt: "${record.deployedAt}",
     blockNumber: ${record.blockNumber ?? "undefined"},
   },`,
   )
@@ -130,7 +135,6 @@ export interface Deployment {
   voting: \`0x\${string}\`;
   owner: \`0x\${string}\`;
   deployer: \`0x\${string}\`;
-  deployedAt: string;
   /**
    * The block the contract was created in. The indexer starts here rather than
    * at block 0, because public RPCs prune old history and a scan from genesis

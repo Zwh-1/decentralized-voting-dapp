@@ -7,7 +7,6 @@ export interface Deployment {
   voting: `0x${string}`;
   owner: `0x${string}`;
   deployer: `0x${string}`;
-  deployedAt: string;
   /**
    * The block the contract was created in. The indexer starts here rather than
    * at block 0, because public RPCs prune old history and a scan from genesis
@@ -32,7 +31,6 @@ export const deployments: Record<number, Deployment> = {
     voting: "0x5fbdb2315678afecb367f032d93f642f64180aa3",
     owner: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
     deployer: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
-    deployedAt: "2026-09-20T03:13:04.650Z",
     blockNumber: 1,
   },
 };

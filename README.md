@@ -235,7 +235,31 @@ pnpm run indexer:check-consistency
 
 也就是说：**只给一个空数据库和一条可达的链，索引就能自行收敛到与链完全一致的状态**，不需要任何手工播种。
 
-> **CI 不覆盖这一步。** `.github/workflows/ci.yml` 的 `web` 作业只把 schema 应用到真实的 MySQL 服务（并跑两遍证明幂等），它**不起节点、不部署、不播种、不 drain、不跑一致性检查**。上面这套流程是手动步骤，CI 里没有任何替代品——这一点在 workflow 文件的注释里也写明了，以免有人把绿色徽章误读成"索引端到端已被验证"。
+把游标强制归零可以验证幂等（M-6b）——全部 404 行重走一遍插入路径，总数不得移动：
+
+```bash
+mysql -u root -p voting -e "UPDATE sync_cursor SET last_block = 0;"
+pnpm indexer:drain          # 期望：seen 404, inserted 0, duplicatesIgnored 404
+pnpm indexer:check-consistency
+```
+
+### 完整端到端：全新链 + 全新库
+
+上面那套复用的是已播种的链。把链也换成全新的一条，才是完整的复现——`seed-local.ts` 自己负责部署，因此一条命令就能造出整条链：
+
+```bash
+cd contracts && pnpm exec hardhat node --port 8546 &   # 另起一条链，不动正在用的那条
+export LOCALHOST_RPC_URL='http://127.0.0.1:8546'       # Hardhat 的 localhost 网络与 seed 都认它
+cd .. && pnpm run seed:local                           # 部署 + 200 票（约 10 秒）
+```
+
+实测结果与文档基线**逐项相同**：部署地址仍是确定性首地址 `0x5fbd…`、链头 `406`、tally `67/67/66`，随后空库 drain 仍是 `404/404/0`，一致性仍是 `200/200` 与 `[]`。这同时证明了 `seed-local.ts` 的完全确定性。
+
+`LOCALHOST_RPC_URL` 的存在就是为了这个场景：`deploy:local` 原先硬编码 8545，任何一次完整演练都得先拆掉正在使用的那条链。
+
+> **CI 覆盖这一步。** `.github/workflows/ci.yml` 的 `indexer-e2e` 作业在每次推送时重跑等价流程：起一个本地链、`pnpm seed:local`、建表、drain、比对一致性，并把游标归零强制重放一遍验证幂等（M-6b）。它用 `CONFIRMATIONS=0`，不给确认窗口留宽容——整条链对整份索引，落后不算通过。上面的手动流程用于在本机排查。
+
+> 另一个边界：`web` 作业只把 schema 应用到真实的 MySQL 服务（并跑两遍证明幂等），**它本身不碰链**。端到端由 `indexer-e2e` 负责，两者的失败原因因此互不掩盖。
 
 ### 全部测试与覆盖率
 
@@ -594,12 +618,14 @@ CONFIRMATIONS=5
 │   └── test/                      # 57 个单测，不需要链或数据库
 ├── docs/aegis/                    # 设计规格、基线、9 条 ADR、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）
-└── .github/workflows/ci.yml       # 4 条流水线
+└── .github/workflows/ci.yml       # 5 条流水线
 ```
 
 ### 关于 `web/src/lib/contracts` 的生成文件
 
 `voting-abi.ts`、`deployments.ts` 与 `index.ts` 由 `pnpm export-abi` 生成并**入库提交**，这样应用无需先编译合约即可类型检查与构建。CI 中的 `abi-drift` 作业会重新生成并要求 `git diff` 为空，因此这份副本不可能悄悄过期。
+
+这个字节级守护有一个前提：**产物只能包含可由链复现的字段**。所以 `deployments.ts` 刻意不发布 `deployedAt`——它是时间戳，任何一次本地部署都会改变它，留在里面会让这个检查在语义毫无变化时报红。想验证这一点，跑一遍就能看到：全新链上 `pnpm seed:local && pnpm export-abi`，`web/src/lib/contracts/` 下**没有任何改动**（`deployments/31337.json` 会因时间戳变化，那是部署溯源，不进产物）。
 
 之所以不单独建一个 `packages/shared` 包，是因为它的唯一内容是生成物；放进 `web/` 让仓库保持"合约层 + Next 层"两层的结构。
 

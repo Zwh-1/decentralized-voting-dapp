@@ -95,12 +95,10 @@ jobs:
       # locally, but no step in this job talks to a chain.
       #
       # Boundary: this job does NOT exercise the indexer end to end. Nothing here
-      # starts a node, deploys, seeds, drains or runs the consistency check, so
-      # the "0/200 deviation" claim is not re-verified by CI. Reproducing it from
-      # scratch is a documented manual procedure — see "从零复现索引" in the
-      # README. The unit tests below cover the indexer's decision logic and
-      # decoding with fakes, which is a different (and deliberately narrower)
-      # guarantee.
+      # starts a node, seeds, drains or runs the consistency check — the unit
+      # tests below cover the indexer's decision logic and decoding with fakes,
+      # which is a deliberately narrower guarantee. The end-to-end claim is
+      # covered by the separate `indexer-e2e` job, not by this one.
       DATABASE_URL: mysql://root:root@127.0.0.1:3306/voting
       RPC_URL: http://127.0.0.1:8545
       CHAIN_ID: "31337"
@@ -135,6 +133,89 @@ jobs:
 
       - name: Build
         run: pnpm run build:web
+
+  indexer-e2e:
+    name: Indexer end to end (fresh chain, fresh database)
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: voting
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      DATABASE_URL: mysql://root:root@127.0.0.1:3306/voting
+      RPC_URL: http://127.0.0.1:8545
+      CHAIN_ID: "31337"
+      # No confirmation window here: the job compares the whole chain against
+      # the whole index, so lag must not be excused.
+      CONFIRMATIONS: "0"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Apply the schema
+        run: pnpm run indexer:migrate
+
+      - name: Start a local chain and wait until it answers
+        run: |
+          pnpm --filter @voting/contracts exec hardhat node > /tmp/hardhat-node.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf -X POST -H 'Content-Type: application/json' \
+                --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+                http://127.0.0.1:8545 > /dev/null; then
+              echo "chain ready after $((i * 2))s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "the chain never came up:"
+          tail -40 /tmp/hardhat-node.log
+          exit 1
+
+      - name: Seed — deploys the contract and casts 200 votes
+        # One command, and it is self-contained: `seed-local.ts` deploys its own
+        # instance at the deterministic first address. Adding `deploy:local`
+        # before it would leave a second, empty contract on the chain.
+        run: pnpm run seed:local
+
+      - name: Index the chain
+        run: pnpm run indexer:drain
+
+      - name: The index must agree with the chain
+        # The project's headline claim. Until this job existed, nothing in CI
+        # checked it — see the boundary note on the `web` job above.
+        run: pnpm run indexer:check-consistency
+
+      - name: Replaying the whole chain must not double-count
+        # M-6b. Resetting the cursor forces all 404 event rows through the
+        # idempotent path again; the tally must not move.
+        run: |
+          mysql -h 127.0.0.1 -uroot -proot voting -e "UPDATE sync_cursor SET last_block = 0;"
+          pnpm run indexer:drain
+          pnpm run indexer:check-consistency
+
+      - name: Chain log
+        if: failure()
+        run: tail -100 /tmp/hardhat-node.log
 
   format:
     name: Formatting
