@@ -784,6 +784,23 @@ UI 侧的措辞暴露了同一个歧义：那一行的标签是"索引高度"，
 
 索引器单测 83 → **92**，总数 132 → **141**。
 
+### 校正 17：重组演练在应用运行时误报"回退路径坏了"
+
+本轮在收尾复测中跑 `pnpm indexer:reorg-drill`，得到自相矛盾的输出：`"status": "success"` 的交易、`"rewound": false`，外加 `error: "the indexer never reported a rewind after the head moved backwards"`，退出码 1。而同一脚本在同一台机器上此前多次通过。
+
+实测定位：`before` 为 head 406 / cursor 406；快照后一笔真实交易落到 407（游标随之 407、白名单 201）；`evm_revert` 把链头退回 406，`cursorBeforeRepair` 仍为 407——到这里一切正常。问题在于**应用的后台索引循环仍在运行**（`INDEXER_ENABLED` 默认真，两秒轮询一次）：它在演练读到 `cursorBeforeRepair: 407` 之后、演练自己调用 `drainToIdle()` 之前把重组修好了，于是演练看到"什么都没发生"。脚本注释与 README 都写了"先停掉应用"，但**忘记停时的失败模式没有被识别**，报错把原因归给了索引器。
+
+停掉应用后同一命令立刻恢复 `rewound: true, rewoundTo: 406, discardedFrom: 407`、白名单 201 → 200、票数 200，退出码 0——确认**不是回归**，而是竞态。
+
+**修正**：在 `drainToIdle()` 前后各读一次游标，识别"别的索引器抢先修复"这一情形并单独报出，明确写出该结论**不代表回退路径有问题**。竞态有两个落点（修复前 / 修复后），因此两处都要判：
+
+- `rewound === undefined` 之前：若游标已 ≤ 回退后的链头，说明已被他人修好；
+- `rewound === undefined` 之后：再观察一次，若游标已回落且链头仍 ≤ 回退后的链头，同样判定为他人抢先。
+
+实测：应用运行时连续**三次**都给出新诊断（`another indexer already repaired this reorg: the cursor is back at 406 while this drill expected to observe it at 407`）；停掉应用后演练通过，新检查无误报。README 的 M-6c 一节同时补上"忘记停会怎样、以及为什么那不是回退路径的问题"。
+
+这条与 ADR-0012 同源，但对象从**产品**扩大到**验证脚本**：一个验证脚本若无法区分"性质不成立"与"别人先满足了它"，就会产出假失败——而假失败会把读者送到错误的代码位置。
+
 ## 15. 实测结果
 
 | 指标         | 结果                                                                                                                                                                                                                                                                                                                                                                         |

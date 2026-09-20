@@ -429,6 +429,8 @@ pnpm indexer:reorg-drill     # 需要 hardhat node + 已排空的索引；先停
 
 > 两个实测踩到的坑，已写进脚本注释：`evm_snapshot` 返回的 id 是节点生命周期内递增的十六进制数（不是想当然的 `0x1`，传错只会安静地返回 `false`）；并且 `evm_revert` 返回 `true` 之后，`eth_blockNumber` **不会立刻**反映回退——只读一次就下结论，会误判成"重组从未发生"。
 
+> **忘了停应用会怎样**：应用的后台循环每两秒轮询一次，它会在演练自己动手之前把重组修好，演练于是观察不到 `rewound`。这**不是**回退路径坏了，但脚本原先只会报"the indexer never reported a rewind"，把读者引向 `planReorgRewind` 找一个并不存在的 bug。现在脚本会在修复前后各读一次游标，识别出这种情况并直接说明是**另一个索引器**抢先修复、以及该怎么处理（`another indexer already repaired this reorg … Stop it (or set INDEXER_ENABLED=false) and re-run`）。实测：应用运行时连续三次都给出这条诊断，停掉后演练立即恢复 `rewound: true`。
+
 ### M-6d：真实退款演练
 
 `refunds` 是投影里唯一一张种子数据填不满的表——播种结束时选票仍停在 Voting 阶段，无法退款，所以它一直是 0 行。`Refunded` 的解码有单测、插入语句也出现在同步测试里，但两者用的都是合成日志：**从来没有一个真实的 wei 数额从合约走到 `DECIMAL(38,0)`**。

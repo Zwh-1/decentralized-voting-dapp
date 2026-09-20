@@ -15,6 +15,11 @@
  * the chain back; a failure after that point has already consumed the snapshot.
  * Either way the report is printed, because a drill that fails silently is
  * worth nothing.
+ *
+ * **Stop the app first, or set `INDEXER_ENABLED=false`.** A running server's
+ * background loop repairs the reorg on its own within a poll interval, and this
+ * drill would then see nothing to repair. That case is detected and reported as
+ * such rather than as a broken rewind path.
  */
 import { createPublicClient, createWalletClient, defineChain, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -300,6 +305,24 @@ try {
   );
 
   // ---- 3. The indexer must notice and repair ---------------------------
+  //
+  // Only this process may repair it. An app left running with the background
+  // loop on polls every couple of seconds, so it can rewind between the read
+  // above and the `drainToIdle()` below; this drill then observes `rewound:
+  // false` and, before this check existed, reported "the indexer never reported
+  // a rewind" — blaming the indexer for a rewind it had already performed.
+  // Naming the real cause matters more than the diagnosis being rare: a reader
+  // who believes the rewind path is broken will go looking in `planReorgRewind`.
+  const cursorBeforeRepair = await observe();
+  if (cursorBeforeRepair.cursor !== null && cursorBeforeRepair.cursor <= revertedHead) {
+    throw new Error(
+      `another indexer already repaired this reorg: the cursor is back at ` +
+        `${cursorBeforeRepair.cursor} while this drill expected to observe it at ${cursorAfterGrowth}. ` +
+        `Something else is advancing the index — most likely a running \`next start\` with ` +
+        `INDEXER_ENABLED unset or true. Stop it (or set INDEXER_ENABLED=false) and re-run.`,
+    );
+  }
+
   const repairOutcomes = await drainToIdle();
   const rewound = repairOutcomes.find((outcome) => outcome.status === "rewound");
   report.repair = {
@@ -308,10 +331,25 @@ try {
     discardedFrom: rewound?.status === "rewound" ? rewound.discardedFrom.toString() : null,
   };
 
-  check(
-    rewound !== undefined,
-    "the indexer never reported a rewind after the head moved backwards",
-  );
+  if (rewound === undefined) {
+    // The other half of the race the pre-check above covers: a concurrent
+    // indexer can also repair between that read and this call. In both cases the
+    // rewind *did* happen, so reporting a broken rewind path would send the
+    // reader to `planReorgRewind` for a bug that is not there.
+    const settled = await observe();
+    const repairedByAnotherIndexer =
+      settled.cursor !== null && settled.cursor <= revertedHead && settled.head <= revertedHead;
+
+    throw new Error(
+      repairedByAnotherIndexer
+        ? `another indexer repaired this reorg while this drill was running: the cursor is ` +
+            `${settled.cursor}, already back to the reverted head ${revertedHead}, so this drill ` +
+            `never got to observe the rewind. Something else is advancing the index — most likely ` +
+            `a running \`next start\` with INDEXER_ENABLED unset or true. Stop it (or set ` +
+            `INDEXER_ENABLED=false) and re-run. The rewind path itself was not shown to be broken.`
+        : "the indexer never reported a rewind after the head moved backwards",
+    );
+  }
 
   const repaired = await observe();
   report.afterRepair = describe(repaired);
