@@ -111,6 +111,27 @@ function firstLine(text: string): string {
 }
 
 /**
+ * The sentence shown when a chain read fails.
+ *
+ * Written once and used by both branches that can produce it — a viem error and
+ * an unreachable-looking message — because the two must not drift apart: they
+ * describe the same condition, and a reader comparing them would see a difference
+ * that means nothing.
+ *
+ * It names BOTH variables now. With `RPC_URLS` configured, any number of
+ * endpoints may have been tried and failed, and a message pointing only at
+ * `RPC_URL` would send the operator to edit the one endpoint that was probably
+ * working. "Every configured endpoint" is the accurate description of what was
+ * attempted, and it is true whether one endpoint is configured or five.
+ */
+function rpcFailure(call: string): string {
+  return (
+    `链上读取失败${call}：所有已配置的 RPC 端点都未响应（连接失败或请求超时）。` +
+    "请检查 web/.env 里的 RPC_URL / RPC_URLS 是否可达；完整错误见服务端日志。"
+  );
+}
+
+/**
  * The sentence to show for a failed dependency read.
  *
  * Guarantees, in order of how much they cost when broken: the result never
@@ -128,7 +149,7 @@ export function describeFailure(error: unknown): string {
   // came from MySQL or from `fetch`, so the text alone would send the operator to
   // `RPC_URL` while the database is what is down.
   if (shape.fromChainClient) {
-    return `RPC 端点无响应${call}：请求超时或连接失败。请检查 web/.env 里的 RPC_URL 是否可达，或换一个端点；完整错误见服务端日志。`;
+    return rpcFailure(call);
   }
 
   if (shape.fromDatabase) {
@@ -136,7 +157,7 @@ export function describeFailure(error: unknown): string {
   }
 
   if (UNREACHABLE.test(shape.message)) {
-    return `RPC 端点无响应${call}：请求超时或连接失败。请检查 web/.env 里的 RPC_URL 是否可达，或换一个端点；完整错误见服务端日志。`;
+    return rpcFailure(call);
   }
 
   const generic = `未预期的失败（${shape.name}）。完整错误见服务端日志。`;

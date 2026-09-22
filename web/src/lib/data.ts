@@ -32,15 +32,20 @@ import type { Pool } from "mysql2/promise";
 import {
   asChainReader,
   buildChainClient,
+  readOnChainEligibility,
   readOnChainPoll,
   readOnChainPolls,
   readOnChainTally,
   readOnChainVoter,
+  type OnChainEligibility,
   type OnChainVoter,
 } from "./chain";
 import { isIndexEnabled, loadServerConfig, type ServerConfig } from "./config";
+import type { AuditEntry, AuditFilters, AuditKind } from "./audit";
+import { createReadCache, type ReadCache } from "./cache";
 import { migrate } from "./db/migrate";
 import { createPool } from "./db/pool";
+import { createRotatingChainReader, type RotatingChainReader } from "./indexer/endpoints";
 import { describeFailure } from "./failure";
 import { lagBlocks } from "./indexer/plan";
 import { readCursor, startSyncLoop, syncOnce, type Logger, type SyncOutcome } from "./indexer/sync";
@@ -66,7 +71,24 @@ import type { ChainTarget } from "./voting";
 interface ServerState {
   config: ServerConfig;
   client: ReturnType<typeof buildChainClient>;
+  /**
+   * The indexer's endpoint-rotating reader.
+   *
+   * A SINGLETON, and it has to be: rotation works by remembering how many times
+   * the active endpoint has failed in a row, so a reader rebuilt per call would
+   * forget that count every time and never rotate. Held here alongside `client`
+   * because both are per-process resources with the same lifetime.
+   */
+  indexerChain: RotatingChainReader;
   pool: Pool | null;
+  /**
+   * The cached poll list.
+   *
+   * Built lazily on first use rather than in `initialise`, because the TTL comes
+   * from config and building it eagerly would create a cache for a process that
+   * never lists polls.
+   */
+  pollList?: ReadCache<PollSummary[]>;
   ready: Promise<void>;
   syncLoopStarted: boolean;
   /**
@@ -85,11 +107,36 @@ interface GlobalWithState {
 
 function initialise(): ServerState {
   const config = loadServerConfig();
-  const client = buildChainClient(config.chainId, config.rpcUrl);
+  // The whole endpoint list, not just the first: the client is built once and
+  // lives for the process, so this is the single place where the configured
+  // fallbacks either reach every server-side read or reach none of them.
+  const client = buildChainClient(config.chainId, config.rpcUrls);
+
+  // The indexer gets one client PER endpoint rather than the fallback client
+  // above, because rotation needs to be able to talk to exactly one endpoint at a
+  // time and know which one failed. A fallback transport hides that: it swallows
+  // the individual failure and answers from whichever endpoint worked, so the
+  // indexer could never accumulate the evidence that one endpoint is down.
+  //
+  // `asChainReader` is reused rather than a second adapter being written, so the
+  // narrow read interface stays defined in one place (`indexer/sync.ts`).
+  const indexerChain = createRotatingChainReader({
+    endpoints: config.rpcUrls.map((url, position) => ({
+      // Position only — never the URL, which may carry an apiKey (ADR-0020).
+      label: `endpoint ${position + 1} of ${config.rpcUrls.length}`,
+      create: () => asChainReader(buildChainClient(config.chainId, url)),
+    })),
+    onRotate: ({ from, to, consecutiveFailures }) => {
+      console.warn(
+        `[indexer] ${consecutiveFailures} consecutive failures on ${from}; now reading from ${to}`,
+      );
+    },
+  });
 
   const state: ServerState = {
     config,
     client,
+    indexerChain,
     pool: null,
     ready: Promise.resolve(),
     syncLoopStarted: false,
@@ -229,10 +276,47 @@ export function getConfiguredTarget(): ChainTarget | null {
  * it would look like the poll does not exist, which is the one wrong answer this
  * function must not give. The fields that could not be read become the honest
  * placeholders, and `totalVotes` falls back to 0 with the poll still listed.
+ *
+ * The whole result is cached briefly — see `readPollList` below for why that is
+ * safe here and nowhere else.
  */
 export async function getPolls(): Promise<PollSummary[]> {
   const state = getServerState();
 
+  return readPollList(state);
+}
+
+/**
+ * The cached body of `getPolls`.
+ *
+ * Cached for `readCacheTtlMs` because this is the one server read whose cost
+ * grows with the number of polls: `allPolls()` plus one summary read per poll,
+ * repeated by the list page, the API route and the poll detail page within the
+ * same second. On a public RPC that is how an app reaches its own rate limit.
+ *
+ * Two things make the brief staleness acceptable, and both had to hold:
+ *
+ *   * the browser re-reads the same function through the wallet's chain and
+ *     replaces this answer as soon as it lands, so the cached copy is only ever
+ *     the FIRST PAINT. A poll created a second ago appears from the chain read
+ *     without waiting for the cache to expire;
+ *   * the TTL is far below the confirmation window, so nothing here can be
+ *     described as final while the app is still calling it unconfirmed.
+ *
+ * The consistency check does not go through this and must not: it compares one
+ * instant against the index (ADR-0017), and a cached head would make it accuse a
+ * healthy index of diverging. See `cache.ts`.
+ */
+async function readPollList(state: ServerState): Promise<PollSummary[]> {
+  state.pollList ??= createReadCache(() => readPollListUncached(state), {
+    ttlMs: state.config.readCacheTtlMs,
+  });
+
+  return state.pollList.get();
+}
+
+/** One uncached pass over the factory and its polls. */
+async function readPollListUncached(state: ServerState): Promise<PollSummary[]> {
   const addresses = await readOnChainPolls(state.client, state.config.factoryAddress);
 
   const summaries = await Promise.all(
@@ -359,6 +443,26 @@ export async function getResults(address: `0x${string}`): Promise<ResultsRespons
     indexed: check.indexed,
     lastIndexedBlock: check.lastIndexedBlock?.toString() ?? null,
   };
+}
+
+/**
+ * How many may vote in a poll, and the denominator turnout is measured against.
+ *
+ * Read from the chain, like every other figure that ends up in an export: a
+ * downloadable artefact is what a third party cites, and it must come from the
+ * same source the contract itself would give (ADR-0001).
+ *
+ * A failure PROPAGATES rather than degrading to null, because the caller decides
+ * what to do about it. The export route treats a failure as an error; a UI that
+ * only displays the figure can show "unavailable" without failing the page. A
+ * helper that swallowed it would make both callers unable to tell the difference
+ * between "not computable" and "the read broke".
+ */
+export async function getEligibility(address: `0x${string}`): Promise<OnChainEligibility> {
+  const state = getServerState();
+  await ready(state);
+
+  return readOnChainEligibility(state.client, address);
 }
 
 export async function getHealth(): Promise<HealthResponse> {
@@ -785,13 +889,221 @@ export async function getPollActivity(address: `0x${string}`): Promise<ActivityE
 }
 
 /**
+ * Every event the index has recorded, across every poll, newest first.
+ *
+ * ---------------------------------------------------------------------------
+ * Why this is a second query rather than a loop over `getPollActivity`
+ * ---------------------------------------------------------------------------
+ *
+ * `getPollActivity` takes one poll address. Looping it over the poll table to
+ * build a global feed would issue one query per poll and then sort the union in
+ * memory — the cost grows with the number of polls while the result stays the
+ * same size. The union below is the same six tables with the poll filter made
+ * OPTIONAL instead of required, so the database does the filtering and the
+ * ordering it already has indexes for.
+ *
+ * ---------------------------------------------------------------------------
+ * Why null rather than an empty list
+ * ---------------------------------------------------------------------------
+ *
+ * `null` means "this deployment has no index", which is a different statement
+ * from "nothing has happened". The route and the page both say so explicitly,
+ * because rendering an empty audit table would tell a reader that no one has ever
+ * done anything — a confident claim about data that was never read (ADR-0012).
+ *
+ * A query that fails after the index was reached also returns `null`, but records
+ * the failure so `/api/health` reports it. The caller cannot tell those two apart
+ * from the return value alone, and does not need to: both mean "the audit cannot
+ * be shown", and the distinction belongs on the health endpoint where the
+ * operator can act on it.
+ *
+ * Filters are applied in SQL, so a filtered request does not read the whole table.
+ * The `LIKE`-free design is deliberate: every filter is an equality on an indexed
+ * column or nothing at all.
+ */
+export async function getAuditActivity(filters: AuditFilters): Promise<AuditEntry[] | null> {
+  const state = getServerState();
+  await ready(state);
+
+  const pool = state.pool;
+
+  if (pool === null) {
+    return null;
+  }
+
+  // `?` placeholders for every value, so a filter can never become SQL. The
+  // clause TEXT is assembled from constants only; nothing a caller sends is
+  // interpolated into the statement.
+  const pollClause =
+    filters.poll === null ? null : { sql: "poll_address = ?", value: filters.poll };
+  const actorClause = filters.actor === null ? null : { sql: "voter = ?", value: filters.actor };
+
+  const include = (kind: AuditKind): boolean => filters.kind === null || filters.kind === kind;
+
+  const branches: string[] = [];
+  const branchValues: string[] = [];
+
+  /**
+   * Adds one branch, repeating the shared filter values for its placeholders.
+   *
+   * `condition` is a trusted literal (never caller input) folded into the SAME
+   * `WHERE` as the bound clauses. A second `WHERE` would be a syntax error, and
+   * building the clause text here rather than appending to it is what keeps the
+   * placeholder order equal to the collected values.
+   *
+   * `hasVoter` is not cosmetic. `phase_events` records a transition and names no
+   * address, so it has no `voter` column — emitting the actor clause for it would
+   * be a SQL error, and silently dropping the clause would return phase rows for a
+   * filter that asked for one address. A phase event cannot match an actor filter,
+   * so the branch is left out entirely.
+   */
+  function branch(sql: string, hasVoter: boolean, condition: string | null = null): void {
+    if (actorClause !== null && !hasVoter) return;
+
+    const clauses: string[] = [];
+    const bound: string[] = [];
+
+    if (condition !== null) clauses.push(condition);
+
+    if (pollClause !== null) {
+      clauses.push(pollClause.sql);
+      bound.push(pollClause.value);
+    }
+
+    if (actorClause !== null) {
+      clauses.push(actorClause.sql);
+      bound.push(actorClause.value);
+    }
+
+    const where = clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`;
+
+    branches.push(`${sql}${where}`);
+    branchValues.push(...bound);
+  }
+
+  if (include("cast")) {
+    branch(
+      `SELECT 'cast' AS kind, poll_address, voter AS actor, option_id, NULL AS allowed,
+              NULL AS from_phase, NULL AS to_phase, NULL AS amount_wei,
+              block_number, tx_hash
+         FROM votes`,
+      true,
+      "event_type = 'cast'",
+    );
+  }
+
+  if (include("changed")) {
+    branch(
+      `SELECT 'changed' AS kind, poll_address, voter AS actor, option_id, NULL AS allowed,
+              NULL AS from_phase, NULL AS to_phase, NULL AS amount_wei,
+              block_number, tx_hash
+         FROM votes`,
+      true,
+      "event_type = 'changed'",
+    );
+  }
+
+  if (include("withdrawn")) {
+    branch(
+      `SELECT 'withdrawn' AS kind, poll_address, voter AS actor, NULL AS option_id,
+              NULL AS allowed, NULL AS from_phase, NULL AS to_phase, NULL AS amount_wei,
+              block_number, tx_hash
+         FROM votes`,
+      true,
+      "event_type = 'withdrawn'",
+    );
+  }
+
+  if (include("refunded")) {
+    branch(
+      `SELECT 'refunded' AS kind, poll_address, voter AS actor, NULL AS option_id,
+              NULL AS allowed, NULL AS from_phase, NULL AS to_phase, amount_wei,
+              block_number, tx_hash
+         FROM refunds`,
+      true,
+    );
+  }
+
+  if (include("whitelist")) {
+    branch(
+      `SELECT 'whitelist' AS kind, poll_address, voter AS actor, NULL AS option_id,
+              allowed, NULL AS from_phase, NULL AS to_phase, NULL AS amount_wei,
+              block_number, tx_hash
+         FROM whitelist_events`,
+      true,
+    );
+  }
+
+  if (include("phase")) {
+    branch(
+      `SELECT 'phase' AS kind, poll_address, NULL AS actor, NULL AS option_id,
+              NULL AS allowed, from_phase, to_phase, NULL AS amount_wei,
+              block_number, tx_hash
+         FROM phase_events`,
+      false,
+    );
+  }
+
+  // Nothing to ask for: either the kind filter matched no branch, or an actor
+  // filter excluded the only branch. Issuing an empty UNION would be a syntax
+  // error rather than an empty result.
+  if (branches.length === 0) {
+    recordIndexSuccess(state);
+
+    return [];
+  }
+
+  try {
+    const [rows] = await pool.query<
+      ({
+        kind: ActivityEntry["kind"];
+        poll_address: string;
+        actor: string | null;
+        option_id: number | null;
+        allowed: number | null;
+        from_phase: number | null;
+        to_phase: number | null;
+        amount_wei: string | null;
+        block_number: string;
+        tx_hash: string;
+      } & import("mysql2/promise").RowDataPacket)[]
+    >(
+      // Ordered by the first SELECT's output names, which is what MySQL allows
+      // after a UNION. `orderActivity` is applied below regardless — this only
+      // stops the database from returning the union in an arbitrary order.
+      `${branches.join(" UNION ALL ")} ORDER BY block_number DESC, tx_hash DESC`,
+      branchValues,
+    );
+
+    recordIndexSuccess(state);
+
+    return orderActivity(
+      withoutChangeEcho(
+        rows.map((row) => ({
+          kind: row.kind,
+          pollAddress: row.poll_address,
+          blockNumber: row.block_number,
+          txHash: row.tx_hash,
+          actor: row.actor ?? undefined,
+          optionId: row.option_id === null || row.option_id === 0 ? null : Number(row.option_id),
+          detail: activityDetail(row),
+        })),
+      ),
+    ) as AuditEntry[];
+  } catch (error) {
+    recordIndexFailure(state, error);
+
+    return null;
+  }
+}
+
+/**
  * The extra column a row shows, per kind.
  *
  * Built here rather than in the component so the "0 means withdrawn" and
  * "which phase did it move to" rules live beside the query that produced them,
  * instead of being re-derived from raw columns in the view layer.
- */
-function activityDetail(row: {
+ */ function activityDetail(row: {
   kind: ActivityEntry["kind"];
   allowed: number | null;
   from_phase: number | null;
@@ -858,7 +1170,11 @@ export async function runSyncOnce(): Promise<SyncResponse> {
 
   const outcome: SyncOutcome = await syncOnce({
     pool: state.pool,
-    chain: asChainReader(state.client),
+    // The rotating reader, not `asChainReader(state.client)`: this path must
+    // share the SAME failure counters as the background loop, or the on-demand
+    // route would reset the evidence the loop accumulated and neither would ever
+    // reach the threshold on an endpoint that fails intermittently.
+    chain: state.indexerChain.reader,
     factoryAddress: state.config.factoryAddress,
     confirmations: state.config.confirmations,
     chunkBlocks: state.config.chunkBlocks,
@@ -912,7 +1228,9 @@ export async function ensureSyncLoop(): Promise<void> {
   // so the two entry points cannot drift apart.
   const handle = startSyncLoop({
     pool,
-    chain: asChainReader(state.client),
+    // Same rotating reader as `runSyncOnce`, so both paths share one set of
+    // failure counters and one notion of which endpoint is current.
+    chain: state.indexerChain.reader,
     factoryAddress: state.config.factoryAddress,
     confirmations: state.config.confirmations,
     chunkBlocks: state.config.chunkBlocks,

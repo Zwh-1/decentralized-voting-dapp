@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+import Link from "next/link";
+
 import { CreatePollForm } from "@/components/CreatePollForm";
 import { PageShell } from "@/components/PageShell";
 import { PollList } from "@/components/PollList";
@@ -84,6 +86,23 @@ export default async function Home() {
         initialAddresses={addresses}
         configuredTarget={configuredTarget}
       />
+
+      {/*
+        The audit view is linked from here rather than added to the navigation.
+
+        It is a reviewer's tool, not a reader's: it lists raw indexer events across
+        every poll. Putting it beside "create" would suggest it is part of the
+        normal voting loop, and a reader who opened it looking for a poll would
+        find a table of log rows instead. It is reachable, and it states what it
+        reads, which is the part that matters.
+      */}
+      <p className="mt-8 text-xs text-slate-500">
+        需要核对链上事件与索引记录？打开{" "}
+        <Link href="/audit" className="underline">
+          审计视图
+        </Link>
+        ，可按事件类型、投票合约或地址过滤。该页读取索引，不读取链上实时状态。
+      </p>
     </PageShell>
   );
 }

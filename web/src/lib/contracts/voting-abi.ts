@@ -2547,6 +2547,19 @@ export const pollAbi = [
   },
   {
     "inputs": [],
+    "name": "whitelistedCount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "count",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "winningOption",
     "outputs": [
       {

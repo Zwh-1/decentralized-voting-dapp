@@ -6,15 +6,17 @@
 
 ## Progress
 
-| 批次 | 任务                                        | 状态   | 证据                                                                         |
-| ---- | ------------------------------------------- | ------ | ---------------------------------------------------------------------------- |
-| 一   | Task 1-2 多选 + 加权                        | 完成   | `PollMultiSelect.t.sol`、`PollMechanisms.t.sol`；commit `02ef5a5`            |
-| 一   | Task 3 委托投票                             | 完成   | `PollDelegation.t.sol`（21 测试）；ADR-0035；commit `367ef19`                |
-| 一   | Task 4 commit-reveal                        | 完成   | `PollCommitReveal.t.sol`；`commit-reveal-drill` 21/21；commit `dcecef5`      |
-| 一   | 机制矩阵属性测试                            | 完成   | `PollMechanismMatrix.t.sol`（6 机制 × 200 轮，突变验证）                     |
-| 二   | Task 5-7 quorum/timelock/execute + 创建准入 | 完成   | `PollExecutor.t.sol`（43 测试）；ADR-0032/0033；commit `79ed547` + `3767c59` |
-| 三   | Task 8-10 数据与接口层                      | 未开始 | —                                                                            |
-| 四   | Task 11-13 前端体验                         | 未开始 | —                                                                            |
+| 批次 | 任务                                        | 状态   | 证据                                                                           |
+| ---- | ------------------------------------------- | ------ | ------------------------------------------------------------------------------ |
+| 一   | Task 1-2 多选 + 加权                        | 完成   | `PollMultiSelect.t.sol`、`PollMechanisms.t.sol`；commit `02ef5a5`              |
+| 一   | Task 3 委托投票                             | 完成   | `PollDelegation.t.sol`（21 测试）；ADR-0035；commit `367ef19`                  |
+| 一   | Task 4 commit-reveal                        | 完成   | `PollCommitReveal.t.sol`；`commit-reveal-drill` 21/21；commit `dcecef5`        |
+| 一   | 机制矩阵属性测试                            | 完成   | `PollMechanismMatrix.t.sol`（6 机制 × 200 轮，突变验证）                       |
+| 二   | Task 5-7 quorum/timelock/execute + 创建准入 | 完成   | `PollExecutor.t.sol`（43 测试）；ADR-0032/0033；commit `79ed547` + `3767c59`   |
+| 三   | Task 8 RPC 多端点容错                       | 完成   | `rpc-endpoints.ts` + `endpoints.ts`（22 测试）；ADR-0036                       |
+| 三   | Task 9 分页/搜索/投票率                     | 完成   | `pagination.ts`（50 测试）；`whitelistedCount()`；ADR-0037/0038                |
+| 三   | Task 10 审计视图 + 读缓存                   | 完成   | `/audit` + `/api/audit`；`audit.ts`（20 测试）+ `cache.ts`（9 测试）；ADR-0039 |
+| 四   | Task 11-13 前端体验                         | 未开始 | —                                                                              |
 
 **批一验收结果**（2026-09-22）：
 
@@ -29,6 +31,19 @@
 3. `sync.ts` 的「是否已投过票」规则与测试 FakePool 各写一份，导致真代码错误时测试仍全绿。
 
 因此批二起的默认做法是：**派生值一律从单一来源生成，不手写第二份**。
+
+**批三验收结果**（2026-09-22）：
+
+- `pnpm test`：350 合约（287 solidity + 63 nodejs）+ 499 web，全通过；`pnpm typecheck`、`pnpm format:check`、`pnpm build:web` 均干净。
+- `pnpm build:web` 输出确认 `/audit` 与 `/api/audit` 已注册为动态路由。
+- 批三新增测试 89 个：`pagination.test.ts` 50、`audit.test.ts` 20、`cache.test.ts` 9、`endpoints.test.ts` 12、`rpc-endpoints.test.ts` 10（后两者为 Task 8 期间新增）。
+
+**批三纠正的两处计划偏离**：
+
+1. **Task 9 原文要求用 `whitelistedCount` 替换硬编码 `eligible = null`**。这在加权投票下会让投票率超过 100%：该函数数的是**地址**，而分子 `totalVotes` 累加的是**票权**。批二已引入的 `frozenEligiblePower`（创建时冻结的票权总和）才是正确分母。落地为：`whitelistedCount()` 作为**活地址数**新增（Setup 与审计需要它），投票率/quorum/导出用 `frozenEligiblePower`。详见 ADR-0037。
+2. **Task 10 的"缓存"原表述为调整页面级 `revalidate`**。Next.js 的 `revalidate` 在构建期求值、无法读运行期环境变量，且缓存整个页面渲染结果会把一致性标记一起冻住——而一致性检查必须比较同一瞬间（ADR-0017）。改为在 `getPolls()` 上做读穿缓存，一致性检查与健康检查**不经过**它。详见 ADR-0039。
+
+**批三期间的一次真实返工**：`web/test/pagination.test.ts` 曾用 PowerShell 的 `Set-Content` 重写，被按 GBK 重新编码后成为非法 UTF-8（`read` 工具拒绝读取，字节 8789 处出现截断的 `E2 80` 序列）。改用文件写入工具整体重写。教训：源码文件一律走文件工具，不用 shell 重定向。
 
 ## 0. Aegis Visibility
 

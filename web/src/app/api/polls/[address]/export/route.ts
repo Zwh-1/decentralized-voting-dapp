@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { NextResponse } from "next/server";
 
-import { getPoll, getResults } from "@/lib/data";
+import { getEligibility, getPoll, getResults } from "@/lib/data";
 import { describeFailure } from "@/lib/failure";
 import { resultCsv, resultRows, turnout } from "@/lib/poll-report";
 import { phaseLabel } from "@/lib/voting";
@@ -55,9 +55,14 @@ export async function GET(request: Request, context: { params: Promise<{ address
   try {
     const poll = address as `0x${string}`;
     // The summary carries the question, the creator and the deadline; `results`
-    // carries the tally and the chain-versus-index comparison. Both are needed
-    // and neither implies the other.
-    const [summary, results] = await Promise.all([getPoll(poll), getResults(poll)]);
+    // carries the tally and the chain-versus-index comparison; `eligibility`
+    // carries the denominator turnout needs. All three are needed and none
+    // implies another.
+    const [summary, results, eligibility] = await Promise.all([
+      getPoll(poll),
+      getResults(poll),
+      getEligibility(poll),
+    ]);
 
     const rows = resultRows(
       results.onChain.options.map((option) => ({
@@ -71,15 +76,21 @@ export async function GET(request: Request, context: { params: Promise<{ address
     );
 
     /*
-      Turnout is reported only when a denominator exists.
+      Turnout is computed against `eligiblePower`, NOT against the address count.
 
-      There is no contract getter for "how many addresses are whitelisted" —
-      the list lives in a mapping, and counting it would mean replaying every
-      `WhitelistUpdated` event. So this is `null`, which the export writes as
-      null rather than 0: "no one voted" and "this cannot be computed" are
-      different statements, and only one of them is true.
+      `eligiblePower` is the denominator the contract itself uses: it is frozen at
+      `startPoll`, so it cannot move while votes accumulate, and it is the same
+      quantity the quorum is a fraction of. Using the live address count instead
+      would let an address admitted during voting lower the reported turnout with
+      no vote withdrawn.
+
+      It is still `null` in two cases, and both are genuine rather than a
+      placeholder: an open poll has no enumerable electorate, and a poll still in
+      `Setup` has not frozen its denominator yet. `turnout()` writes null for
+      those rather than 0, because "no one voted" and "this cannot be computed"
+      are different statements and only one of them is true.
     */
-    const eligible: number | null = null;
+    const eligible = eligibility.eligiblePower === null ? null : Number(eligibility.eligiblePower);
     const base = `${address}-result`;
 
     if (format === "json") {
@@ -94,7 +105,17 @@ export async function GET(request: Request, context: { params: Promise<{ address
         },
         totals: {
           votes: results.onChainTotal,
-          eligibleVoters: eligible,
+          /**
+           * How many addresses were admitted. A live count, so it can differ
+           * from `eligiblePower` — and on a weighted poll it differs in kind.
+           */
+          eligibleVoters: eligibility.eligibleVoters,
+          /**
+           * The frozen denominator `turnoutPercent` was divided by. Exported
+           * alongside the percentage so a reader can redo the division and see
+           * which of the two numbers produced it.
+           */
+          eligiblePower: eligibility.eligiblePower?.toString() ?? null,
           turnoutPercent: turnout(results.onChainTotal, eligible),
         },
         options: rows,

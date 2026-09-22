@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { createPublicClient, defineChain, http, type PublicClient } from "viem";
+import { createPublicClient, defineChain, fallback, http, type PublicClient } from "viem";
 
 import { factoryAbi, pollAbi } from "./contracts";
 import type { ChainReader } from "./indexer/sync";
@@ -12,13 +12,50 @@ import type { TallyResponse } from "./types";
  * same code works against a local Hardhat node (31337) and Sepolia (11155111)
  * with no branching.
  */
-export function buildChainClient(chainId: number, rpcUrl: string): PublicClient {
+export function buildChainClient(
+  chainId: number,
+  rpcUrl: string | readonly string[],
+): PublicClient {
+  // A bare string is accepted so that every existing caller — and every test that
+  // passes one endpoint — keeps working. The list form is what the config
+  // produces, and the two must describe the same client or the fallback would
+  // only apply to some call sites.
+  const urls = typeof rpcUrl === "string" ? [rpcUrl] : [...rpcUrl];
+
+  if (urls.length === 0) {
+    throw new Error("buildChainClient needs at least one RPC endpoint");
+  }
+
   const chain = defineChain({
     id: chainId,
     name: `chain-${chainId}`,
     nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-    rpcUrls: { default: { http: [rpcUrl] } },
+    rpcUrls: { default: { http: urls } },
   });
+
+  // More than one endpoint means the reads must survive one of them being down,
+  // and `fallback` is what provides that: it tries each transport in order and
+  // moves on when one throws.
+  //
+  // `rank: false` — the default — ranks transports by latency and reorders them.
+  // That is wrong here. The order is an operator's statement of preference (a paid
+  // primary, a public backup), and silently promoting whichever node answered a
+  // ping fastest would send production traffic to the free endpoint. It also makes
+  // failures harder to reason about, since which node answered would change
+  // between requests.
+  //
+  // `retryCount: 0` because `fallback` retries a failing transport on its own
+  // schedule before moving to the next one; a retry here would multiply the wait
+  // before the backup is reached, which is the exact delay the fallback exists to
+  // avoid. A single endpoint keeps viem's own defaults, so nothing about the
+  // one-endpoint behaviour changes.
+  const transport =
+    urls.length === 1
+      ? http(urls[0])
+      : fallback(
+          urls.map((url) => http(url, { retryCount: 0 })),
+          { rank: false },
+        );
 
   // `cacheTime: 0` because this client's whole job is to answer "what does the
   // chain say right now", and viem otherwise caches `getBlockNumber` for 4000ms.
@@ -28,7 +65,7 @@ export function buildChainClient(chainId: number, rpcUrl: string): PublicClient 
   // `checkConsistency` derives its unindexed range from it, so a vote mined inside
   // the window landed in neither side of the comparison and the check reported
   // `divergent` with HTTP 500 for as long as the cache lived. See ADR-0017.
-  return createPublicClient({ chain, transport: http(rpcUrl), cacheTime: 0 });
+  return createPublicClient({ chain, transport, cacheTime: 0 });
 }
 
 /** Adapts a viem client to the narrow interface the sync loop needs. */
@@ -376,4 +413,61 @@ export async function readExecutionTargets(
   });
 
   return targets as readonly `0x${string}`[];
+}
+
+/**
+ * How many may vote, and how much voting power they hold.
+ *
+ * ---------------------------------------------------------------------------
+ * Why two numbers rather than one
+ * ---------------------------------------------------------------------------
+ *
+ * They answer different questions and are both needed:
+ *
+ *   * `eligibleVoters` is a COUNT of admitted addresses. It is what a reader
+ *     means by "how many people could vote here", and it is the same figure under
+ *     every mechanism.
+ *   * `eligiblePower` is the frozen denominator the quorum and the turnout are
+ *     measured against. On an equal-weight poll it equals the count; on a
+ *     weighted poll it is the sum of weights, and the two differ in kind.
+ *
+ * Turnout MUST use `eligiblePower`. Dividing a weighted tally by an address
+ * count would report a turnout above 100% on any poll where a weight exceeds one.
+ *
+ * ---------------------------------------------------------------------------
+ * Why power is zero in two different situations
+ * ---------------------------------------------------------------------------
+ *
+ * `frozenEligiblePower` is set at `startPoll`, so it is 0 while the poll is still
+ * in `Setup`. And an open poll has no enumerable electorate, so it stays 0
+ * forever — a quorum on an open poll is refused at creation for exactly this
+ * reason. The caller cannot distinguish those two from the number alone, which is
+ * why it is returned as null-when-unusable rather than as a bare 0: "no one is
+ * eligible" and "this cannot be computed yet" are different statements (ADR-0011).
+ */
+export interface OnChainEligibility {
+  /** Admitted addresses right now. `null` when the read failed. */
+  eligibleVoters: number | null;
+  /** The frozen turnout/quorum denominator, or `null` when there is not one. */
+  eligiblePower: bigint | null;
+}
+
+/** Reads a poll's electorate, live count and frozen denominator together. */
+export async function readOnChainEligibility(
+  client: PublicClient,
+  address: `0x${string}`,
+): Promise<OnChainEligibility> {
+  const [count, power] = await Promise.all([
+    client.readContract({ address, abi: pollAbi, functionName: "whitelistedCount" }),
+    client.readContract({ address, abi: pollAbi, functionName: "frozenEligiblePower" }),
+  ]);
+
+  const frozen = power as bigint;
+
+  return {
+    eligibleVoters: Number(count as bigint),
+    // Zero means "not started, or no enumerable electorate" — a denominator that
+    // would divide by zero, not a denominator of zero. Reported as absent.
+    eligiblePower: frozen === 0n ? null : frozen,
+  };
 }

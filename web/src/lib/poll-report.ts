@@ -211,11 +211,18 @@ export function resultCsv(input: {
 /**
  * The share of the electorate that has voted.
  *
- * `eligible` is optional because it is not always knowable: an open poll has no
- * list to count, and on a whitelisted poll the count is a series of events rather
- * than a number the contract exposes. When it is unknown this returns `null`
- * rather than a percentage of the wrong denominator — "0% turnout" and "we cannot
- * compute turnout" are different statements and only one of them is true.
+ * `eligible` is the DENOMINATOR — the frozen eligible voting power — and not the
+ * number of admitted addresses. The two are equal on an equal-weight poll and
+ * differ everywhere else: on a weighted poll the tally is a sum of weights, so
+ * dividing it by an address count would report a turnout above 100% as soon as
+ * any weight exceeded one.
+ *
+ * It is optional because it is genuinely not always knowable. An open poll has no
+ * enumerable electorate, and a poll still in `Setup` has not frozen its
+ * denominator yet — a quorum on an open poll is refused at creation for exactly
+ * that reason. When it is unknown this returns `null` rather than a percentage of
+ * the wrong denominator: "0% turnout" and "we cannot compute turnout" are
+ * different statements and only one of them is true (ADR-0011).
  */
 export function turnout(votes: number, eligible: number | null | undefined): number | null {
   if (eligible === null || eligible === undefined || !Number.isFinite(eligible) || eligible <= 0) {

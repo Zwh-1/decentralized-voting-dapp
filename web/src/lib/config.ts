@@ -11,9 +11,25 @@
  * make the whole app unusable for anyone who just wants to look at a local chain.
  */
 import { getDeployment } from "./contracts";
+import { resolveRpcEndpoints } from "./rpc-endpoints";
 
 export interface ServerConfig {
+  /**
+   * The endpoint reads are tried FIRST.
+   *
+   * Kept as a single value rather than replaced by `rpcUrls` because it is the
+   * one the failure messages name, the one the indexer logs, and the one an
+   * operator sets when they have exactly one node. `rpcUrls[0]` is always equal
+   * to it, so anything holding a single URL keeps working unchanged.
+   */
   rpcUrl: string;
+  /**
+   * Every configured endpoint, in the order they should be tried.
+   *
+   * Never empty: `rpcUrl` is always the first entry, so callers can iterate this
+   * without a fallback branch of their own.
+   */
+  rpcUrls: readonly string[];
   chainId: number;
   factoryAddress: `0x${string}`;
   /** null when no database is configured; the index is then disabled. */
@@ -23,6 +39,21 @@ export interface ServerConfig {
   pollIntervalMs: number;
   indexerEnabled: boolean;
   startBlock: bigint | undefined;
+  /**
+   * How long a cached poll-list read stays usable, in milliseconds. 0 disables
+   * caching but keeps the concurrent-read collapsing.
+   *
+   * Defaults to two seconds. The bound is not arbitrary: it must stay far below
+   * the confirmation window, which is what "final" means on this app. At 5
+   * confirmations and a 12s block time that window is about a minute, so a 2s
+   * cache can never show a tally older than a second or two while the app is
+   * claiming a block is unconfirmed. It is still long enough to collapse the
+   * duplicate reads a single page mount produces.
+   *
+   * It does NOT apply to the chain-versus-index comparison or to `/api/health`.
+   * See `cache.ts`.
+   */
+  readCacheTtlMs: number;
 }
 
 const DEFAULT_CHAIN_ID = 31337;
@@ -53,6 +84,29 @@ function integer(env: NodeJS.ProcessEnv, name: string, fallback: number): number
   }
 
   return parsed;
+}
+
+/**
+ * Every endpoint to try, in order, from `RPC_URLS` and `RPC_URL`.
+ *
+ * Both variables are read rather than one replacing the other, because they
+ * answer different questions. `RPC_URL` is "the node", and every existing
+ * deployment and every message in this codebase names it. `RPC_URLS` is "the
+ * nodes, in the order I want them tried", and is what makes a single endpoint's
+ * outage survivable. An operator who sets only `RPC_URL` gets exactly the old
+ * single-endpoint behaviour; one who sets both gets their primary first and the
+ * rest behind it, with no need to repeat the primary inside `RPC_URLS`.
+ *
+ * It defaults to localhost rather than being required, preserving the previous
+ * behaviour where an unset `RPC_URL` still produced a usable local configuration.
+ *
+ * The merging rule itself lives in `rpc-endpoints.ts`, shared with the browser's
+ * `wagmi.ts`, so the two sides cannot disagree about endpoint order.
+ */
+function resolveRpcUrls(env: NodeJS.ProcessEnv): readonly string[] {
+  const fallback = required(env, "RPC_URL", "http://127.0.0.1:8545");
+
+  return resolveRpcEndpoints(fallback, env.RPC_URLS);
 }
 
 /**
@@ -126,8 +180,23 @@ export function loadServerConfig(env: NodeJS.ProcessEnv = process.env): ServerCo
     throw new Error("DATABASE_URL must be a mysql:// connection URI");
   }
 
+  const rpcUrls = resolveRpcUrls(env);
+
+  // `resolveRpcEndpoints` cannot return empty here, because it is given a
+  // non-empty primary from `required`. Indexing `[0]` still types as possibly
+  // undefined, and this is the one place where the invariant can be stated and
+  // checked rather than asserted away — a future edit that let the primary go
+  // blank would then fail here with a readable message instead of producing a
+  // client pointed at `undefined`.
+  const [primaryRpc, ...restRpc] = rpcUrls;
+
+  if (primaryRpc === undefined) {
+    throw new Error("No RPC endpoint resolved; RPC_URL must not be empty");
+  }
+
   return {
-    rpcUrl: required(env, "RPC_URL", "http://127.0.0.1:8545"),
+    rpcUrl: primaryRpc,
+    rpcUrls: [primaryRpc, ...restRpc],
     chainId,
     factoryAddress: resolveAddress(env, chainId),
     databaseUrl,
@@ -136,6 +205,7 @@ export function loadServerConfig(env: NodeJS.ProcessEnv = process.env): ServerCo
     pollIntervalMs: integer(env, "POLL_INTERVAL_MS", 4000),
     indexerEnabled: (env.INDEXER_ENABLED ?? "true") !== "false",
     startBlock: resolveStartBlock(env, chainId),
+    readCacheTtlMs: integer(env, "READ_CACHE_TTL_MS", 2000),
   };
 }
 

@@ -1,10 +1,14 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useAccount, useChainId, useConfig, useReadContract } from "wagmi";
 
+import { Pagination } from "@/components/Pagination";
 import { PollCard, PollCardSkeleton } from "@/components/PollCard";
+import { SearchBar } from "@/components/SearchBar";
 import { EmptyState } from "@/components/ui";
 import { useMounted } from "@/hooks/useMounted";
+import { pageEntries, type ListEntry, type SortOrder } from "@/lib/pagination";
 import { chainName, factoryAbi, resolveChainTarget, type ChainTarget } from "@/lib/voting";
 import type { PollSummary } from "@/lib/types";
 
@@ -56,6 +60,15 @@ export function PollList({ initialPolls, initialAddresses, configuredTarget }: P
   const { isConnected } = useAccount();
   const walletChainId = useChainId();
 
+  // Search, sort and page state. All three are component state rather than URL
+  // parameters, because the list is rebuilt from a chain read on every mount and
+  // a deep link to "page 3 of the newest list" would not survive a poll being
+  // created in between. `sort` defaults to `newest`, which is the order a reader
+  // arriving at a voting site expects.
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<SortOrder>("newest");
+  const [page, setPage] = useState(1);
+
   const target = resolveChainTarget({
     walletConnected: isConnected,
     walletChainId,
@@ -89,6 +102,39 @@ export function PollList({ initialPolls, initialAddresses, configuredTarget }: P
   const addresses: `0x${string}`[] = mounted
     ? (chainAddresses ?? (initialAddresses as `0x${string}`[] | null) ?? [])
     : ((initialAddresses as `0x${string}`[] | null) ?? []);
+
+  /*
+    One entry per address the chain reports, paired with the summary the server
+    read for it if there is one.
+
+    The ADDRESS is the authority on existence and the summary is an optimisation,
+    which is why this is a list of pairs rather than a list of summaries. A poll
+    created after the server render has no summary, and `pageEntries` keeps such
+    an entry whatever the search says — see `entryMatches` for why hiding it would
+    be the worse mistake.
+
+    Not memoised on purpose: this is one array pass over a list that is small by
+    construction, and a `useMemo` here would need `addresses` compared by identity
+    (it is rebuilt every render from the chain read) or by a joined key, which is
+    more machinery than the work it saves.
+  */
+  const entries: ListEntry[] = addresses.map((address) => ({
+    address,
+    summary: summaries.get(address.toLowerCase()) ?? null,
+  }));
+
+  const current = pageEntries(entries, { query, sort, page });
+
+  /** Any change to the result set returns to the first page. */
+  function search(next: string): void {
+    setQuery(next);
+    setPage(1);
+  }
+
+  function reorder(next: SortOrder): void {
+    setSort(next);
+    setPage(1);
+  }
 
   const notListing = !mounted
     ? null
@@ -146,16 +192,55 @@ export function PollList({ initialPolls, initialAddresses, configuredTarget }: P
       )}
 
       {addresses.length > 0 && (
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {addresses.map((address) => (
-            <PollCard
-              key={address}
-              address={address}
-              initial={summaries.get(address.toLowerCase()) ?? null}
-              chainId={factoryKnown ? subjectChainId : undefined}
-            />
-          ))}
-        </div>
+        <>
+          <SearchBar
+            query={query}
+            onQueryChange={search}
+            sort={sort}
+            onSortChange={reorder}
+            matched={current.total}
+            total={addresses.length}
+          />
+
+          {/*
+            A search that matched nothing is its own state, not an empty list.
+            Rendering the "no polls exist yet" copy here would tell a reader that
+            the deployment is empty when it is their search that found nothing.
+          */}
+          {current.items.length === 0 ? (
+            <div className="mt-4">
+              <EmptyState
+                title="没有匹配的投票"
+                description={`没有投票符合「${query.trim()}」。搜索会匹配问题、发起人地址与合约地址的开头部分。`}
+              />
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {current.items.map((entry) => (
+                <PollCard
+                  key={entry.address}
+                  address={entry.address as `0x${string}`}
+                  initial={entry.summary}
+                  chainId={factoryKnown ? subjectChainId : undefined}
+                />
+              ))}
+            </div>
+          )}
+
+          {/*
+            Rendered after the grid so it reads as a footer for the list. It hides
+            itself when there is only one page, which is why no `pageCount > 1`
+            check is needed here.
+          */}
+          <Pagination
+            page={current.page}
+            pageCount={current.pageCount}
+            count={current.items.length}
+            total={current.total}
+            pageSize={current.pageSize}
+            onPageChange={setPage}
+          />
+        </>
       )}
     </section>
   );

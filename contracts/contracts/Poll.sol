@@ -1117,6 +1117,37 @@ contract Poll is Ownable, ReentrancyGuard {
         }
     }
 
+    /// @notice How many addresses are whitelisted right now.
+    ///
+    /// @dev A LIVE count, and deliberately not the same fact as
+    ///      `frozenEligiblePower`, which is the frozen denominator the quorum and
+    ///      the turnout are both measured against. The two answer different
+    ///      questions and are allowed to differ:
+    ///
+    ///        * this says how many addresses the creator has admitted SO FAR. It
+    ///          is useful while a poll is still in `Setup` — to check an uploaded
+    ///          list actually landed — and it moves if the list is edited during
+    ///          voting, which `setWhitelist` permits.
+    ///        * `frozenEligiblePower` says how much voting power the quorum is a
+    ///          fraction of, fixed at `startPoll` so that the pass mark cannot
+    ///          move while votes accumulate.
+    ///
+    ///      Turnout must therefore be computed against `frozenEligiblePower`, not
+    ///      against this number. With a weighted poll the two differ in KIND as
+    ///      well as in time: this counts addresses, that sums weights.
+    ///
+    ///      Counts addresses rather than power, so it is the same figure under
+    ///      every mechanism; the weighted denominator is the other one.
+    function whitelistedCount() external view returns (uint256 count) {
+        uint256 length = _whitelistKeys.length;
+
+        for (uint256 i = 0; i < length; ++i) {
+            if (isWhitelisted[_whitelistKeys[i]]) {
+                ++count;
+            }
+        }
+    }
+
     /// @notice Close voting. On a commit-reveal poll this opens the reveal
     ///         window rather than ending the poll.
     ///
