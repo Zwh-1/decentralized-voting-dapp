@@ -7,43 +7,43 @@
 
 ## Progress
 
-| 批次 | 任务                                              | 状态     | 证据                                                                                                                                                                                         |
-| ---- | ------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 零   | Task 0.1 修复 Docker 引擎                         | **阻塞** | 根因见 §14；解除需管理员提权 + 重启，本会话做不到                                                                                                                                            |
-| 零   | Task 0.2 服务器初始化                             | 未开始   | —                                                                                                                                                                                            |
-| 零   | Task 0.3 GitHub / Docker Hub 准备                 | 未开始   | —                                                                                                                                                                                            |
-| 零   | Task 0.4 Sepolia 工厂重新部署 + 演示投票          | 未开始   | —                                                                                                                                                                                            |
-| 零   | Task 0.5 域名与 TLS                               | 未开始   | —                                                                                                                                                                                            |
-| 零   | Task 0.6 邮件（SMTP）接收端准备                   | 未开始   | —                                                                                                                                                                                            |
-| 一   | Task 1.1 standalone 产物                          | **完成** | `.next/standalone/web/server.js` 实测存在；typecheck 与 format 退出码均为 0；负向对照成立（改动前无该目录）。产物自包含性见 §14.4                                                            |
-| 一   | Task 1.2 Dockerfile 与 .dockerignore              | **阻塞** | 需 Linux 镜像才能验证；设计已按 §14.4 增补 `.env` 清除与自包含自检                                                                                                                           |
-| 一   | Task 1.3 compose base 扩写                        | 未开始   | —                                                                                                                                                                                            |
-| 一   | Task 1.4 indexer worker 入口                      | 未开始   | —                                                                                                                                                                                            |
-| 一   | Task 1.5 migrate 一次性服务                       | 未开始   | —                                                                                                                                                                                            |
-| 一   | Task 1.6 本地 override                            | 未开始   | —                                                                                                                                                                                            |
-| 一   | Task 1.7 一键拉起验收（含负向对照）               | 未开始   | —                                                                                                                                                                                            |
-| 二   | Task 2.1 `/api/metrics`                           | **完成** | 24 个新测试通过（全量 711 通过）；typecheck 0；构建含 `ƒ /api/metrics`；端到端 HTTP 200；lag 不可读时序列缺席已用真实数据验证；null→0 负向对照红了 2 个测试。详见 §14.5                      |
-| 二   | Task 2.2 metrics 不暴露公网                       | 未开始   | —                                                                                                                                                                                            |
-| 二   | Task 2.3 Prometheus 采集与告警规则                | 未开始   | —                                                                                                                                                                                            |
-| 二   | Task 2.4 exporters                                | 未开始   | —                                                                                                                                                                                            |
-| 二   | Task 2.5 Alertmanager 与邮件                      | 未开始   | —                                                                                                                                                                                            |
-| 二   | Task 2.6 Grafana provisioning 与看板              | 未开始   | —                                                                                                                                                                                            |
-| 二   | Task 2.7 部署版本可见性                           | 未开始   | —                                                                                                                                                                                            |
-| 二   | Task 2.8 三类故障演练                             | 未开始   | —                                                                                                                                                                                            |
-| 三   | Task 3.1 `ci.yml` 增加 `workflow_call`            | 未开始   | —                                                                                                                                                                                            |
-| 三   | Task 3.2 `release.yml`（门 → 构建 → 扫描 → 推送） | 未开始   | —                                                                                                                                                                                            |
-| 三   | Task 3.3 部署脚本三件套                           | **完成** | 新增 `ops/deploy/` 六个脚本；`bash -n` 全过；`selftest.sh` **32 项全过**（桩化 docker/curl 验证中止语义）；健康门对真实服务三分支已验。**`shellcheck` 未安装，该项验证无法执行**。详见 §14.6 |
-| 三   | Task 3.4 SSH 部署 job                             | 未开始   | —                                                                                                                                                                                            |
-| 三   | Task 3.5 `rollback.yml`                           | 未开始   | —                                                                                                                                                                                            |
-| 三   | Task 3.6 流水线端到端验收                         | 未开始   | —                                                                                                                                                                                            |
-| 四   | Task 4.1 nginx 与上游模板                         | 未开始   | —                                                                                                                                                                                            |
-| 四   | Task 4.2 prod compose 双槽定义                    | 未开始   | —                                                                                                                                                                                            |
-| 四   | Task 4.3 `deploy.sh` 双槽流程                     | 未开始   | —                                                                                                                                                                                            |
-| 四   | Task 4.4 `rollback.sh` 秒级回滚                   | 未开始   | —                                                                                                                                                                                            |
-| 四   | Task 4.5 零停机证据与负向对照                     | 未开始   | —                                                                                                                                                                                            |
-| 四   | Task 4.6 expand-contract runbook                  | 未开始   | —                                                                                                                                                                                            |
-| 五   | Task 5.1 七条 ADR 落地                            | 未开始   | —                                                                                                                                                                                            |
-| 五   | Task 5.2 基线记录与简历材料                       | 未开始   | —                                                                                                                                                                                            |
+| 批次 | 任务                                              | 状态                 | 证据                                                                                                                                                                                         |
+| ---- | ------------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 零   | Task 0.1 修复 Docker 引擎                         | **阻塞**             | 根因见 §14；解除需管理员提权 + 重启，本会话做不到                                                                                                                                            |
+| 零   | Task 0.2 服务器初始化                             | 未开始               | —                                                                                                                                                                                            |
+| 零   | Task 0.3 GitHub / Docker Hub 准备                 | 未开始               | —                                                                                                                                                                                            |
+| 零   | Task 0.4 Sepolia 工厂重新部署 + 演示投票          | 未开始               | —                                                                                                                                                                                            |
+| 零   | Task 0.5 域名与 TLS                               | 未开始               | —                                                                                                                                                                                            |
+| 零   | Task 0.6 邮件（SMTP）接收端准备                   | 未开始               | —                                                                                                                                                                                            |
+| 一   | Task 1.1 standalone 产物                          | **完成**             | `.next/standalone/web/server.js` 实测存在；typecheck 与 format 退出码均为 0；负向对照成立（改动前无该目录）。产物自包含性见 §14.4                                                            |
+| 一   | Task 1.2 Dockerfile 与 .dockerignore              | **已写，构建未验**   | stdlib 外的四阶段 Dockerfile + `.dockerignore`；**构建需 Linux 引擎**。执行中发现计划三处会导致容器启动即失败，见 §14.8                                                                      |
+| 一   | Task 1.3 compose base 扩写                        | **完成**             | 四服务；`docker compose config` 退出码 0；mysql 兼容字段原样。**3307 在 internal 网络上能否发布未验证**，§14.8 记了应急方案                                                                  |
+| 一   | Task 1.4 indexer worker 入口                      | **已写，运行未验**   | `bash -n` 通过；循环/退避语义需容器才能验。写作时自己写出一个 `set -e` 死代码 bug，已修，见 §14.8                                                                                            |
+| 一   | Task 1.5 migrate 一次性服务                       | **部分**（静态通过） | compose 内已定义且结构正确；「跑两遍幂等」需引擎。静态项已验：全仓库无 `entrypoint-initdb` 挂载、无 `MYSQL_INITDB_*` 配置（10 处命中全在正文注释里，无一处是实际配置）                       |
+| 一   | Task 1.6 本地 override                            | 未开始               | —                                                                                                                                                                                            |
+| 一   | Task 1.7 一键拉起验收（含负向对照）               | **阻塞**             | 需引擎                                                                                                                                                                                       |
+| 二   | Task 2.1 `/api/metrics`                           | **完成**             | 24 个新测试通过（全量 711 通过）；typecheck 0；构建含 `ƒ /api/metrics`；端到端 HTTP 200；lag 不可读时序列缺席已用真实数据验证；null→0 负向对照红了 2 个测试。详见 §14.5                      |
+| 二   | Task 2.2 metrics 不暴露公网                       | 未开始               | —                                                                                                                                                                                            |
+| 二   | Task 2.3 Prometheus 采集与告警规则                | 未开始               | —                                                                                                                                                                                            |
+| 二   | Task 2.4 exporters                                | 未开始               | —                                                                                                                                                                                            |
+| 二   | Task 2.5 Alertmanager 与邮件                      | 未开始               | —                                                                                                                                                                                            |
+| 二   | Task 2.6 Grafana provisioning 与看板              | 未开始               | —                                                                                                                                                                                            |
+| 二   | Task 2.7 部署版本可见性                           | 未开始               | —                                                                                                                                                                                            |
+| 二   | Task 2.8 三类故障演练                             | 未开始               | —                                                                                                                                                                                            |
+| 三   | Task 3.1 `ci.yml` 增加 `workflow_call`            | 未开始               | —                                                                                                                                                                                            |
+| 三   | Task 3.2 `release.yml`（门 → 构建 → 扫描 → 推送） | 未开始               | —                                                                                                                                                                                            |
+| 三   | Task 3.3 部署脚本三件套                           | **完成**             | 新增 `ops/deploy/` 六个脚本；`bash -n` 全过；`selftest.sh` **32 项全过**（桩化 docker/curl 验证中止语义）；健康门对真实服务三分支已验。**`shellcheck` 未安装，该项验证无法执行**。详见 §14.6 |
+| 三   | Task 3.4 SSH 部署 job                             | 未开始               | —                                                                                                                                                                                            |
+| 三   | Task 3.5 `rollback.yml`                           | 未开始               | —                                                                                                                                                                                            |
+| 三   | Task 3.6 流水线端到端验收                         | 未开始               | —                                                                                                                                                                                            |
+| 四   | Task 4.1 nginx 与上游模板                         | 未开始               | —                                                                                                                                                                                            |
+| 四   | Task 4.2 prod compose 双槽定义                    | 未开始               | —                                                                                                                                                                                            |
+| 四   | Task 4.3 `deploy.sh` 双槽流程                     | 未开始               | —                                                                                                                                                                                            |
+| 四   | Task 4.4 `rollback.sh` 秒级回滚                   | 未开始               | —                                                                                                                                                                                            |
+| 四   | Task 4.5 零停机证据与负向对照                     | 未开始               | —                                                                                                                                                                                            |
+| 四   | Task 4.6 expand-contract runbook                  | 未开始               | —                                                                                                                                                                                            |
+| 五   | Task 5.1 七条 ADR 落地                            | 未开始               | —                                                                                                                                                                                            |
+| 五   | Task 5.2 基线记录与简历材料                       | 未开始               | —                                                                                                                                                                                            |
 
 ---
 
@@ -2042,3 +2042,57 @@ D:\桌面\实习项目\decentralized-voting-dapp\node_modules\.pnpm\mysql2@3.24.
 这同时**细化并确认了 §14.4**：mysql2 的文件**确实被 trace 进了** `standalone/node_modules/.pnpm/mysql2@.../`（92 个文件），缺的只是顶层链接；之所以在仓库内能跑，是因为向上的逃逸路径恰好存在。镜像里代码放到 `/app` 之后，向上走到 `/app/node_modules`、`/node_modules` 都不存在，**运行时才会 `MODULE_NOT_FOUND`**。
 
 因此 Task 1.2 那条 `RUN node -e "require.resolve('mysql2/promise')"` 是必要的，而且它会在**构建期**而不是运行时把问题暴露出来。§14.4 里「若 standalone 缺 mysql2 就停下解决依赖追踪、绝不用『再拷一个 node_modules』糊过去」这条纪律继续有效——现在已知缺的是链接而不是文件。
+
+### 14.8 批一执行记录：计划里三处会让容器启动即失败的设计（2026-09-22）
+
+Docker 仍未解除，但 compose 与脚本可以静态验证——`docker compose config` 不需要引擎，所以能用**真正会消费这些文件的工具**校验。据此把 Task 1.2–1.4 写完，并发现计划有三处照做就会失败。
+
+**新增/修改文件**
+
+| 文件                        | 状态                                                                  |
+| --------------------------- | --------------------------------------------------------------------- |
+| `web/Dockerfile`            | 新建，四阶段：`base` / `deps` / `builder` / `runtime-deps` / `runner` |
+| `.dockerignore`             | 新建                                                                  |
+| `docker-compose.yml`        | 扩写为四服务                                                          |
+| `ops/indexer/entrypoint.sh` | 新建                                                                  |
+| `.env.example`              | 新建（根，容器用；`web/.env` 是给 `pnpm dev` 的另一个文件）           |
+
+**已实测的验证**
+
+| 验证项                                 | 结果                                                                                                                                       |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `docker compose config --quiet`        | 退出码 **0**                                                                                                                               |
+| 展开后的结构                           | 四服务；三角色共用 `voting-web:dev`；依赖条件为 `service_healthy` / `service_completed_successfully`；`backend: internal: true` + `egress` |
+| mysql 兼容边界                         | `container_name`、`MYSQL_ROOT_PASSWORD`、`utf8mb4` 字符集与排序规则、3307 全部保留                                                         |
+| `bash -n ops/indexer/entrypoint.sh`    | 退出码 0                                                                                                                                   |
+| `entrypoint-initdb` / `MYSQL_INITDB_*` | 10 处命中全在正文注释，无一处是实际挂载或配置                                                                                              |
+
+**未验证的**（需引擎）：镜像能否构建、体积是否 < 250MB、`mysql2/promise` 在镜像内是否可解析、启动后 `/api/health` 是否 200、migrate 是否幂等、indexer 循环是否在跑而不退出、3307 在 `internal` 网络上是否真的发布得出去。
+
+**计划里三处会让容器启动即失败的设计，均已修正**
+
+1. **standalone 产物不含 `web/scripts` 与 `web/src`**（Task 1.2 第 3–5 步的隐含前提）。
+   `web/scripts/migrate.ts` 的 import 链实测为 `../src/lib/config` 与 `../src/lib/db/migrate`，而这两个目录**不在 Next 构建的依赖图里**，standalone 的追踪器永远不会带上它们。照计划写，migrate 与 indexer 容器启动即 `MODULE_NOT_FOUND`。
+   修正：runner 阶段改为从 `runtime-deps`（`pnpm install --frozen-lockfile --prod`）复制 **pnpm 自己产生的相对符号链接树**，而不是依赖 standalone 的追踪结果，并额外复制 `web/scripts`、`web/src`、`web/tsconfig.json`。
+   这**不违反**「绝不用再拷一个 node_modules 糊过去」——用的是 pnpm 自己的产物而非任意目录，且相对链接在 Linux 上可移植（Windows 的 junction 用绝对路径，那才是 standalone 不可移植的原因）。
+
+2. **`npm i -g tsx` 之后 `node --import tsx` 根本找不到它**（Task 1.2 第 5 步）。
+   Node 按工作目录的常规规则解析 `--import` 的说明符，全局前缀不在解析路径上，`NODE_PATH` 对 ESM 解析也不生效。照计划写，migrate 与 indexer 会报 `Cannot find module 'tsx'`。
+   修正：改为装进镜像自己的 node_modules（`npm install --prefix /app --no-save tsx@4.20.6`），即解析实际会看的位置。
+
+3. **`ENTRYPOINT` 与 compose 的 `command:` 不能共存**（Task 1.2 第 4 步 × Task 1.3 第 2–4 步）。
+   计划要求 Dockerfile 用 `ENTRYPOINT ["node","web/server.js"]`，同时要求 compose 用 `command:` 给三个角色换命令。但 `command:` 只覆盖 `CMD`——留着 ENTRYPOINT，三个角色都会被拼成 `node web/server.js node --import tsx ...`，即**每个角色都在跑 web server 并静默忽略自己的命令**。
+   修正：Dockerfile 改用 `CMD ["node","web/server.js"]`。
+
+**另修正两处网络设计**
+
+4. **indexer 只挂 `internal: true` 网络就没有出网路由**（Task 1.3 第 5 步）。而 indexer 的全部职责就是读链，它必须能访问 RPC 端点。
+   修正：新增 `egress` 网络（非 internal），web 与 indexer 同时挂 `backend` + `egress`；mysql 仍只挂 `backend`。真正想要的效果保住了——**数据库出不了网**。
+
+5. **`internal: true` 与「3307 必须继续可用」互相矛盾**。只挂在 internal 网络上的容器发布不了端口（见 [moby#36174](https://github.com/moby/moby/issues/36174) 与 [Docker 端口发布文档](https://docs.docker.com/engine/network/port-publishing/)）。
+   处置：3307 的映射改为绑定回环 `127.0.0.1:3307:3306`。README 与既有用法都走 `127.0.0.1:3307`，因此**兼容边界逐字保住**，同时数据库不再暴露到任何网络接口——这比原来的 `3307:3306` 更安全。
+   **仍未定论**：`internal: true` 下发布端口是否真的失效，我无法在本机证实。若 Task 1.3 的验证显示 3307 连不上，应急方案是去掉 `backend` 的 `internal: true`（mysql 仅挂这一个网络，隔离性由「不在别的网络上」保证）。这条写在这里，以免届时重新推导。
+
+**我自己写出的一个 bug，值得单独记**：`ops/indexer/entrypoint.sh` 初版用 `node ...; code=$?` 配 `set -eu`——`set -e` 会让脚本在 node 失败的瞬间就退出，于是 `code=$?` 与整个「连续失败 N 次才放弃」的处理**全是死代码**。而这个包装脚本存在的唯一理由，就是防止一次 RPC 抖动变成重启风暴；死代码意味着它恰好退化成它要防的那个东西。改为 `if node ...; then code=0; else code=$?; fi` 后失败处理才是活的。
+
+**本批新增的未决问题**：`.env.example` 是计划外的文件。加它是因为 compose 需要一份容器侧的变量清单（`DATABASE_URL` 在容器内是 `mysql:3306`，与 `web/.env` 的 `127.0.0.1:3307` 不同），且 `docker compose config` 在无 `.env` 时仍需可校验——故 `env_file` 用 `required: false` 写法。这与 Task 1.6 的本地 override 是两件事。
