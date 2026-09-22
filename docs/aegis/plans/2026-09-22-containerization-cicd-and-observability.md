@@ -2190,3 +2190,13 @@ Docker 仍未解除，但批二几乎全部是 YAML 与 POSIX sh，可以静态�
 **这套检查器最大的价值不在于它现在全绿，而在于 `selftest.py` 证明它会红。** 一个不能失败的检查不是证据。8 个破坏用例覆盖：部署读可变 tag、删掉部署锁、gate 不再引用 `ci.yml`、deploy 不再依赖 scan、回滚换锁、`ci.yml` 丢掉 `workflow_call`、重新引入 `ssh-keyscan`、关闭主机校验。
 
 **一处对测试自身的修正**：「删掉部署锁」这个用例初版是用字符串替换实现的，结果把 YAML 改成了不可解析——于是检查器确实退出了非 0，但**理由是 YAML 解析失败，而不是缺锁**，用例通过得毫无意义。改为按行定位 deployment job 的 `concurrency:` 块再删除，保证产物仍是合法 YAML。**假通过比不通过更危险**，因为它以绿灯的形式留了下来。
+
+**另一处自伤：三个 workflow 以 CRLF 提交，与 `.gitattributes` 的 `eol=lf` 相矛盾**
+
+`ci.yml` / `release.yml` / `rollback.yml` 一度以 CRLF 行尾进过仓库，而 `.gitattributes` 开篇就写着 `* text=auto eol=lf`，`.prettierrc.json` 也写着 `endOfLine: "lf"`，仓库里其它每个文件都是 LF。这不是格式癖好：该文件自己解释了理由——「没有它，Windows/macOS/Linux 上的贡献者会产出整文件级 diff」。CRLF 的文件会让后续任何一次无关编辑都变成整文件重写，把真正的改动淹没掉。
+
+成因是一次往返而不是一次疏忽：`prettier --write` 写出 LF，随后 `git` 检出/暂存时按 `core.autocrlf=true` 转成 CRLF，我就这样提交了。中途我曾用 `prettier --write`「修好」过一次——但那只是把工作区改回 LF，下一次 git 往返又会变回去，所以症状复发。**这是一个只改症状不改成因的修法，当时没意识到。**
+
+真正的成因是作用域：`core.autocrlf=true` 设在 **system** 作用域。仓库级设 `git config core.autocrlf false` 后，`.gitattributes` 才成为权威，工作区按 LF 检出。三者现已实测：磁盘 `CRLF=0`、索引 `CRLF=0`（`LF=342/249/79`）、`pnpm format:check` 退出码 0。
+
+排查过程中还有一次**干扰值得记**：我几次观察到文件在 `format:check` 前后于 LF/CRLF 之间反复横跳，一度怀疑有 git hook 在改写（实测 `core.hooksPath` 为空、`.git/hooks` 无启用脚本）。实际原因是**另一个会话在并发做 i18n，它执行了 `git checkout`**，把我刚检出的工作区按当时的配置重写了。确认方法是在同一次调用里「检出 → 立即读字节 → 跑 prettier → 再读字节」：两次都是 LF 且检查通过。**在多写者环境下，观察到的状态可能是别人的副作用**——记下来，以免下次误判成自己的 bug 去乱改配置。
