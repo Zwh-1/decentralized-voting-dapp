@@ -6,6 +6,24 @@ packages:
 # transitive dependency of the Hardhat toolchain and of tsx) needs its
 # postinstall to run, otherwise `pnpm install` exits non-zero and CI fails.
 # `sharp` is pulled in by Next.js for image optimisation.
+#
+# Every entry here is a package whose postinstall we let run arbitrary code. That
+# is a supply-chain decision, so an entry earns its place by producing an artifact
+# the tree cannot work without — not by being noisy when it is skipped.
 allowBuilds:
+  # Reached through `@walletconnect/ethereum-provider`, which is how a phone
+  # browser outside a wallet's own in-app browser connects.
+  #
+  # DENIED, and the reason is that the script does nothing useful here. It is
+  # `scripts/appkit-version-check.js`: it prints whether the installed
+  # `@reown/appkit` packages share a version, writes no files, and exits 0 on
+  # every path including its own errors. Nothing in the tree consumes its output,
+  # so allowing it would buy a console line at the cost of running third-party
+  # code on every install. The version check is a diagnostic, not a build step.
+  #
+  # pnpm still prints the skipped-script warning at install time. That warning is
+  # expected and is not a failure; leaving `false` here is what stops pnpm from
+  # exiting before it runs any script at all.
+  "@reown/appkit": false
   esbuild: true
   sharp: true

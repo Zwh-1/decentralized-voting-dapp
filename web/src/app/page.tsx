@@ -103,6 +103,21 @@ export default async function Home() {
         </Link>
         ，可按事件类型、投票合约或地址过滤。该页读取索引，不读取链上实时状态。
       </p>
+
+      {/*
+        Beside the audit link rather than in the masthead: both are secondary to
+        voting, and a reader who wants one of them is the reader who will read a
+        second sentence. The distinction worth stating is that audit is about the
+        deployment and notifications are about one wallet — otherwise "audit" and
+        "notifications" both look like "things that happened".
+      */}
+      <p className="mt-2 text-xs text-slate-500">
+        只想看你订阅的投票？打开{" "}
+        <Link href="/notifications" className="underline">
+          我的通知
+        </Link>
+        ，它按连接的钱包地址列出你订阅的投票在上次查看之后的新事件；不订阅则没有内容可列。
+      </p>
     </PageShell>
   );
 }

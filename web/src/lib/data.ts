@@ -41,8 +41,15 @@ import {
   type OnChainVoter,
 } from "./chain";
 import { isIndexEnabled, loadServerConfig, type ServerConfig } from "./config";
-import type { AuditEntry, AuditFilters, AuditKind } from "./audit";
+import type { AuditEntry, AuditFilters } from "./audit";
 import { createReadCache, type ReadCache } from "./cache";
+import {
+  EVENT_BRANCHES,
+  EVENT_ORDER_BY,
+  branchSql,
+  type EventBranch,
+} from "./indexer/event-branches";
+import { watermarkFor, type NotificationEntry, type Subscription } from "./notify";
 import { migrate } from "./db/migrate";
 import { createPool } from "./db/pool";
 import { createRotatingChainReader, type RotatingChainReader } from "./indexer/endpoints";
@@ -932,126 +939,43 @@ export async function getAuditActivity(filters: AuditFilters): Promise<AuditEntr
   }
 
   // `?` placeholders for every value, so a filter can never become SQL. The
-  // clause TEXT is assembled from constants only; nothing a caller sends is
-  // interpolated into the statement.
-  const pollClause =
-    filters.poll === null ? null : { sql: "poll_address = ?", value: filters.poll };
-  const actorClause = filters.actor === null ? null : { sql: "voter = ?", value: filters.actor };
+  // clause TEXT comes from `EVENT_BRANCHES` (the single owner of what an event is)
+  // plus these two constants; nothing a caller sends is interpolated.
+  const shared: { sql: string; value: string }[] = [];
 
-  const include = (kind: AuditKind): boolean => filters.kind === null || filters.kind === kind;
-
-  const branches: string[] = [];
-  const branchValues: string[] = [];
-
-  /**
-   * Adds one branch, repeating the shared filter values for its placeholders.
-   *
-   * `condition` is a trusted literal (never caller input) folded into the SAME
-   * `WHERE` as the bound clauses. A second `WHERE` would be a syntax error, and
-   * building the clause text here rather than appending to it is what keeps the
-   * placeholder order equal to the collected values.
-   *
-   * `hasVoter` is not cosmetic. `phase_events` records a transition and names no
-   * address, so it has no `voter` column — emitting the actor clause for it would
-   * be a SQL error, and silently dropping the clause would return phase rows for a
-   * filter that asked for one address. A phase event cannot match an actor filter,
-   * so the branch is left out entirely.
-   */
-  function branch(sql: string, hasVoter: boolean, condition: string | null = null): void {
-    if (actorClause !== null && !hasVoter) return;
-
-    const clauses: string[] = [];
-    const bound: string[] = [];
-
-    if (condition !== null) clauses.push(condition);
-
-    if (pollClause !== null) {
-      clauses.push(pollClause.sql);
-      bound.push(pollClause.value);
-    }
-
-    if (actorClause !== null) {
-      clauses.push(actorClause.sql);
-      bound.push(actorClause.value);
-    }
-
-    const where = clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`;
-
-    branches.push(`${sql}${where}`);
-    branchValues.push(...bound);
+  if (filters.poll !== null) {
+    shared.push({ sql: "poll_address = ?", value: filters.poll });
   }
 
-  if (include("cast")) {
-    branch(
-      `SELECT 'cast' AS kind, poll_address, voter AS actor, option_id, NULL AS allowed,
-              NULL AS from_phase, NULL AS to_phase, NULL AS amount_wei,
-              block_number, tx_hash
-         FROM votes`,
-      true,
-      "event_type = 'cast'",
-    );
+  if (filters.actor !== null) {
+    shared.push({ sql: "voter = ?", value: filters.actor });
   }
 
-  if (include("changed")) {
-    branch(
-      `SELECT 'changed' AS kind, poll_address, voter AS actor, option_id, NULL AS allowed,
-              NULL AS from_phase, NULL AS to_phase, NULL AS amount_wei,
-              block_number, tx_hash
-         FROM votes`,
-      true,
-      "event_type = 'changed'",
-    );
-  }
-
-  if (include("withdrawn")) {
-    branch(
-      `SELECT 'withdrawn' AS kind, poll_address, voter AS actor, NULL AS option_id,
-              NULL AS allowed, NULL AS from_phase, NULL AS to_phase, NULL AS amount_wei,
-              block_number, tx_hash
-         FROM votes`,
-      true,
-      "event_type = 'withdrawn'",
-    );
-  }
-
-  if (include("refunded")) {
-    branch(
-      `SELECT 'refunded' AS kind, poll_address, voter AS actor, NULL AS option_id,
-              NULL AS allowed, NULL AS from_phase, NULL AS to_phase, amount_wei,
-              block_number, tx_hash
-         FROM refunds`,
-      true,
-    );
-  }
-
-  if (include("whitelist")) {
-    branch(
-      `SELECT 'whitelist' AS kind, poll_address, voter AS actor, NULL AS option_id,
-              allowed, NULL AS from_phase, NULL AS to_phase, NULL AS amount_wei,
-              block_number, tx_hash
-         FROM whitelist_events`,
-      true,
-    );
-  }
-
-  if (include("phase")) {
-    branch(
-      `SELECT 'phase' AS kind, poll_address, NULL AS actor, NULL AS option_id,
-              NULL AS allowed, from_phase, to_phase, NULL AS amount_wei,
-              block_number, tx_hash
-         FROM phase_events`,
-      false,
-    );
-  }
+  const branches: EventBranch[] = EVENT_BRANCHES.filter(
+    (candidate) =>
+      (filters.kind === null || filters.kind === candidate.kind) &&
+      // A phase event names nobody, so it cannot match an address filter. The
+      // BRANCH is dropped rather than the clause: dropping only the clause would
+      // be a SQL error against a table with no `voter` column, and keeping both
+      // would return phase rows for a filter that asked about one address.
+      !(filters.actor !== null && !candidate.hasVoter),
+  );
 
   // Nothing to ask for: either the kind filter matched no branch, or an actor
-  // filter excluded the only branch. Issuing an empty UNION would be a syntax
-  // error rather than an empty result.
+  // filter excluded the only branch. An empty UNION is a syntax error rather than
+  // an empty result, so it is short-circuited here.
   if (branches.length === 0) {
     recordIndexSuccess(state);
 
     return [];
   }
+
+  const clauses = shared.map((clause) => clause.sql);
+  const statement = branches.map((b) => branchSql(b, clauses)).join(" UNION ALL ");
+
+  // The shared values repeat once per branch, in the order the clauses were named.
+  // `branchSql` cannot check this for us — it only sees the fragments.
+  const values = branches.flatMap(() => shared.map((clause) => clause.value));
 
   try {
     const [rows] = await pool.query<
@@ -1068,11 +992,10 @@ export async function getAuditActivity(filters: AuditFilters): Promise<AuditEntr
         tx_hash: string;
       } & import("mysql2/promise").RowDataPacket)[]
     >(
-      // Ordered by the first SELECT's output names, which is what MySQL allows
-      // after a UNION. `orderActivity` is applied below regardless — this only
-      // stops the database from returning the union in an arbitrary order.
-      `${branches.join(" UNION ALL ")} ORDER BY block_number DESC, tx_hash DESC`,
-      branchValues,
+      // Ordered in SQL as well as in memory: `orderActivity` is applied below, but
+      // a LIMIT-free feed should not depend on the planner for its shape.
+      `${statement} ${EVENT_ORDER_BY}`,
+      values,
     );
 
     recordIndexSuccess(state);
@@ -1094,6 +1017,302 @@ export async function getAuditActivity(filters: AuditFilters): Promise<AuditEntr
     recordIndexFailure(state, error);
 
     return null;
+  }
+}
+
+// ===========================================================================
+// Subscriptions and the notifications derived from them
+// ===========================================================================
+//
+// A subscription stores only a WATERMARK; a notification is derived from the
+// event stream above that watermark. There is no notifications table, for the
+// same reason `current_votes` is a view rather than a counter (ADR-0023): a
+// stored copy of something the events already say is a second record that drifts.
+
+/**
+ * The height the index has actually processed.
+ *
+ * Read from `sync_cursor`, never from the chain. A watermark set to the chain head
+ * would sit ABOVE events the index has not written yet, and those events would
+ * then never notify anyone — a silent loss, and exactly the failure mode this
+ * feature exists to avoid.
+ *
+ * Returns `null` when the index has never synced, which is distinguishable from
+ * block 0 on purpose: `null` means "no watermark can be chosen yet".
+ */
+export async function indexedHead(): Promise<string | null> {
+  const state = getServerState();
+  await ready(state);
+
+  const pool = state.pool;
+
+  if (pool === null) {
+    return null;
+  }
+
+  try {
+    const [rows] = await pool.query<
+      ({ last_block: string } & import("mysql2/promise").RowDataPacket)[]
+    >("SELECT last_block FROM sync_cursor WHERE id = 1");
+
+    return rows[0]?.last_block ?? null;
+  } catch (error) {
+    recordIndexFailure(state, error);
+
+    return null;
+  }
+}
+
+/** Adds or refreshes a subscription. Returns false when there is no index. */
+export async function subscribe(address: string, pollAddress: string): Promise<boolean> {
+  const state = getServerState();
+  await ready(state);
+
+  const pool = state.pool;
+
+  if (pool === null) {
+    return false;
+  }
+
+  // The watermark starts at the index's CURRENT head, so a new subscriber is not
+  // handed the poll's entire history as unread. `?? 0` only applies on a
+  // deployment whose cursor row is missing, where there is no history to flood
+  // anyone with anyway.
+  const head = (await indexedHead()) ?? "0";
+
+  try {
+    await pool.query(
+      `INSERT INTO subscriptions (address, poll_address, last_read_block)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE address = VALUES(address)`,
+      [address.toLowerCase(), pollAddress.toLowerCase(), head],
+    );
+
+    recordIndexSuccess(state);
+
+    return true;
+  } catch (error) {
+    recordIndexFailure(state, error);
+
+    return false;
+  }
+}
+
+/** Removes a subscription. Returns false when there is no index. */
+export async function unsubscribe(address: string, pollAddress: string): Promise<boolean> {
+  const state = getServerState();
+  await ready(state);
+
+  const pool = state.pool;
+
+  if (pool === null) {
+    return false;
+  }
+
+  try {
+    await pool.query("DELETE FROM subscriptions WHERE address = ? AND poll_address = ?", [
+      address.toLowerCase(),
+      pollAddress.toLowerCase(),
+    ]);
+
+    recordIndexSuccess(state);
+
+    return true;
+  } catch (error) {
+    recordIndexFailure(state, error);
+
+    return false;
+  }
+}
+
+/** Every poll one address is subscribed to. */
+export async function listSubscriptions(address: string): Promise<Subscription[] | null> {
+  const state = getServerState();
+  await ready(state);
+
+  const pool = state.pool;
+
+  if (pool === null) {
+    return null;
+  }
+
+  try {
+    const [rows] = await pool.query<
+      ({
+        poll_address: string;
+        last_read_block: string;
+        created_at: string | null;
+      } & import("mysql2/promise").RowDataPacket)[]
+    >(
+      `SELECT poll_address, last_read_block, created_at
+         FROM subscriptions WHERE address = ? ORDER BY poll_address`,
+      [address.toLowerCase()],
+    );
+
+    recordIndexSuccess(state);
+
+    return rows.map((row) => ({
+      pollAddress: row.poll_address,
+      lastReadBlock: row.last_read_block,
+      createdAt: row.created_at ?? undefined,
+    }));
+  } catch (error) {
+    recordIndexFailure(state, error);
+
+    return null;
+  }
+}
+
+/**
+ * Everything that has happened in this address's subscribed polls since it was
+ * last told, newest first.
+ *
+ * The join is what makes this one query rather than one per subscription: the
+ * union of events is INNER JOINed to the reader's subscriptions on the poll, with
+ * the watermark as a join condition. So the database discards the uninteresting
+ * rows, and the cost tracks the reader's own event count rather than the number of
+ * polls they follow.
+ *
+ * `JOIN subscriptions` also means an unsubscribed poll contributes nothing without
+ * a second `WHERE`.
+ */
+export async function listNotifications(address: string): Promise<NotificationEntry[] | null> {
+  const state = getServerState();
+  await ready(state);
+
+  const pool = state.pool;
+
+  if (pool === null) {
+    return null;
+  }
+
+  const subscriber = address.toLowerCase();
+
+  // The join conditions are the same for every branch, so they are built once and
+  // passed to each — which is what keeps the placeholder order equal to the bound
+  // values. `s.address = ?` is the only value, repeated per branch.
+  const join = [
+    "JOIN subscriptions s ON s.poll_address = e.poll_address AND s.address = ?",
+    "WHERE e.block_number > s.last_read_block",
+  ];
+
+  /*
+    Each branch is wrapped in its own derived table so it can be aliased as `e` and
+    joined. Wrapping the UNION as a whole would work too, but MySQL would then
+    materialise every event in the index before discarding almost all of them —
+    the join would be applied after the fact rather than pushed into each branch.
+  */
+  const statement = EVENT_BRANCHES.map((branch) => {
+    const inner = branchSql(branch);
+
+    return `SELECT * FROM (${inner}) AS e ${join.join(" ")}`;
+  }).join(" UNION ALL ");
+
+  const values = EVENT_BRANCHES.map(() => subscriber);
+
+  try {
+    const [rows] = await pool.query<
+      ({
+        kind: NotificationEntry["kind"];
+        poll_address: string;
+        actor: string | null;
+        option_id: number | null;
+        allowed: number | null;
+        from_phase: number | null;
+        to_phase: number | null;
+        amount_wei: string | null;
+        block_number: string;
+        tx_hash: string;
+      } & import("mysql2/promise").RowDataPacket)[]
+    >(`${statement} ${EVENT_ORDER_BY}`, values);
+
+    recordIndexSuccess(state);
+
+    return orderActivity(
+      withoutChangeEcho(
+        rows.map((row) => ({
+          kind: row.kind,
+          pollAddress: row.poll_address,
+          blockNumber: row.block_number,
+          txHash: row.tx_hash,
+          actor: row.actor ?? undefined,
+          optionId: row.option_id === null || row.option_id === 0 ? null : Number(row.option_id),
+          detail: activityDetail(row),
+        })),
+      ),
+    ) as NotificationEntry[];
+  } catch (error) {
+    recordIndexFailure(state, error);
+
+    return null;
+  }
+}
+
+/**
+ * Marks notifications read.
+ *
+ * Pass a poll address to mark only that poll, or `null` for every subscription.
+ *
+ * The new watermark is the HIGHEST BLOCK in `entries` (the ones actually shown),
+ * never the current head — see `watermarkFor` for why taking the head would
+ * silently swallow everything that arrived during the request.
+ */
+export async function markNotificationsRead(
+  address: string,
+  entries: readonly NotificationEntry[],
+  pollAddress: string | null,
+): Promise<boolean> {
+  const state = getServerState();
+  await ready(state);
+
+  const pool = state.pool;
+
+  if (pool === null) {
+    return false;
+  }
+
+  const subscriber = address.toLowerCase();
+
+  // Grouped per poll, because each subscription carries its own watermark and the
+  // per-poll maximum is the only correct value for it.
+  const byPoll = new Map<string, string>();
+
+  for (const entry of entries) {
+    const poll = entry.pollAddress.toLowerCase();
+
+    byPoll.set(poll, watermarkFor([entry], byPoll.get(poll) ?? "0"));
+  }
+
+  if (pollAddress !== null) {
+    const wanted = pollAddress.toLowerCase();
+    const watermark = byPoll.get(wanted);
+
+    if (watermark === undefined) {
+      // Nothing was shown for this poll, so there is nothing to call read.
+      // Advancing the watermark anyway would mark unseen events read.
+      return true;
+    }
+
+    byPoll.clear();
+    byPoll.set(wanted, watermark);
+  }
+
+  try {
+    for (const [poll, watermark] of byPoll) {
+      await pool.query(
+        `UPDATE subscriptions SET last_read_block = ?
+          WHERE address = ? AND poll_address = ? AND last_read_block < ?`,
+        [watermark, subscriber, poll, watermark],
+      );
+    }
+
+    recordIndexSuccess(state);
+
+    return true;
+  } catch (error) {
+    recordIndexFailure(state, error);
+
+    return false;
   }
 }
 

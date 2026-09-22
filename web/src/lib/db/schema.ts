@@ -241,6 +241,52 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------------------------------------------------------------------
+-- Subscriptions and notifications
+-- ---------------------------------------------------------------------------
+
+-- "Tell me when this poll moves."
+--
+-- THERE IS NO NOTIFICATIONS TABLE, and that is the design. A notification is
+-- DERIVED from the event stream, not stored, for the same reason the current
+-- vote is a view and not a counter (ADR-0023): a stored notification would be a
+-- second record of something the events already say, and the two would drift the
+-- first time the indexer replayed a range. It would also mean every reorg
+-- recovery had to remember to un-write notifications, which is exactly the kind
+-- of step that gets forgotten.
+--
+-- So a subscription stores only the WATERMARK: \`last_read_block\`, the height up
+-- to which this reader has already been told what happened. Notifications are
+-- "events in my subscribed polls above that height".
+--
+-- last_read_block defaults to 0 for a row inserted by hand, but \`subscribe()\`
+-- writes the current head instead, so a new subscriber is not handed the whole
+-- history as unread. Marking read moves it forward.
+--
+-- THE TRUST MODEL IS WEAK AND IS STATED HERE ON PURPOSE. \`address\` is supplied
+-- by the caller and is NOT authenticated: this app has no accounts and no
+-- sessions, so anyone can create a subscription for any address. That is
+-- tolerable only because of what a notification reveals — "poll P had a refund at
+-- block N" — which is public on chain already. It does mean a subscription is a
+-- HINT, not an authorisation, and nothing may ever be gated on holding one.
+CREATE TABLE IF NOT EXISTS subscriptions (
+  address         CHAR(42)         NOT NULL,
+  poll_address    CHAR(42)         NOT NULL,
+  last_read_block BIGINT UNSIGNED  NOT NULL DEFAULT 0,
+  created_at      TIMESTAMP        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (address, poll_address),
+  KEY idx_subscriptions_address (address)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Which block the index has reached, for a reader with no subscriptions yet.
+--
+-- Read from \`sync_cursor\` rather than from the chain head: a subscriber should be
+-- flooded with nothing, and the only height at which "nothing has happened yet"
+-- is true is the height the index has actually processed. Using the chain head
+-- would set the watermark past events the index has not written, and those events
+-- would then never notify anyone.
+
+
+-- ---------------------------------------------------------------------------
 -- The read model: derive the CURRENT vote, then count it
 -- ---------------------------------------------------------------------------
 

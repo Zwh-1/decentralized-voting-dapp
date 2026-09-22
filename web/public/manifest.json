@@ -1,0 +1,12 @@
+{
+  "name": "去中心化投票 / Decentralized Voting",
+  "short_name": "投票 / Voting",
+  "description": "链上投票 dApp：票数与事件由只读索引器投影到 MySQL，前端实时比对链上与索引两侧是否一致。 / On-chain voting: votes and events are projected into MySQL by a read-only indexer, and the front end compares the chain and the index.",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "browser",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": []
+}

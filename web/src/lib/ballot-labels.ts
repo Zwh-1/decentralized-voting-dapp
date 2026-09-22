@@ -29,6 +29,22 @@ import { isPlausibleCid, type MetadataResult } from "./ipfs";
 import { formatEth, phaseLabel } from "./voting";
 
 /**
+ * Where a tally's numbers came from, in the words this app uses for it.
+ *
+ * The one spelling of this claim: `tallyLabels` renders it in the 数据来源 row,
+ * and `ResultChart`'s caption and `aria-label` render the same words, because a
+ * reader who compares the chart with the text is comparing one claim rather than
+ * two. A second ternary somewhere else is how the chart and the numbers start
+ * disagreeing about their own provenance.
+ *
+ * The parameter is written out rather than taking `TallyResponse["source"]` so
+ * this module does not import the wire types just for one field name.
+ */
+export function tallySourceLabel(source: "chain" | "index"): string {
+  return source === "index" ? "MySQL 索引" : "链上直读";
+}
+
+/**
  * The three labels in the 合约状态 panel that describe the tally read.
  *
  * "We could not find out" is a different claim from "the answer is zero", and the
@@ -50,7 +66,7 @@ export function tallyLabels(query: {
   }
 
   return {
-    source: query.source === "index" ? "MySQL 索引" : "链上直读",
+    source: tallySourceLabel(query.source),
     total: String(query.total ?? 0),
     candidates: String(query.candidateCount),
   };

@@ -7,43 +7,43 @@
 
 ## Progress
 
-| 批次 | 任务 | 状态 | 证据 |
-| --- | --- | --- | --- |
-| 零 | Task 0.1 修复 Docker 引擎 | 未开始 | — |
-| 零 | Task 0.2 服务器初始化 | 未开始 | — |
-| 零 | Task 0.3 GitHub / Docker Hub 准备 | 未开始 | — |
-| 零 | Task 0.4 Sepolia 工厂重新部署 + 演示投票 | 未开始 | — |
-| 零 | Task 0.5 域名与 TLS | 未开始 | — |
-| 零 | Task 0.6 邮件（SMTP）接收端准备 | 未开始 | — |
-| 一 | Task 1.1 standalone 产物 | 未开始 | — |
-| 一 | Task 1.2 Dockerfile 与 .dockerignore | 未开始 | — |
-| 一 | Task 1.3 compose base 扩写 | 未开始 | — |
-| 一 | Task 1.4 indexer worker 入口 | 未开始 | — |
-| 一 | Task 1.5 migrate 一次性服务 | 未开始 | — |
-| 一 | Task 1.6 本地 override | 未开始 | — |
-| 一 | Task 1.7 一键拉起验收（含负向对照） | 未开始 | — |
-| 二 | Task 2.1 `/api/metrics` | 未开始 | — |
-| 二 | Task 2.2 metrics 不暴露公网 | 未开始 | — |
-| 二 | Task 2.3 Prometheus 采集与告警规则 | 未开始 | — |
-| 二 | Task 2.4 exporters | 未开始 | — |
-| 二 | Task 2.5 Alertmanager 与邮件 | 未开始 | — |
-| 二 | Task 2.6 Grafana provisioning 与看板 | 未开始 | — |
-| 二 | Task 2.7 部署版本可见性 | 未开始 | — |
-| 二 | Task 2.8 三类故障演练 | 未开始 | — |
-| 三 | Task 3.1 `ci.yml` 增加 `workflow_call` | 未开始 | — |
-| 三 | Task 3.2 `release.yml`（门 → 构建 → 扫描 → 推送） | 未开始 | — |
-| 三 | Task 3.3 部署脚本三件套 | 未开始 | — |
-| 三 | Task 3.4 SSH 部署 job | 未开始 | — |
-| 三 | Task 3.5 `rollback.yml` | 未开始 | — |
-| 三 | Task 3.6 流水线端到端验收 | 未开始 | — |
-| 四 | Task 4.1 nginx 与上游模板 | 未开始 | — |
-| 四 | Task 4.2 prod compose 双槽定义 | 未开始 | — |
-| 四 | Task 4.3 `deploy.sh` 双槽流程 | 未开始 | — |
-| 四 | Task 4.4 `rollback.sh` 秒级回滚 | 未开始 | — |
-| 四 | Task 4.5 零停机证据与负向对照 | 未开始 | — |
-| 四 | Task 4.6 expand-contract runbook | 未开始 | — |
-| 五 | Task 5.1 七条 ADR 落地 | 未开始 | — |
-| 五 | Task 5.2 基线记录与简历材料 | 未开始 | — |
+| 批次 | 任务                                              | 状态   | 证据 |
+| ---- | ------------------------------------------------- | ------ | ---- |
+| 零   | Task 0.1 修复 Docker 引擎                         | 未开始 | —    |
+| 零   | Task 0.2 服务器初始化                             | 未开始 | —    |
+| 零   | Task 0.3 GitHub / Docker Hub 准备                 | 未开始 | —    |
+| 零   | Task 0.4 Sepolia 工厂重新部署 + 演示投票          | 未开始 | —    |
+| 零   | Task 0.5 域名与 TLS                               | 未开始 | —    |
+| 零   | Task 0.6 邮件（SMTP）接收端准备                   | 未开始 | —    |
+| 一   | Task 1.1 standalone 产物                          | 未开始 | —    |
+| 一   | Task 1.2 Dockerfile 与 .dockerignore              | 未开始 | —    |
+| 一   | Task 1.3 compose base 扩写                        | 未开始 | —    |
+| 一   | Task 1.4 indexer worker 入口                      | 未开始 | —    |
+| 一   | Task 1.5 migrate 一次性服务                       | 未开始 | —    |
+| 一   | Task 1.6 本地 override                            | 未开始 | —    |
+| 一   | Task 1.7 一键拉起验收（含负向对照）               | 未开始 | —    |
+| 二   | Task 2.1 `/api/metrics`                           | 未开始 | —    |
+| 二   | Task 2.2 metrics 不暴露公网                       | 未开始 | —    |
+| 二   | Task 2.3 Prometheus 采集与告警规则                | 未开始 | —    |
+| 二   | Task 2.4 exporters                                | 未开始 | —    |
+| 二   | Task 2.5 Alertmanager 与邮件                      | 未开始 | —    |
+| 二   | Task 2.6 Grafana provisioning 与看板              | 未开始 | —    |
+| 二   | Task 2.7 部署版本可见性                           | 未开始 | —    |
+| 二   | Task 2.8 三类故障演练                             | 未开始 | —    |
+| 三   | Task 3.1 `ci.yml` 增加 `workflow_call`            | 未开始 | —    |
+| 三   | Task 3.2 `release.yml`（门 → 构建 → 扫描 → 推送） | 未开始 | —    |
+| 三   | Task 3.3 部署脚本三件套                           | 未开始 | —    |
+| 三   | Task 3.4 SSH 部署 job                             | 未开始 | —    |
+| 三   | Task 3.5 `rollback.yml`                           | 未开始 | —    |
+| 三   | Task 3.6 流水线端到端验收                         | 未开始 | —    |
+| 四   | Task 4.1 nginx 与上游模板                         | 未开始 | —    |
+| 四   | Task 4.2 prod compose 双槽定义                    | 未开始 | —    |
+| 四   | Task 4.3 `deploy.sh` 双槽流程                     | 未开始 | —    |
+| 四   | Task 4.4 `rollback.sh` 秒级回滚                   | 未开始 | —    |
+| 四   | Task 4.5 零停机证据与负向对照                     | 未开始 | —    |
+| 四   | Task 4.6 expand-contract runbook                  | 未开始 | —    |
+| 五   | Task 5.1 七条 ADR 落地                            | 未开始 | —    |
+| 五   | Task 5.2 基线记录与简历材料                       | 未开始 | —    |
 
 ---
 
@@ -57,24 +57,24 @@
 
 按六个批次把 DApp 交付形态做完，每批以可复现证据收尾：
 
-| 批次 | 主题 | 交付的核心能力 |
-| --- | --- | --- |
-| 零 | 前置条件 | Docker 引擎可用、服务器就绪、仓库与镜像仓库就绪、Sepolia 部署与演示数据就绪、邮件通道打通 |
-| 一 | 镜像与一键拉起 | 多阶段 Dockerfile、compose 分层与 profiles、migrate 一次性服务、indexer 独立 worker |
-| 二 | 可观测性 | `/api/metrics`、Prometheus 采集与 9 条告警规则、Alertmanager 邮件、Grafana 三块看板、三类故障演练 |
-| 三 | CI/CD | 测试门 → 构建 → 扫描/SBOM/证明 → 审批 → SSH 部署 → 健康门 → 回滚 |
-| 四 | 零停机发布 | nginx 双槽、上游切换、秒级回滚、零停机与原地更新的双向对照证据 |
-| 五 | 收尾 | 七条 ADR、基线记录（含"已实测/未实测"边界）、简历材料 |
+| 批次 | 主题           | 交付的核心能力                                                                                    |
+| ---- | -------------- | ------------------------------------------------------------------------------------------------- |
+| 零   | 前置条件       | Docker 引擎可用、服务器就绪、仓库与镜像仓库就绪、Sepolia 部署与演示数据就绪、邮件通道打通         |
+| 一   | 镜像与一键拉起 | 多阶段 Dockerfile、compose 分层与 profiles、migrate 一次性服务、indexer 独立 worker               |
+| 二   | 可观测性       | `/api/metrics`、Prometheus 采集与 9 条告警规则、Alertmanager 邮件、Grafana 三块看板、三类故障演练 |
+| 三   | CI/CD          | 测试门 → 构建 → 扫描/SBOM/证明 → 审批 → SSH 部署 → 健康门 → 回滚                                  |
+| 四   | 零停机发布     | nginx 双槽、上游切换、秒级回滚、零停机与原地更新的双向对照证据                                    |
+| 五   | 收尾           | 七条 ADR、基线记录（含"已实测/未实测"边界）、简历材料                                             |
 
 **用户在本会话确认的三项决策：**
 
-| 决策 | 结论 |
-| --- | --- |
-| 云服务器 | 已有可用的 Linux 云服务器 → SSH 部署是真实生产发布 |
-| 第二阶段监控产物 | 不存在，本阶段新建 |
-| 交付范围 | A + B：单机 Compose + 双槽零停机（不含 Swarm、不含 k8s） |
-| 部署环境的链 | **只接 Sepolia 真实链**（不跑本地链容器） |
-| 告警接收端 | **邮件（SMTP）** |
+| 决策             | 结论                                                     |
+| ---------------- | -------------------------------------------------------- |
+| 云服务器         | 已有可用的 Linux 云服务器 → SSH 部署是真实生产发布       |
+| 第二阶段监控产物 | 不存在，本阶段新建                                       |
+| 交付范围         | A + B：单机 Compose + 双槽零停机（不含 Swarm、不含 k8s） |
+| 部署环境的链     | **只接 Sepolia 真实链**（不跑本地链容器）                |
+| 告警接收端       | **邮件（SMTP）**                                         |
 
 **对规格 §4.2 的一处细化（记录在案）**：规格的服务清单里列了 `chain`（`--profile local`）服务。既然用户选择只接 Sepolia，本计划**退役该服务**：本地开发改为让容器通过 `host.docker.internal` 访问宿主机上已在运行的 `hardhat node`。profiles 因此只剩 `observability` 一个。这不是非目标变更，只是同一目标下更少的活动部件。
 
@@ -340,27 +340,27 @@ Execution Readiness View:
 
 ## 12. Open Questions（执行时按推荐值实施）
 
-| # | 问题 | 推荐值 | 理由 |
-| --- | --- | --- | --- |
-| 1 | 服务器 CPU 架构 | 先查 `uname -m`；若是 `aarch64` 则改在服务器本机构建或加 `platforms: linux/arm64` | 现在按 amd64 设计；架构错了镜像拉下来直接报 exec format error |
-| 2 | 监控栈与 DApp 是否同机 | **同机**，但为监控容器设内存限额 | 简历项目不值得第二台机器；限额保证超限的是监控而不是应用 |
-| 3 | 演示投票的选项元数据 | 若 Pinata 凭据可用则 pin 真实元数据；否则退化为 CID 为空的投票并**如实记录** | 不伪造 CID（ADR-0021 明确禁止手写 CID） |
-| 4 | Grafana 是否对公网开放 | **不开放**，仅通过 SSH 隧道访问 | 单机暴露 3001 是最常见的被扫目标；隧道足够自己看 |
-| 5 | 是否给 nginx 加限流 | **加**，对 `/api/*` 做 basic rate limit | 一行配置换一个可以讲的防护点；但不得影响正常轮询 |
-| 6 | 服务器上是否需要 swap | 内存 ≤2G 时加 2G swap | 监控栈 + Next 构建峰值容易触发 OOM |
+| #   | 问题                   | 推荐值                                                                            | 理由                                                          |
+| --- | ---------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| 1   | 服务器 CPU 架构        | 先查 `uname -m`；若是 `aarch64` 则改在服务器本机构建或加 `platforms: linux/arm64` | 现在按 amd64 设计；架构错了镜像拉下来直接报 exec format error |
+| 2   | 监控栈与 DApp 是否同机 | **同机**，但为监控容器设内存限额                                                  | 简历项目不值得第二台机器；限额保证超限的是监控而不是应用      |
+| 3   | 演示投票的选项元数据   | 若 Pinata 凭据可用则 pin 真实元数据；否则退化为 CID 为空的投票并**如实记录**      | 不伪造 CID（ADR-0021 明确禁止手写 CID）                       |
+| 4   | Grafana 是否对公网开放 | **不开放**，仅通过 SSH 隧道访问                                                   | 单机暴露 3001 是最常见的被扫目标；隧道足够自己看              |
+| 5   | 是否给 nginx 加限流    | **加**，对 `/api/*` 做 basic rate limit                                           | 一行配置换一个可以讲的防护点；但不得影响正常轮询              |
+| 6   | 服务器上是否需要 swap  | 内存 ≤2G 时加 2G swap                                                             | 监控栈 + Next 构建峰值容易触发 OOM                            |
 
 ## 13. 本会话新增的链上证据（Task 0.4 的依据）
 
 用 `viem` 对 Sepolia 公共 RPC（`ethereum-sepolia-rpc.publicnode.com`）做**只读**调用，无交易、无私钥：
 
-| 核查项 | 结果 | 判定 |
-| --- | --- | --- |
-| 链头 | 11756951 → 11756953（两次调用间增长） | RPC 可用 |
-| 工厂 `0xcf01c9d51911f189b40d9287bcf21a638c36bf92` 代码 | 1933 字节 | 合约存活（与 README 记录一致） |
-| 实现 `0xb853ce67cdfa7e7d67c2ce0c2ef4f62a3d0add6b` 代码 | 9127 字节 | 有代码；README 记录当前构建为 9125 字节，**差 2 字节** |
-| `pollCount()` | `0` | 链上**没有任何投票** |
-| `currentRulesHash()` | 连续 3 次 revert | **不存在** |
-| `rulesHash(address)` | revert | **不存在** |
+| 核查项                                                 | 结果                                  | 判定                                                   |
+| ------------------------------------------------------ | ------------------------------------- | ------------------------------------------------------ |
+| 链头                                                   | 11756951 → 11756953（两次调用间增长） | RPC 可用                                               |
+| 工厂 `0xcf01c9d51911f189b40d9287bcf21a638c36bf92` 代码 | 1933 字节                             | 合约存活（与 README 记录一致）                         |
+| 实现 `0xb853ce67cdfa7e7d67c2ce0c2ef4f62a3d0add6b` 代码 | 9127 字节                             | 有代码；README 记录当前构建为 9125 字节，**差 2 字节** |
+| `pollCount()`                                          | `0`                                   | 链上**没有任何投票**                                   |
+| `currentRulesHash()`                                   | 连续 3 次 revert                      | **不存在**                                             |
+| `rulesHash(address)`                                   | revert                                | **不存在**                                             |
 
 结论（与 README 第 1054 行登记的隐患一致，现由链上调用证实）：
 
@@ -933,6 +933,7 @@ docker compose exec prometheus wget -qO- http://web-blue:3000/api/metrics | head
 
    其余七条：`VotingIndexErrors`（`increase(voting_index_errors_total[10m]) > 0`）、`VotingHealthDegraded`（blackbox 探针 `probe_success == 0`）、`VotingApiErrorRate`（5xx 占比 > 2%）、`ContainerDown`（`up == 0`）、`MySQLDown`（`mysql_up == 0`）、`HostDiskWillFillIn4Hours`（`predict_linear(node_filesystem_avail_bytes[6h], 4*3600) < 0`）、以及 `DeployVersionDrift`（Task 2.7 后启用，`voting_deploy_info` 与期望 tag 不一致）。
    每条 `annotations` 必须写明"在防什么"，不得只写指标名。
+
 3. 加 compose 服务：`prom/prometheus`，挂载 `prometheus.yml`、`rules/`、`alertmanager` 地址、`prometheus-data` 卷；**`profiles: ["observability"]`**；给内存限额。
 4. 本地校验：`promtool check config` + `promtool check rules`（用 `--entrypoint` 覆盖容器入口执行）。
 
@@ -1658,24 +1659,24 @@ python <aegis>/scripts/aegis-workspace.py check --root .
 
 **必须保持（违反即为设计缺陷）**
 
-| 边界 | 验证 Task |
-| --- | --- |
-| `docker compose up -d mysql` 仍可用，服务名与 3307 不变 | Task 1.3、Task 1.7 |
-| schema 只有一个所有者（无 initdb 脚本） | Task 1.5 |
-| `/api/health` JSON 契约不变 | Task 2.1（新增而非替换） |
-| `lagBlocks` 的 null 语义不得在指标层被抹平 | Task 2.1（负向对照） |
-| 应用在监控全缺时仍正常启动与服务 | Task 2.3、Task 1.7 |
-| 失败报告不回显配置值 | Task 3.3、Task 3.4 |
-| `ci.yml` 既有 5 个 job 语义不变 | Task 3.1 |
-| 部署链路不引入持币私钥 | Task 3.4 |
+| 边界                                                    | 验证 Task                |
+| ------------------------------------------------------- | ------------------------ |
+| `docker compose up -d mysql` 仍可用，服务名与 3307 不变 | Task 1.3、Task 1.7       |
+| schema 只有一个所有者（无 initdb 脚本）                 | Task 1.5                 |
+| `/api/health` JSON 契约不变                             | Task 2.1（新增而非替换） |
+| `lagBlocks` 的 null 语义不得在指标层被抹平              | Task 2.1（负向对照）     |
+| 应用在监控全缺时仍正常启动与服务                        | Task 2.3、Task 1.7       |
+| 失败报告不回显配置值                                    | Task 3.3、Task 3.4       |
+| `ci.yml` 既有 5 个 job 语义不变                         | Task 3.1                 |
+| 部署链路不引入持币私钥                                  | Task 3.4                 |
 
 **退役项**
 
-| 退役对象 | 原因 | 处置 |
-| --- | --- | --- |
-| 规格 §4.2 的 `chain` 服务（`--profile local`） | 用户选择只接 Sepolia | 不实现；本地开发改由 `host.docker.internal` 访问宿主机 hardhat node（Task 1.6） |
-| prod 中 web 的进程内索引循环（`INDEXER_ENABLED=true`） | 索引由独立 worker 承担 | 显式置 `false`（Task 4.2）；**代码保留**，因为它是 dev 便利，且默认行为不变 |
-| Sepolia 上的旧工厂 `0xcf01c9d5…` | 缺 `currentRulesHash`/`rulesHash`（§13 实测） | 归档记录并重新部署（Task 0.4） |
+| 退役对象                                               | 原因                                          | 处置                                                                            |
+| ------------------------------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------- |
+| 规格 §4.2 的 `chain` 服务（`--profile local`）         | 用户选择只接 Sepolia                          | 不实现；本地开发改由 `host.docker.internal` 访问宿主机 hardhat node（Task 1.6） |
+| prod 中 web 的进程内索引循环（`INDEXER_ENABLED=true`） | 索引由独立 worker 承担                        | 显式置 `false`（Task 4.2）；**代码保留**，因为它是 dev 便利，且默认行为不变     |
+| Sepolia 上的旧工厂 `0xcf01c9d5…`                       | 缺 `currentRulesHash`/`rulesHash`（§13 实测） | 归档记录并重新部署（Task 0.4）                                                  |
 
 ---
 
@@ -1760,21 +1761,21 @@ time ssh deploy@<server> 'cd /srv/voting && ./ops/deploy/rollback.sh'
 
 ## Risks
 
-| 风险 | 影响 | 缓解 / 处置 |
-| --- | --- | --- |
-| Docker 引擎修不好（README 记录过 API 持续 500） | 本计划没有任何一条能标"已实测" | Task 0.1 备选路线：WSL2 内原生 Docker Engine + 仓库移入 WSL 文件系统 |
-| 批四未提交改动与 push 冲突 | 历史里混入未完成工作流 | Task 0.3 第 1 步：先由用户决定其归属；本计划任何 Task 不得提交或回退它们 |
-| `tsx` 不在生产依赖中 | migrate / indexer 容器启动即失败 | Task 1.2 第 5 步显式处理，并写进 ADR（Task 5.1a） |
-| standalone 的 `server.js` 路径与预期不符 | ENTRYPOINT 指向不存在的文件 | Task 1.1 第 4 步先确认路径再写 Dockerfile |
-| `HOSTNAME` 未设为 `0.0.0.0` | 容器内服务正常但容器外连不上 | Task 1.2 第 4 步固化 |
-| 无法精确产生 `lagBlocks === null` | `LagUnknown` 演练无法完成，设计点无法证明 | Task 2.8 第 3 步先读 `lib/data.ts` 核实语义；若无法产生则**如实记为未完成**，不得用"导出 0 也能告警"替代 |
-| 零停机对照组测不出失败 | 实验组的"0 失败"失去意义 | Task 4.5 第 4 步：缩短探测间隔重测，直到对照能测出失败 |
-| 不向后兼容的迁移 | 双槽并存期新槽读写失败；回滚后服务起不来 | Task 4.6 的 expand-contract 约束 + runbook |
-| 服务器是 arm64 | 镜像 exec format error | §12 第 1 项：Task 0.2 先取 `uname -m` |
-| 监控栈内存挤占导致应用 OOM | 应用被 kill | 每个容器设内存限额（Task 2.3–2.6）；§12 第 2、6 项 |
-| 邮件被投进垃圾箱 | 演练时误判为"告警没发出" | Task 0.6 第 3 步先验证投递，并把发件人加入白名单 |
-| Grafana 对公网暴露 | 被扫描、弱口令 | §12 第 4 项：仅 SSH 隧道访问 |
-| `absent()` 规则被漏配或写错 | "索引整个挂掉"反而不告警 | Task 2.3 逐字给出表达式；Task 2.8 演练丙专门验证它触发 |
+| 风险                                            | 影响                                      | 缓解 / 处置                                                                                              |
+| ----------------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Docker 引擎修不好（README 记录过 API 持续 500） | 本计划没有任何一条能标"已实测"            | Task 0.1 备选路线：WSL2 内原生 Docker Engine + 仓库移入 WSL 文件系统                                     |
+| 批四未提交改动与 push 冲突                      | 历史里混入未完成工作流                    | Task 0.3 第 1 步：先由用户决定其归属；本计划任何 Task 不得提交或回退它们                                 |
+| `tsx` 不在生产依赖中                            | migrate / indexer 容器启动即失败          | Task 1.2 第 5 步显式处理，并写进 ADR（Task 5.1a）                                                        |
+| standalone 的 `server.js` 路径与预期不符        | ENTRYPOINT 指向不存在的文件               | Task 1.1 第 4 步先确认路径再写 Dockerfile                                                                |
+| `HOSTNAME` 未设为 `0.0.0.0`                     | 容器内服务正常但容器外连不上              | Task 1.2 第 4 步固化                                                                                     |
+| 无法精确产生 `lagBlocks === null`               | `LagUnknown` 演练无法完成，设计点无法证明 | Task 2.8 第 3 步先读 `lib/data.ts` 核实语义；若无法产生则**如实记为未完成**，不得用"导出 0 也能告警"替代 |
+| 零停机对照组测不出失败                          | 实验组的"0 失败"失去意义                  | Task 4.5 第 4 步：缩短探测间隔重测，直到对照能测出失败                                                   |
+| 不向后兼容的迁移                                | 双槽并存期新槽读写失败；回滚后服务起不来  | Task 4.6 的 expand-contract 约束 + runbook                                                               |
+| 服务器是 arm64                                  | 镜像 exec format error                    | §12 第 1 项：Task 0.2 先取 `uname -m`                                                                    |
+| 监控栈内存挤占导致应用 OOM                      | 应用被 kill                               | 每个容器设内存限额（Task 2.3–2.6）；§12 第 2、6 项                                                       |
+| 邮件被投进垃圾箱                                | 演练时误判为"告警没发出"                  | Task 0.6 第 3 步先验证投递，并把发件人加入白名单                                                         |
+| Grafana 对公网暴露                              | 被扫描、弱口令                            | §12 第 4 项：仅 SSH 隧道访问                                                                             |
+| `absent()` 规则被漏配或写错                     | "索引整个挂掉"反而不告警                  | Task 2.3 逐字给出表达式；Task 2.8 演练丙专门验证它触发                                                   |
 
 **BASELINE-GOVERNANCE §6 七维复核重点（每批结束时）**
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { PageShell } from "@/components/PageShell";
 import { ExecutionPanel } from "@/components/ExecutionPanel";
 import { PollActivity } from "@/components/PollActivity";
+import { SubscribeButton } from "@/components/SubscribeButton";
 import { PollAdmin } from "@/components/PollAdmin";
 import { PollBallot } from "@/components/PollBallot";
 import { ResultExport } from "@/components/ResultExport";
@@ -146,6 +147,13 @@ export default async function PollPage({ params }: { params: Promise<{ id: strin
       <div className="mt-6 space-y-6">
         <ResultExport address={address} />
         <PollActivity address={address} />
+
+        {/*
+          Below the activity feed, because that is the same information on demand:
+          a reader who has just looked at what has happened is the one most likely
+          to want to be told next time.
+        */}
+        <SubscribeButton address={address} />
       </div>
 
       {/*

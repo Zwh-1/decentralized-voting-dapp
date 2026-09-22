@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { HealthPanel } from "@/components/HealthPanel";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { WalletSlot } from "@/components/WalletSlot";
 import type { ChainTarget } from "@/lib/voting";
 /**
@@ -113,8 +114,15 @@ function Masthead({ configuredTarget }: { configuredTarget: ChainTarget | null }
           chain it reports is true of the whole deployment, not of one page — and
           because this dark band is what gives the chain badge enough contrast to
           be noticed at all.
+
+          The language switcher sits beside it for the same reason: both are
+          properties of the deployment and of this reader rather than of the page
+          being read, and both are set once and then forgotten.
         */}
-        <WalletSlot configuredTarget={configuredTarget} />
+        <div className="flex items-center gap-2">
+          <LanguageSwitcher />
+          <WalletSlot configuredTarget={configuredTarget} />
+        </div>
       </div>
     </div>
   );

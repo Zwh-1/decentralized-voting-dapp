@@ -406,3 +406,148 @@ describe("every reason is a sentence", () => {
     assert.ok(checked > 1000, `the sweep should cover many states, covered ${checked}`);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Language
+// ---------------------------------------------------------------------------
+//
+// The extraction moved the WORDING into a catalogue while leaving the ORDER and
+// the predicates here. These tests are what makes that claim checkable rather
+// than a comment: the same input must produce the same CAUSE in both languages,
+// and only the sentence around it may differ.
+
+describe("language", () => {
+  it("defaults to Chinese, so every pre-existing call site is unchanged", () => {
+    const zh = inputs();
+
+    assert.equal(sharedBlock(zh), sharedBlock(zh, "zh"));
+    assert.equal(voteReason(zh), voteReason(zh, "zh"));
+    assert.equal(withdrawReason(zh), withdrawReason(zh, "zh"));
+    assert.equal(refundReason(zh), refundReason(zh, "zh"));
+    assert.equal(closeReason(zh), closeReason(zh, "zh"));
+  });
+
+  it("answers in English when asked", () => {
+    const reason = sharedBlock(inputs({ isConnected: false }), "en");
+
+    assert.equal(reason, "Connect a wallet first.");
+  });
+
+  it("produces a DIFFERENT sentence per language for the same input", () => {
+    const input = inputs({ phase: SETUP });
+    const zh = sharedBlock(input, "zh");
+    const en = sharedBlock(input, "en");
+
+    assert.ok(zh !== undefined && en !== undefined);
+    assert.notEqual(zh, en, "the sentence must actually be translated");
+    assert.match(zh, /投票尚未开始/);
+    assert.match(en, /has not started/);
+  });
+
+  it("fills the chain placeholders in English too", () => {
+    // The one phrase with placeholders. A translation that dropped `{chainId}`
+    // would leave the reader unable to tell which chain to switch to.
+    const reason = sharedBlock(inputs({ contractKnown: false, subjectChainId: CHAIN_ID }), "en");
+
+    assert.ok(reason !== undefined);
+    assert.match(reason, new RegExp(String(CHAIN_ID)));
+    assert.ok(!reason.includes("{chainId}"), "the placeholder must be filled");
+    assert.ok(!reason.includes("{chainName}"), "the placeholder must be filled");
+    assert.ok(!reason.includes("{suffix}"), "the placeholder must be filled");
+  });
+
+  it("leaves no unfilled placeholder in any English sentence it can produce", () => {
+    // A sweep rather than a spot check: `interpolate` leaves an unknown
+    // placeholder VISIBLE on purpose, so any typo inside a template would reach
+    // the reader as literal braces. This is what catches it.
+    const phases = [SETUP, VOTING, REVEAL, ENDED];
+
+    for (const phase of phases) {
+      for (const contractKnown of [true, false]) {
+        for (const isConnected of [true, false]) {
+          for (const txBusy of [true, false]) {
+            for (const deadlinePassed of [true, false]) {
+              for (const canVote of [true, false]) {
+                for (const marked of [true, false]) {
+                  const input = inputs({
+                    phase,
+                    contractKnown,
+                    isConnected,
+                    txBusy,
+                    deadlinePassed,
+                    canVote,
+                    marked,
+                  });
+
+                  for (const reason of [
+                    sharedBlock(input, "en"),
+                    voteReason(input, "en"),
+                    changeReason(input, 1, "en"),
+                    withdrawReason(input, "en"),
+                    refundReason(input, "en"),
+                    closeReason(input, "en"),
+                  ]) {
+                    if (reason === undefined) continue;
+
+                    assert.ok(!/\{\w+\}/.test(reason), `unfilled placeholder in: ${reason}`);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it("keeps the SAME cause when the language changes", () => {
+    // The safety property of the whole extraction: a translation may not change
+    // WHICH reason a reader is given, only how it is worded. Compared by the
+    // undefined/defined shape across a sweep, since the sentences themselves
+    // differ by design.
+    const phases = [SETUP, VOTING, REVEAL, ENDED];
+
+    for (const phase of phases) {
+      for (const marked of [true, false]) {
+        for (const committed of [true, false]) {
+          for (const canVote of [true, false]) {
+            const input = inputs({ phase, marked, committed, canVote });
+
+            assert.equal(
+              sharedBlock(input, "en") === undefined,
+              sharedBlock(input, "zh") === undefined,
+              `sharedBlock disagreed at phase=${phase} marked=${marked}`,
+            );
+            assert.equal(
+              voteReason(input, "en") === undefined,
+              voteReason(input, "zh") === undefined,
+            );
+            assert.equal(
+              withdrawReason(input, "en") === undefined,
+              withdrawReason(input, "zh") === undefined,
+            );
+            assert.equal(
+              refundReason(input, "en") === undefined,
+              refundReason(input, "zh") === undefined,
+            );
+            assert.equal(
+              closeReason(input, "en") === undefined,
+              closeReason(input, "zh") === undefined,
+            );
+            assert.equal(
+              changeReason(input, 1, "en") === undefined,
+              changeReason(input, 1, "zh") === undefined,
+            );
+          }
+        }
+      }
+    }
+  });
+
+  it("keeps the exported BUSY_REASON identical to the catalogue's", () => {
+    // The constant used to hold its own copy of the sentence. If it ever drifts
+    // from the table, the reader sees one wording in one control and another
+    // elsewhere.
+    assert.equal(BUSY_REASON, sharedBlock(inputs({ txBusy: true }), "zh"));
+  });
+});

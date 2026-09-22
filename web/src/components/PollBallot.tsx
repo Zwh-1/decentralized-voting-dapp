@@ -13,6 +13,7 @@ import {
 } from "wagmi";
 
 import { OptionRow } from "@/components/OptionRow";
+import { ResultChart } from "@/components/ResultChart";
 import { Badge, Stat } from "@/components/ui";
 import { useMounted } from "@/hooks/useMounted";
 import { describeWriteFailure, phaseText, readStatus, type ReadState } from "@/lib/ballot-labels";
@@ -156,6 +157,31 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
   // address, and every "我的状态" row would otherwise render its answer as the
   // reader's own (未连接 is the truth there).
   const voter = isConnected ? voterResult?.result : undefined;
+
+  // ---- the tally, in the one shape both the numbers and the chart read ----
+  //
+  // A single expression rather than two, because two would be two chances to
+  // disagree: the 票数合计 stat, the per-option cards and `ResultChart` all read
+  // this object, and there is no second derivation of the total or of an
+  // option's count anywhere below. The shape is the app's shared wire shape
+  // (`TallyResponse`), the same one the API's index path produces, so the chart
+  // is not a special case that only the ballot can render.
+  //
+  // `source: "chain"` is not a guess. These numbers come from this component's
+  // own `results()` read on `target.chainId` — the chain the wallet would sign
+  // on (ADR-0019) — so they are the contract's own tally, and the chart names
+  // them the way the rest of the app already names a chain read.
+  const tally =
+    results === undefined
+      ? undefined
+      : {
+          source: "chain" as const,
+          total: Number(results[1]),
+          options: results[0].map((option) => ({
+            id: Number(option.id),
+            voteCount: Number(option.voteCount),
+          })),
+        };
 
   const phaseState = readStatus(phase !== undefined, reads.isError);
   // `ready` only when there is an address to have a state. Without one the state
@@ -331,7 +357,7 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
               initial === null ? (readFailed ? "读取失败" : "读取中…") : String(initial.optionCount)
             }
           />
-          <Stat label="票数合计" value={results === undefined ? "读取中…" : String(results[1])} />
+          <Stat label="票数合计" value={tally === undefined ? "读取中…" : String(tally.total)} />
           <Stat
             label="押金"
             value={myStake === undefined ? "读取中…" : `${formatEth(myStake)} ETH`}
@@ -543,6 +569,26 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
           </p>
         )}
       </section>
+
+      {/*
+        ---- the result, as a picture ----
+
+        Placed above the option cards because it answers the question the panel
+        above it asks: 票数合计 says how many votes there are, and this says how
+        they are split. It is rendered ONLY when `tally` exists, i.e. when the
+        same `results()` read the cards below are built from succeeded — a poll
+        whose tally could not be read gets the failure notice further down and no
+        chart at all, because an empty chart would report "could not read" as
+        "nothing to show" (ADR-0011).
+
+        Zero votes is a different story and gets its own honest sentence from
+        `ResultChart`: the read answered, and the answer is that nobody has voted.
+      */}
+      {tally !== undefined && (
+        <section>
+          <ResultChart tally={tally} />
+        </section>
+      )}
 
       {/* ---- the options ---- */}
       <section>

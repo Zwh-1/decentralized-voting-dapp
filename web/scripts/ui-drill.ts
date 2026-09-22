@@ -178,6 +178,10 @@ interface PageState {
   voteButtonTexts: string[];
   /** How many option action controls the ballot rendered, one per option. */
   optionActionCount: number;
+  /** True when a result chart rendered at all, which needs a readable tally. */
+  chartFound: boolean;
+  /** How many bars the chart drew. Must equal `optionActionCount` when it rendered. */
+  chartBarCount: number;
   refundReason: string | null;
   ipfsLabels: string[];
   /** Per IPFS row, in the same order as `ipfsLabels`: the CID that row is about. */
@@ -407,9 +411,18 @@ const READ_PAGE = `(() => {
   );
   // One entry per option, whatever that option's control currently offers.
   const optionActionCount = voteButtonTexts.length;
+  // The result chart draws one bar per option, so its bar count is the chart's
+  // own claim about how many options the poll has. Compared against
+  // \`optionActionCount\` rather than against a number written here: a chart that
+  // silently dropped an option still renders, and it renders as a SHORTER, wholly
+  // plausible bar chart. Only the ballot's own count can catch that.
+  const chartBarCount = document.querySelectorAll('[data-chart-bar]').length;
+  const chartFound = document.querySelector('[data-result-chart]') !== null;
   return {
     buttons,
     hasSubmittingLabel: text.includes('提交中…'),
+    chartBarCount,
+    chartFound,
     whitelistRow: rowAfter('白名单'),
     canVoteRow: rowAfter('可投票'),
     modeRow: rowAfter('准入方式'),
@@ -718,6 +731,17 @@ async function main(): Promise<number> {
       before.myOptionButtons === (votedForOption === null ? 0 : 1),
       `myOptions=${before.myOptionButtons} chainVotedFor=${votedForOption}`,
     );
+    // The chart is a rendering of the same tally the cards show, so the two must
+    // agree on how many options there are. Skipped rather than failed when no
+    // chart rendered at all: this deployment may have no index AND no reachable
+    // chain, in which case the ballot has no tally to draw and says so.
+    if (before.chartFound) {
+      check(
+        "the result chart drew one bar per option",
+        before.chartBarCount === before.optionActionCount,
+        `bars=${before.chartBarCount} options=${before.optionActionCount}`,
+      );
+    }
     check(
       "vote buttons are enabled exactly when the chain says the account may vote",
       chainSaysVotable

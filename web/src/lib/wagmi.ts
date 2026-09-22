@@ -1,8 +1,9 @@
-import { createConfig, fallback, http, type Transport } from "wagmi";
+import { createConfig, fallback, http, type CreateConnectorFn, type Transport } from "wagmi";
 import { hardhat, sepolia } from "wagmi/chains";
-import { injected } from "wagmi/connectors";
+import { coinbaseWallet, injected, walletConnect } from "wagmi/connectors";
 
 import { resolveRpcEndpoints } from "./rpc-endpoints";
+import { WALLET_APP_NAME, resolveWalletConnect, walletConnectNotice } from "./wallet-connectors";
 
 /**
  * wagmi configuration.
@@ -71,9 +72,67 @@ const localRpcUrls = process.env.NEXT_PUBLIC_LOCAL_RPC_URLS;
 const sepoliaRpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL;
 const sepoliaRpcUrls = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URLS;
 
+/**
+ * Read literally, for the same inlining reason as the endpoints above.
+ *
+ * `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` is a public value by design — it ships in
+ * the client bundle — so it is configuration, not a secret. It is still not
+ * committed, because it is per-deployment and belongs in `web/.env` with the rest.
+ */
+const walletConnectProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
+
+const walletConnectStatus = resolveWalletConnect(walletConnectProjectId);
+const walletConnectWarning = walletConnectNotice(walletConnectStatus);
+
+if (walletConnectWarning !== null && typeof window !== "undefined") {
+  // Console rather than the UI. A missing optional connector is an operator
+  // problem, not something a reader can act on, and a banner about it would be
+  // noise on every page for everyone.
+  console.warn(walletConnectWarning);
+}
+
+/**
+ * The connectors, in the order a wallet picker should show them.
+ *
+ * `injected()` first because it is the one that works with no configuration and no
+ * relay — a desktop extension or a wallet's own in-app browser connects straight
+ * through it. WalletConnect is added only when configured (see
+ * `wallet-connectors.ts` for why an unconfigured one is omitted rather than
+ * broken). Coinbase Wallet last: it needs no project id, and it covers readers who
+ * use that wallet on a phone, but it is the narrowest of the three.
+ *
+ * `appName` is the only parameter. The v4 SDK takes `{ appName, appLogoUrl? }` at
+ * construction and chooses between the smart wallet and the extension itself, so
+ * there is no preference to express here — an earlier version of this file passed
+ * a `preference` string, which the current SDK does not accept at this layer and
+ * which failed to typecheck.
+ */
+function buildConnectors(): CreateConnectorFn[] {
+  const connectors: CreateConnectorFn[] = [injected()];
+
+  if (walletConnectStatus.available) {
+    connectors.push(
+      walletConnect({
+        projectId: walletConnectStatus.projectId,
+        showQrModal: true,
+        metadata: {
+          name: WALLET_APP_NAME,
+          description: "On-chain voting with on-chain tallies.",
+          url: "https://localhost",
+          icons: [],
+        },
+      }),
+    );
+  }
+
+  connectors.push(coinbaseWallet({ appName: WALLET_APP_NAME }));
+
+  return connectors;
+}
+
 export const wagmiConfig = createConfig({
   chains: [hardhat, sepolia],
-  connectors: [injected()],
+  connectors: buildConnectors(),
   transports: {
     [hardhat.id]: endpointTransport(localRpcUrl, localRpcUrls),
     [sepolia.id]: endpointTransport(sepoliaRpcUrl, sepoliaRpcUrls),

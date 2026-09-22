@@ -6,17 +6,19 @@
 
 ## Progress
 
-| 批次 | 任务                                        | 状态   | 证据                                                                           |
-| ---- | ------------------------------------------- | ------ | ------------------------------------------------------------------------------ |
-| 一   | Task 1-2 多选 + 加权                        | 完成   | `PollMultiSelect.t.sol`、`PollMechanisms.t.sol`；commit `02ef5a5`              |
-| 一   | Task 3 委托投票                             | 完成   | `PollDelegation.t.sol`（21 测试）；ADR-0035；commit `367ef19`                  |
-| 一   | Task 4 commit-reveal                        | 完成   | `PollCommitReveal.t.sol`；`commit-reveal-drill` 21/21；commit `dcecef5`        |
-| 一   | 机制矩阵属性测试                            | 完成   | `PollMechanismMatrix.t.sol`（6 机制 × 200 轮，突变验证）                       |
-| 二   | Task 5-7 quorum/timelock/execute + 创建准入 | 完成   | `PollExecutor.t.sol`（43 测试）；ADR-0032/0033；commit `79ed547` + `3767c59`   |
-| 三   | Task 8 RPC 多端点容错                       | 完成   | `rpc-endpoints.ts` + `endpoints.ts`（22 测试）；ADR-0036                       |
-| 三   | Task 9 分页/搜索/投票率                     | 完成   | `pagination.ts`（50 测试）；`whitelistedCount()`；ADR-0037/0038                |
-| 三   | Task 10 审计视图 + 读缓存                   | 完成   | `/audit` + `/api/audit`；`audit.ts`（20 测试）+ `cache.ts`（9 测试）；ADR-0039 |
-| 四   | Task 11-13 前端体验                         | 未开始 | —                                                                              |
+| 批次 | 任务                                        | 状态 | 证据                                                                                   |
+| ---- | ------------------------------------------- | ---- | -------------------------------------------------------------------------------------- |
+| 一   | Task 1-2 多选 + 加权                        | 完成 | `PollMultiSelect.t.sol`、`PollMechanisms.t.sol`；commit `02ef5a5`                      |
+| 一   | Task 3 委托投票                             | 完成 | `PollDelegation.t.sol`（21 测试）；ADR-0035；commit `367ef19`                          |
+| 一   | Task 4 commit-reveal                        | 完成 | `PollCommitReveal.t.sol`；`commit-reveal-drill` 21/21；commit `dcecef5`                |
+| 一   | 机制矩阵属性测试                            | 完成 | `PollMechanismMatrix.t.sol`（6 机制 × 200 轮，突变验证）                               |
+| 二   | Task 5-7 quorum/timelock/execute + 创建准入 | 完成 | `PollExecutor.t.sol`（43 测试）；ADR-0032/0033；commit `79ed547` + `3767c59`           |
+| 三   | Task 8 RPC 多端点容错                       | 完成 | `rpc-endpoints.ts` + `endpoints.ts`（22 测试）；ADR-0036                               |
+| 三   | Task 9 分页/搜索/投票率                     | 完成 | `pagination.ts`（50 测试）；`whitelistedCount()`；ADR-0037/0038                        |
+| 三   | Task 10 审计视图 + 读缓存                   | 完成 | `/audit` + `/api/audit`；`audit.ts`（20 测试）+ `cache.ts`（9 测试）；ADR-0039         |
+| 四   | Task 11 结果图表                            | 完成 | `ResultChart.tsx`（服务端 SVG，无图表库）；`result-chart.test.ts`；ADR-0042            |
+| 四   | Task 12 i18n + 移动端连接                   | 完成 | `lib/i18n/*`（8 个 describe）；`wallet-connectors.ts`；ADR-0040/0043                   |
+| 四   | Task 13 模板/草稿 + 通知订阅                | 完成 | `templates.ts`（26）+ `draft.ts`（25）`notify`（28）+ `event-branches`（21）；ADR-0041 |
 
 **批一验收结果**（2026-09-22）：
 
@@ -44,6 +46,21 @@
 2. **Task 10 的"缓存"原表述为调整页面级 `revalidate`**。Next.js 的 `revalidate` 在构建期求值、无法读运行期环境变量，且缓存整个页面渲染结果会把一致性标记一起冻住——而一致性检查必须比较同一瞬间（ADR-0017）。改为在 `getPolls()` 上做读穿缓存，一致性检查与健康检查**不经过**它。详见 ADR-0039。
 
 **批三期间的一次真实返工**：`web/test/pagination.test.ts` 曾用 PowerShell 的 `Set-Content` 重写，被按 GBK 重新编码后成为非法 UTF-8（`read` 工具拒绝读取，字节 8789 处出现截断的 `E2 80` 序列）。改用文件写入工具整体重写。教训：源码文件一律走文件工具，不用 shell 重定向。
+
+**批四验收结果**（2026-09-22）：
+
+- `pnpm test`：350 合约（287 solidity + 63 nodejs）+ 658 web，全通过；`pnpm typecheck`、`pnpm format`、`pnpm build:web` 均干净。
+- `pnpm build:web` 输出确认 `/notifications`、`/api/notifications`、`/api/subscriptions` 已注册为动态路由。
+- 新增 ADR-0040（语言由读者选择、合约名不翻译）、ADR-0041（通知是推导的、订阅不是授权）、ADR-0042（服务端 SVG 图表）、ADR-0043（移动端连接的依赖树代价）。
+
+**批四新增测试 111 个**：`result-chart.test.ts`、`i18n.test.ts`（8 个 describe）、`wallet-connectors.test.ts`、`templates.test.ts` 26、`draft.test.ts` 25、`notify.test.ts` 28、`event-branches.test.ts` 21，以及 `ballot-reasons.test.ts` 追加的 6 条**语言覆盖**用例。
+
+**批四中途的一次派生值合并**：`getAuditActivity` 与 `listNotifications` 都要读"跨投票的事件流"。第一版各写了六分支 `UNION ALL`，随后抽出 `web/src/lib/indexer/event-branches.ts` 作为唯一所有者。`UNION ALL` 按**位置**匹配，所以六支的列顺序必须一致——`branchSql()` 用同一模板生成每一支使位置差异无法表达，`event-branches.test.ts` 逐支比对别名位置。这是批一那条教训（派生值不手写第二份）在批四的第二次应用。
+
+**批四的两处未完成，如实记录**：
+
+1. **i18n 只做了一部分**。`ballot-reasons.ts`、塔标元数据、语言切换器、结果来源标签已参数化；`ballot-labels.ts` 的阶段/状态句与其余组件的文案仍是内联中文。英文界面目前是中英混杂，不是完整英文。详见 ADR-0040 的 Consequences。
+2. **两条浏览器路径没有端到端验证**：`ui-drill` 未覆盖英文语言切换，也未覆盖订阅按钮与草稿恢复（该 drill 从不访问创建页，因此没有加草稿断言——加了也是没有消费者的死代码）。图表已加入 `chartBarCount === optionActionCount` 断言，但该 drill 需要同时跑起 Next 服务、Playwright 与本地 Hardhat，本次未执行。
 
 ## 0. Aegis Visibility
 

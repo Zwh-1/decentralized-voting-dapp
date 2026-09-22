@@ -21,9 +21,30 @@
  * The shape is deliberate: one `BallotInputs` value in, one sentence out. No
  * closures over hook results, no ordering hidden in a component body — the order
  * IS the specification, and it is now visible and testable in one file.
+ *
+ * ---------------------------------------------------------------------------
+ * What the language parameter did and did not change
+ * ---------------------------------------------------------------------------
+ *
+ * Every sentence now comes from `BallotPhrases` (see `i18n/ballot-phrases.ts`),
+ * and each function takes an optional `locale`. The ORDER of the checks, the
+ * predicates and the set of causes are untouched — that is the part that encodes
+ * the contract's behaviour, and a translation must not be able to reorder a
+ * reader's rights. Only the wording moved.
+ *
+ * `locale` defaults to `DEFAULT_LOCALE`, so every pre-existing call site keeps
+ * producing exactly the sentence it produced before. That is what makes the
+ * extraction additive rather than a rewrite.
  */
 import { chainName, PollPhase } from "./voting";
 import type { ReadState } from "./ballot-labels";
+import {
+  ballotPhrasesFor,
+  DEFAULT_LOCALE,
+  interpolate,
+  type BallotPhrases,
+  type Locale,
+} from "./i18n";
 
 /** Everything the reason functions need. All of it comes from chain reads. */
 export interface BallotInputs {
@@ -65,8 +86,14 @@ export interface BallotInputs {
   committed: boolean;
 }
 
-/** The sentence for a write that has to wait; shared by every control. */
-export const BUSY_REASON = "上一笔交易还在确认中，请等它完成。";
+/**
+ * The sentence for a write that has to wait; shared by every control.
+ *
+ * Still exported as a constant because the ballot renders it in more than one
+ * place, and a second spelling of it would be the drift this module exists to
+ * prevent. It now reads the phrase table rather than holding its own copy.
+ */
+export const BUSY_REASON: string = ballotPhrasesFor(DEFAULT_LOCALE).busy;
 
 /** `Phase.Ended`, or a `Voting` poll whose deadline has passed. */
 function votingClosed(input: BallotInputs): boolean {
@@ -93,9 +120,22 @@ function isSetup(input: BallotInputs): boolean {
   return input.phase === PollPhase.Setup;
 }
 
-/** The "wrong chain / no factory" sentence. Named once so it cannot drift. */
-function unknownContract(input: BallotInputs, suffix: string): string {
-  return `当前链（${input.subjectChainId}，${chainName(input.subjectChainId)}）没有已登记的工厂合约，${suffix}`;
+/**
+ * The "wrong chain / no factory" sentence. Named once so it cannot drift.
+ *
+ * The placeholders go through the shared `interpolate`, not through a local
+ * `replace` chain: a second interpolation implementation is how a placeholder
+ * ends up filled in one sentence and left literal in another.
+ *
+ * The three call sites below pass different suffixes, because the REMEDY differs
+ * even though the diagnosis does not.
+ */
+function unknownContract(input: BallotInputs, phrases: BallotPhrases, suffix: string): string {
+  return interpolate(phrases.wrongNetwork, {
+    chainId: input.subjectChainId,
+    chainName: chainName(input.subjectChainId),
+    suffix,
+  });
 }
 
 /** Reads a status as a sentence, for the two states neither ready nor failed. */
@@ -118,8 +158,13 @@ function statusSentence(state: ReadState, failedText: string, loadingText: strin
  * the deadline, then admission. Reporting a different order would tell a reader
  * the wrong reason about a poll that is, say, both closed and not admitted.
  */
-export function sharedBlock(input: BallotInputs): string | undefined {
-  return checkUntilAdmission(input) ?? admissionBlock(input);
+export function sharedBlock(
+  input: BallotInputs,
+  locale: Locale = DEFAULT_LOCALE,
+): string | undefined {
+  const phrases = ballotPhrasesFor(locale);
+
+  return checkUntilAdmission(input, phrases) ?? admissionBlock(input, phrases);
 }
 
 /**
@@ -129,29 +174,25 @@ export function sharedBlock(input: BallotInputs): string | undefined {
  * sentences differ per control, so they repeat the same ordered checks with their
  * own wording. What they must not do is reorder them, and they do not.
  */
-function checkUntilAdmission(input: BallotInputs): string | undefined {
+function checkUntilAdmission(input: BallotInputs, phrases: BallotPhrases): string | undefined {
   if (!input.contractKnown) {
-    return unknownContract(input, "无法确定投票合约。请在钱包里切到本应用部署的那条链。");
+    return unknownContract(input, phrases, phrases.contractUnknownCannotDetermine);
   }
 
   if (!input.isConnected) {
-    return "请先连接钱包。";
+    return phrases.connectWallet;
   }
 
   if (input.txBusy) {
-    return BUSY_REASON;
+    return phrases.busy;
   }
 
   if (input.phaseState !== "ready") {
-    return statusSentence(
-      input.phaseState,
-      "读取合约阶段失败，无法判断能否投票；请检查 RPC 后重试。",
-      "正在读取合约状态…",
-    );
+    return statusSentence(input.phaseState, phrases.votePhaseReadFailed, phrases.readingContract);
   }
 
   if (isSetup(input)) {
-    return "投票尚未开始：发起人还没有调用 startPoll()，此刻合约不接受任何投票。";
+    return phrases.setup;
   }
 
   if (isReveal(input)) {
@@ -159,7 +200,7 @@ function checkUntilAdmission(input: BallotInputs): string | undefined {
     // The reader's next action here is to REVEAL, and `refund()` still reverts
     // until the poll reaches `Ended` — so pointing at the refund button would
     // send them at a call the contract rejects.
-    return "投票窗口已关闭，现在处于揭示阶段：合约不再接受新的投票或改投，只能揭示此前提交的承诺。揭示期结束后未揭示的承诺视为弃权，押金仍可取回。";
+    return phrases.reveal;
   }
 
   if (votingClosed(input)) {
@@ -167,16 +208,12 @@ function checkUntilAdmission(input: BallotInputs): string | undefined {
     // differs: an Ended poll already lets the stake out, a past-deadline one
     // needs `closeAfterDeadline()` first.
     return input.deadlinePassed && input.phase === PollPhase.Voting
-      ? "已过截止时间，合约不再接受投票（也拒绝改投与撤票）。押金要等投票被正式关闭后才能取回。"
-      : "投票已结束，合约不再接受投票与改投。若你还有押金，可以用「取回押金」拿回。";
+      ? phrases.deadlinePassed
+      : phrases.ended;
   }
 
   if (input.voterState !== "ready") {
-    return statusSentence(
-      input.voterState,
-      "读取你在本投票中的状态失败，无法判断能否投票；请检查 RPC 后重试。",
-      "正在读取你在本投票中的状态…",
-    );
+    return statusSentence(input.voterState, phrases.voteVoterReadFailed, phrases.readingVoterState);
   }
 
   return undefined;
@@ -192,22 +229,24 @@ function checkUntilAdmission(input: BallotInputs): string | undefined {
  * see `changeReason`, which skips this gate exactly when the reader already
  * holds a vote.
  */
-function admissionBlock(input: BallotInputs): string | undefined {
+function admissionBlock(input: BallotInputs, phrases: BallotPhrases): string | undefined {
   if (!input.canVote) {
     // `canVote` is `openToAll || whitelisted`, so on an open poll this branch is
     // unreachable for every address. A reader who reaches it is genuinely on a
     // whitelisted poll, and the sentence says which of the two sub-cases applies.
-    return input.whitelisted
-      ? "这个地址虽然在本投票的白名单里，但合约当前不接受它投票；请确认阶段与截止时间。"
-      : "这个地址不在本投票的白名单里，合约会拒绝投票与改投。白名单由发起人维护。";
+    return input.whitelisted ? phrases.whitelistedButRefused : phrases.notWhitelisted;
   }
 
   return undefined;
 }
 
 /** Why 投票 is unavailable. */
-export function voteReason(input: BallotInputs): string | undefined {
-  const blocked = sharedBlock(input);
+export function voteReason(
+  input: BallotInputs,
+  locale: Locale = DEFAULT_LOCALE,
+): string | undefined {
+  const phrases = ballotPhrasesFor(locale);
+  const blocked = sharedBlock(input, locale);
 
   if (blocked !== undefined) {
     return blocked;
@@ -216,7 +255,7 @@ export function voteReason(input: BallotInputs): string | undefined {
   if (input.marked) {
     // Not a dead end: the same address can move its vote, which is the operation
     // the old single-tenant contract could not express at all.
-    return "你已经投过票了，合约会以 AlreadyVoted 拒绝第二次投票。要换选项请用其他选项上的「改投」，要退出请用「撤票」。";
+    return phrases.alreadyVoted;
   }
 
   return undefined;
@@ -233,8 +272,15 @@ export function voteReason(input: BallotInputs): string | undefined {
  * offered a change it cannot make (`HasNotVoted`), so the admission sentence is
  * the right one to show.
  */
-export function changeReason(input: BallotInputs, optionId: number): string | undefined {
-  const blocked = checkUntilAdmission(input) ?? (input.marked ? undefined : admissionBlock(input));
+export function changeReason(
+  input: BallotInputs,
+  optionId: number,
+  locale: Locale = DEFAULT_LOCALE,
+): string | undefined {
+  const phrases = ballotPhrasesFor(locale);
+  const blocked =
+    checkUntilAdmission(input, phrases) ??
+    (input.marked ? undefined : admissionBlock(input, phrases));
 
   if (blocked !== undefined) {
     return blocked;
@@ -244,42 +290,47 @@ export function changeReason(input: BallotInputs, optionId: number): string | un
     // The contract reverts with `SameOption` here, so offering the button would
     // offer a transaction guaranteed to fail — and that failure would arrive as a
     // wallet prompt the reader has no reason to expect.
-    return "你当前就投给了这个选项，合约会以 SameOption 拒绝「改投到同一个选项」。";
+    return phrases.sameOption;
   }
 
   return undefined;
 }
 
 /** Why 撤票 is unavailable. */
-export function withdrawReason(input: BallotInputs): string | undefined {
+export function withdrawReason(
+  input: BallotInputs,
+  locale: Locale = DEFAULT_LOCALE,
+): string | undefined {
+  const phrases = ballotPhrasesFor(locale);
+
   if (!input.contractKnown) {
-    return unknownContract(input, "无法确定投票合约。");
+    return unknownContract(input, phrases, phrases.contractUnknownGeneric);
   }
 
   if (!input.isConnected) {
-    return "请先连接钱包。";
+    return phrases.connectWallet;
   }
 
   if (input.txBusy) {
-    return BUSY_REASON;
+    return phrases.busy;
   }
 
   if (input.phaseState !== "ready" || input.voterState !== "ready") {
     return input.phaseState === "failed" || input.voterState === "failed"
-      ? "读取合约状态失败，无法判断能否撤票；请检查 RPC 后重试。"
-      : "正在读取合约状态…";
+      ? phrases.withdrawStatusReadFailed
+      : phrases.readingContract;
   }
 
   if (isReveal(input)) {
-    return "揭示阶段不能撤票：此时撤票等于放弃这一票。未揭示的承诺会在揭示期结束后自动视为弃权，押金仍可取回。";
+    return phrases.withdrawInReveal;
   }
 
   if (votingClosed(input)) {
-    return "投票已经结束，撤票只在投票进行中可用；押金请用「取回押金」拿回。";
+    return phrases.withdrawEnded;
   }
 
   if (isSetup(input)) {
-    return "投票尚未开始。";
+    return phrases.withdrawInSetup;
   }
 
   if (input.committed) {
@@ -295,46 +346,43 @@ export function withdrawReason(input: BallotInputs): string | undefined {
     // The contract reverts with `HasNotVoted`. Saying which of "never voted" and
     // "already withdrawn" applies is not possible from `voterState` alone, and
     // guessing would be worse than saying the fact that is checkable.
-    return "你目前在本投票中没有任何有效票，合约会以 HasNotVoted 拒绝撤票。";
+    return phrases.hasNotVoted;
   }
 
   return undefined;
 }
 
 /** Why 取回押金 is unavailable. */
-export function refundReason(input: BallotInputs): string | undefined {
+export function refundReason(
+  input: BallotInputs,
+  locale: Locale = DEFAULT_LOCALE,
+): string | undefined {
+  const phrases = ballotPhrasesFor(locale);
+
   if (!input.contractKnown) {
-    return unknownContract(input, "无法确定投票合约，也就无法取回押金。");
+    return unknownContract(input, phrases, phrases.contractUnknownCannotRefund);
   }
 
   if (!input.isConnected) {
-    return "请先连接钱包。";
+    return phrases.connectWallet;
   }
 
   if (input.txBusy) {
-    return BUSY_REASON;
+    return phrases.busy;
   }
 
   if (!votingClosed(input)) {
     return input.phaseState !== "ready"
-      ? statusSentence(
-          input.phaseState,
-          "读取合约阶段失败，无法判断能否取回押金；请检查 RPC 后重试。",
-          "正在读取合约状态…",
-        )
-      : "投票还没结束，押金现在不能取回；结束前想退出请用「撤票」（撤票会把押金当场退给你）。";
+      ? statusSentence(input.phaseState, phrases.refundPhaseReadFailed, phrases.readingContract)
+      : phrases.refundBeforeEnd;
   }
 
   if (input.voterState !== "ready") {
-    return statusSentence(
-      input.voterState,
-      "读取押金余额失败，无法判断是否有可取回的押金；请检查 RPC 后重试。",
-      "正在读取押金余额…",
-    );
+    return statusSentence(input.voterState, phrases.refundStakeReadFailed, phrases.readingStake);
   }
 
   if (input.myStake === undefined || input.myStake === 0n) {
-    return "没有可取回的押金。";
+    return phrases.refundNothing;
   }
 
   return undefined;
@@ -354,29 +402,30 @@ export function refundReason(input: BallotInputs): string | undefined {
  * a poll is unreachable — `refund()` requires `Phase.Ended`, and nothing else can
  * move the poll out of `Voting`.
  */
-export function closeReason(input: BallotInputs): string | undefined {
+export function closeReason(
+  input: BallotInputs,
+  locale: Locale = DEFAULT_LOCALE,
+): string | undefined {
+  const phrases = ballotPhrasesFor(locale);
+
   if (!input.contractKnown) {
-    return unknownContract(input, "无法确定投票合约。");
+    return unknownContract(input, phrases, phrases.contractUnknownGeneric);
   }
 
   if (input.phaseState !== "ready") {
-    return statusSentence(
-      input.phaseState,
-      "读取合约阶段失败，无法判断能否关闭；请检查 RPC 后重试。",
-      "正在读取合约状态…",
-    );
+    return statusSentence(input.phaseState, phrases.closeReadFailed, phrases.readingContract);
   }
 
   if (input.phase === PollPhase.Ended) {
-    return "投票已经正式关闭了。";
+    return phrases.closeEnded;
   }
 
   if (isSetup(input)) {
-    return "投票还没开始，合约会以 InvalidPhase 拒绝 closeAfterDeadline()。";
+    return phrases.closeInSetup;
   }
 
   if (!input.deadlinePassed) {
-    return "还没到截止时间，合约会以 DeadlineNotInFuture 拒绝 closeAfterDeadline()。";
+    return phrases.closeBeforeDeadline;
   }
 
   return undefined;
