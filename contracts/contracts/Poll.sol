@@ -340,6 +340,42 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      write path so a reader does not have to sum an unbounded mapping.
     uint256 public totalWeightAssigned;
 
+    /// @notice The address a subject handed its vote to; zero when it holds its
+    ///         own. Consulted only when `config.delegable`.
+    ///
+    /// @dev SINGLE-LEVEL, and that is the whole design. A delegate may not
+    ///      itself be a delegate (`CannotDelegateToADelegate`), so authority
+    ///      moves exactly one hop and stops. Chained delegation would need cycle
+    ///      detection on a graph the contract cannot bound, and would make the
+    ///      gas cost of a vote depend on how deep the chain happened to be —
+    ///      which turns "cast a ballot" into a call whose cost the voter cannot
+    ///      predict. Refusing the chain outright is what buys both properties.
+    mapping(address => address) public delegatedTo;
+
+    /// @notice How many subjects handed their vote to this address.
+    ///
+    /// @dev Maintained rather than counted, so that "may this address delegate
+    ///      onward?" is a single read. Keeping the count here is also what makes
+    ///      the single-level rule enforceable at delegation time instead of
+    ///      merely detectable at vote time.
+    mapping(address => uint256) public delegateCountOf;
+
+    /// @dev Extra power the address controls ON TOP OF its own weight, from
+    ///      subjects that named it.
+    ///
+    ///      Deliberately NOT the total. The total depends on an address's own
+    ///      weight, which on a weighted poll is assigned by the creator in Setup
+    ///      and can be reassigned; caching the total here would leave this
+    ///      mapping stale the moment a weight changed, and the staleness would
+    ///      show up as a tally that disagrees with `weightOf`. Keeping only the
+    ///      delegated surplus means there is exactly one owner of "what is this
+    ///      address's own weight" — the weight table — and this field cannot
+    ///      contradict it.
+    ///
+    ///      Read through `controlledPowerOf`, never directly, so callers get the
+    ///      total without having to remember to add the weight themselves.
+    mapping(address => uint256) private _delegatedSurplus;
+
     // ---------------------------------------------------------------------
     // Events
     // ---------------------------------------------------------------------
@@ -377,6 +413,22 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      a weighted poll, and only legal in Setup.
     event WeightAssigned(address indexed voter, uint256 weight);
 
+    /// @dev An address handed its vote to another, or took it back.
+    ///
+    ///      `to == address(0)` is a revocation. Emitted rather than only stored
+    ///      because delegation changes who can act for a subject, and a reader
+    ///      watching a poll needs to see the transfer of authority itself, not
+    ///      merely infer it from a later vote by someone else.
+    event Delegated(address indexed from, address indexed to);
+
+    /// @dev A delegate cast a ballot on behalf of a subject.
+    ///
+    ///      Both addresses are indexed because both are the answer to a real
+    ///      question: the delegate for "who acted", the subject for "whose vote
+    ///      moved". One event with both fields beats two events that a reader
+    ///      would have to correlate.
+    event VoteDelegated(address indexed delegate, address indexed onBehalfOf, uint256 power);
+
     // ---------------------------------------------------------------------
     // Errors
     // ---------------------------------------------------------------------
@@ -405,6 +457,14 @@ contract Poll is Ownable, ReentrancyGuard {
     error UnweightedVoter(address voter);
     error ZeroWeight(address voter);
     error NoWeightAssigned(address voter);
+    error NotDelegable();
+    error SelfDelegation(address voter);
+    error CannotDelegateToADelegate(address delegate);
+    error AlreadyDelegated(address from, address to);
+    error HasNotDelegated(address voter);
+    error DelegatorHasVoted(address delegator);
+    error DelegateNotEligible(address delegate);
+    error NotADelegate(address caller);
 
     // ---------------------------------------------------------------------
     // Construction
@@ -522,6 +582,122 @@ contract Poll is Ownable, ReentrancyGuard {
 
             emit WeightAssigned(voter, weights[i]);
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Delegation
+    // ---------------------------------------------------------------------
+
+    /// @notice Hand this caller's vote to `delegate`, or take it back with
+    ///         `address(0)`.
+    ///
+    /// @dev WHAT A DELEGATE GETS. Authority, not ownership: the delegate casts
+    ///      ONE ballot that counts for itself plus every subject that named it.
+    ///      It cannot split those votes across different options, because the
+    ///      tally credits a single set once — which is what keeps "one subject,
+    ///      one count" true even though the acting address differs (ADR-0034).
+    ///
+    ///      WHY THE SUBJECT MUST NOT HAVE VOTED YET. If it had, its vote is
+    ///      already in the tally, and handing authority away afterwards would
+    ///      either double-count it or silently erase it. Refusing the delegation
+    ///      makes the voter withdraw its own vote first, which is a visible
+    ///      action with a visible effect rather than a hidden one.
+    ///
+    ///      WHY A DELEGATE MAY NOT ITSELF BE A DELEGATE. See `delegatedTo`: the
+    ///      single-level rule is what keeps vote cost independent of a chain
+    ///      depth the contract cannot bound. This is the check that enforces it
+    ///      at the moment authority moves, so a chain can never come to exist.
+    function delegate(address to) external {
+        if (!config.delegable) revert NotDelegable();
+        if (phase != Phase.Voting) revert InvalidPhase(Phase.Voting, phase);
+        if (to == msg.sender) revert SelfDelegation(msg.sender);
+        if (!whitelistedFor(msg.sender)) revert NotWhitelisted(msg.sender);
+        if (_votedOptions[msg.sender].length != 0) revert DelegatorHasVoted(msg.sender);
+
+        address current = delegatedTo[msg.sender];
+        if (current == to) revert AlreadyDelegated(msg.sender, to);
+
+        if (to != address(0)) {
+            // An unlisted address cannot hold authority: it has no vote of its
+            // own and no weight, so a delegation to it would create power out of
+            // nothing.
+            if (!whitelistedFor(to)) revert DelegateNotEligible(to);
+
+            // THE SINGLE-LEVEL RULE, and the check is on the RIGHT side of the
+            // relationship: what is refused is a delegate handing its AUTHORITY
+            // onward, i.e. `to` having already delegated ITSELF. Checking
+            // whether `to` merely HAS delegators would be wrong — that would
+            // stop two subjects from naming the same delegate, which is the
+            // ordinary case the mechanism exists for.
+            //
+            // Refusing the chain is what keeps the cost of a vote independent of
+            // a depth the contract cannot bound (see `delegatedTo`).
+            if (delegatedTo[to] != address(0)) revert CannotDelegateToADelegate(to);
+        }
+
+        // The subject's weight moves OFF its own account and ONTO the
+        // delegate's. Expressed as a surplus rather than an absolute total, so
+        // the weight table stays the single owner of "what is this address's own
+        // weight" — see `_delegatedSurplus`.
+        //
+        // Revocation (`to == address(0)`) runs the same two moves with the
+        // second half skipped, so the counters cannot disagree about how they
+        // are maintained.
+        if (current != address(0)) {
+            _delegatedSurplus[current] -= _ownPowerOf(msg.sender);
+            delegateCountOf[current] -= 1;
+        }
+
+        delegatedTo[msg.sender] = to;
+
+        if (to != address(0)) {
+            _delegatedSurplus[to] += _ownPowerOf(msg.sender);
+            delegateCountOf[to] += 1;
+        }
+
+        emit Delegated(msg.sender, to);
+    }
+
+    /// @notice The voting power an address currently controls: its own, plus
+    ///         that of every subject that delegated to it.
+    ///
+    /// @dev The number a voter should be shown before acting — "your ballot
+    ///      counts for 4" — rather than making the UI add up `weightOf` and the
+    ///      delegator count itself. A subject that delegated away returns zero,
+    ///      because its weight now belongs to its delegate.
+    ///
+    ///      A view, computed from the same two sources `vote` will use, so it
+    ///      cannot drift from what the ballot actually carries.
+    function controlledPowerOf(address account) external view returns (uint256) {
+        if (delegatedTo[account] != address(0)) {
+            return 0;
+        }
+
+        // A live ballot owns the power; the surplus was moved into it at vote
+        // time. Reading the credited value here rather than recomputing keeps
+        // "how much does this address count for" a question with one answer: it
+        // is never both "controlled" and "credited".
+        uint256 credited = votingPowerOf[account];
+        if (credited != 0) {
+            return credited;
+        }
+
+        return _ownPowerOf(account) + _delegatedSurplus[account];
+    }
+
+    /// @dev An address's own contribution, independent of delegation.
+    ///
+    ///      Reads the weight table on a weighted poll and 1 otherwise, WITHOUT
+    ///      the revert `_powerFor` applies. Delegation must be able to compute a
+    ///      subject's power while the creator is still assigning weights, so a
+    ///      missing weight is 0 here; the refusal happens at vote time, where
+    ///      the voter can act on the message.
+    function _ownPowerOf(address voter) private view returns (uint256) {
+        if (!config.weighted) {
+            return 1;
+        }
+
+        return weightOf[voter];
     }
 
     // ---------------------------------------------------------------------
@@ -657,15 +833,48 @@ contract Poll is Ownable, ReentrancyGuard {
         // write path. Short-circuiting on the flag means an open poll costs one
         // fewer SLOAD than a whitelisted one per vote.
         if (!openToAll && !isWhitelisted[msg.sender]) revert NotWhitelisted(msg.sender);
+
+        // A subject that handed its vote away may not also vote for itself: that
+        // would count the same weight twice, once directly and once through the
+        // delegate. Withdrawal is the way out, and it is refused below only
+        // because there is nothing of its own to withdraw.
+        if (delegatedTo[msg.sender] != address(0)) revert NotADelegate(msg.sender);
+
         if (_votedOptions[msg.sender].length != 0) revert AlreadyVoted(msg.sender);
         if (msg.value != STAKE) revert IncorrectStake(STAKE, msg.value);
 
-        uint256 power = _powerFor(msg.sender);
+        // One stake, one ballot, however much power it carries. The subjects that
+        // delegated here do NOT each post a stake: they hold no vote of their
+        // own to secure, and requiring one would make delegating cost as much as
+        // voting while producing a single ballot.
+        //
+        // `_powerFor` rather than `_ownPowerOf` for the delegate's own share, so
+        // that a weighted delegate the creator never listed is refused with a
+        // message naming the problem.
+        uint256 power = _powerFor(msg.sender) + _delegatedSurplus[msg.sender];
 
+        // The surplus is deliberately NOT cleared here. A withdrawal has to be
+        // able to hand the delegated weight back, and `_clearVote` restores
+        // `votingPowerOf` to zero — so the surplus is the only record that the
+        // power was ever delegated. Clearing it would make a delegate's
+        // withdrawal silently disenfranchise every subject that named it.
+        // `controlledPowerOf` reports the credited value first, so leaving this
+        // in place does not double-report.
         _recordVote(msg.sender, optionIds, power);
 
         stakeOf[msg.sender] = msg.value;
         totalStaked += msg.value;
+
+        // One event announcing that this ballot also carried delegated weight.
+        // The individual subjects are NOT enumerated: the contract cannot walk a
+        // mapping, and a per-subject event would require a delegate to pass in a
+        // list the contract cannot verify. `VoteRecorded`'s `power` already says
+        // how much was credited, and each `Delegated` event already names who
+        // gave it — so the two together are the full account, without the
+        // contract having to maintain an enumerable set it has no other use for.
+        if (delegateCountOf[msg.sender] != 0) {
+            emit VoteDelegated(msg.sender, msg.sender, power);
+        }
     }
 
     /// @notice Move an existing vote to a different option set. Costs no extra stake.
@@ -719,6 +928,12 @@ contract Poll is Ownable, ReentrancyGuard {
         if (previous.length == 0) revert HasNotVoted(msg.sender);
 
         uint256 amount = stakeOf[msg.sender];
+
+        // Nothing to restore: `_delegatedSurplus` was left untouched by `vote`
+        // precisely so this path needs no bookkeeping. `_clearVote` zeroes the
+        // credited power, and `controlledPowerOf` falls back to
+        // "own weight + surplus" — which is exactly the power the delegate held
+        // before it voted, so its subjects keep their voice.
 
         // Checks-Effects-Interactions: every piece of state is cleared BEFORE
         // the transfer, so a reentrant caller finds nothing left to take.
@@ -1018,6 +1233,18 @@ contract Poll is Ownable, ReentrancyGuard {
         uint256[] selections;
         /// @dev How much power this address's vote counted for.
         uint256 power;
+        /// @dev The address this one handed its vote to, or zero.
+        address delegatedTo;
+        /// @dev How many subjects handed their vote to this address.
+        uint256 delegatorCount;
+        /// @dev Power this address controls: its own plus its subjects'. This is
+        ///      the number to show BEFORE voting — "your ballot will count for
+        ///      4" — because `power` is zero until a vote exists.
+        uint256 controlledPower;
+        /// @dev True when this address has handed its vote away, so the UI can
+        ///      explain why the ballot is closed to it rather than showing a
+        ///      button that would revert with `NotADelegate`.
+        bool delegating;
     }
 
     /// @dev `whitelisted` stays the raw mapping answer even when `openToAll` is
@@ -1036,6 +1263,17 @@ contract Poll is Ownable, ReentrancyGuard {
         state.canVote = openToAll || whitelistedFor(voter);
         state.selections = held;
         state.power = votingPowerOf[voter];
+        state.delegatedTo = delegatedTo[voter];
+        state.delegatorCount = delegateCountOf[voter];
+        // Read as "own weight plus delegated surplus", or the credited power
+        // once a ballot exists — matching `controlledPowerOf` exactly, so the
+        // struct and the standalone view can never disagree.
+        state.controlledPower = delegatedTo[voter] != address(0)
+            ? 0
+            : (votingPowerOf[voter] != 0
+                ? votingPowerOf[voter]
+                : _ownPowerOf(voter) + _delegatedSurplus[voter]);
+        state.delegating = delegatedTo[voter] != address(0);
     }
 
     /// @dev Split out because `voterState` reads the mapping twice and the

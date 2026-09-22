@@ -274,6 +274,22 @@ export const pollAbi = [
     "type": "constructor"
   },
   {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "from",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      }
+    ],
+    "name": "AlreadyDelegated",
+    "type": "error"
+  },
+  {
     "inputs": [],
     "name": "AlreadyInitialized",
     "type": "error"
@@ -292,12 +308,45 @@ export const pollAbi = [
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "delegate",
+        "type": "address"
+      }
+    ],
+    "name": "CannotDelegateToADelegate",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "endsAt",
         "type": "uint256"
       }
     ],
     "name": "DeadlineNotInFuture",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "delegate",
+        "type": "address"
+      }
+    ],
+    "name": "DelegateNotEligible",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "delegator",
+        "type": "address"
+      }
+    ],
+    "name": "DelegatorHasVoted",
     "type": "error"
   },
   {
@@ -325,6 +374,17 @@ export const pollAbi = [
       }
     ],
     "name": "GracePeriodNotElapsed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      }
+    ],
+    "name": "HasNotDelegated",
     "type": "error"
   },
   {
@@ -395,6 +455,22 @@ export const pollAbi = [
       }
     ],
     "name": "NoWeightAssigned",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "caller",
+        "type": "address"
+      }
+    ],
+    "name": "NotADelegate",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NotDelegable",
     "type": "error"
   },
   {
@@ -476,6 +552,17 @@ export const pollAbi = [
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      }
+    ],
+    "name": "SelfDelegation",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "minimum",
         "type": "uint256"
@@ -547,6 +634,25 @@ export const pollAbi = [
     ],
     "name": "ZeroWeight",
     "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "from",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      }
+    ],
+    "name": "Delegated",
+    "type": "event"
   },
   {
     "anonymous": false,
@@ -756,6 +862,31 @@ export const pollAbi = [
       {
         "indexed": true,
         "internalType": "address",
+        "name": "delegate",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "onBehalfOf",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "power",
+        "type": "uint256"
+      }
+    ],
+    "name": "VoteDelegated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
         "name": "voter",
         "type": "address"
       },
@@ -954,6 +1085,25 @@ export const pollAbi = [
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      }
+    ],
+    "name": "controlledPowerOf",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "creator",
     "outputs": [
@@ -974,6 +1124,57 @@ export const pollAbi = [
         "internalType": "bytes32",
         "name": "",
         "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      }
+    ],
+    "name": "delegate",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "delegateCountOf",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "delegatedTo",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
       }
     ],
     "stateMutability": "view",
@@ -1476,6 +1677,26 @@ export const pollAbi = [
             "internalType": "uint256",
             "name": "power",
             "type": "uint256"
+          },
+          {
+            "internalType": "address",
+            "name": "delegatedTo",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "delegatorCount",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "controlledPower",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bool",
+            "name": "delegating",
+            "type": "bool"
           }
         ],
         "internalType": "struct Poll.VoterState",

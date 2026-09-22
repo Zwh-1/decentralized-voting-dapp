@@ -138,6 +138,38 @@ export interface OnChainVoter {
    * whitelisted" for such an address would name a gate that does not exist.
    */
   canVote: boolean;
+
+  /**
+   * The address this one handed its vote to, or the zero address.
+   *
+   * A delegating subject cannot vote for itself — the contract refuses with
+   * `NotADelegate` — so the ballot has to know this to explain WHY it is closed
+   * rather than offering a button that would revert.
+   */
+  delegatedTo: `0x${string}`;
+
+  /** How many subjects handed their vote to this address. */
+  delegatorCount: number;
+
+  /**
+   * Power this address controls: its own, plus every subject's that delegated
+   * to it.
+   *
+   * The number to show BEFORE voting. `power` is zero until a ballot exists, so
+   * a UI that displayed `power` to a delegate who has not voted yet would tell
+   * it "your vote counts for 0" — false, and the exact kind of misreport
+   * ADR-0011 exists to prevent.
+   */
+  controlledPower: number;
+
+  /**
+   * True when this address handed its vote away.
+   *
+   * Redundant with `delegatedTo !== zeroAddress` on purpose: the UI branches on
+   * the question "may I vote?", not on an address comparison, and naming it
+   * keeps that branch readable at every call site.
+   */
+  delegating: boolean;
 }
 
 /**
@@ -159,6 +191,11 @@ export interface OnChainVoter {
  * applies: on an `openToAll` poll an address can be absent from the list and
  * still be allowed to vote, so reporting only the list would name the wrong
  * reason for a refusal.
+ *
+ * The delegation fields follow the same rule: `delegating` says the ballot is
+ * closed to this address, `delegatedTo` says to whom, and `controlledPower` says
+ * what a delegate's ballot would carry. All three come from the same read, so
+ * the panel cannot show "you may vote" beside "you already delegated".
  */
 export async function readOnChainVoter(
   client: PublicClient,
@@ -178,6 +215,10 @@ export async function readOnChainVoter(
     canVote: boolean;
     selections: readonly bigint[];
     power: bigint;
+    delegatedTo: `0x${string}`;
+    delegatorCount: bigint;
+    controlledPower: bigint;
+    delegating: boolean;
   };
 
   return {
@@ -188,6 +229,10 @@ export async function readOnChainVoter(
     stakeWei: state.stake,
     isWhitelisted: state.whitelisted,
     canVote: state.canVote,
+    delegatedTo: state.delegatedTo,
+    delegatorCount: Number(state.delegatorCount),
+    controlledPower: Number(state.controlledPower),
+    delegating: state.delegating,
   };
 }
 
