@@ -107,12 +107,46 @@
 | `pnpm ui-drill`（只读）                | **all checks passed**，含新增断言 `the result chart drew one bar per option — bars=3 options=3` |
 | `pnpm ui-drill --vote`（针对开放投票） | **all checks passed**，`the transaction reached a confirmed receipt`                            |
 | `pnpm ui-drill --change`               | **all checks passed**，`the change reached a confirmed receipt`，页面把新选项标为"我的"         |
+| `pnpm ui-drill --refund`（新造状态）   | **all checks passed**，押金从 `1000000000000000` wei 归零，见下                                 |
+
+`ui-drill.ts` 实际支持的四个标志中，`--reject` **本次仍未覆盖**。它要求注入的 provider 在 `eth_sendTransaction` 上返回 EIP-1193 的 `4001`（"用户拒绝"），而该 provider 默认把写请求直接转发给节点；本次没有为它准备拒绝行为，因此这条路径**未被验证**——但这属于"没跑"，不是"跑不了"。
 
 `--vote` 首次运行失败，原因是**测试账户选择**而非缺陷：默认账户不在白名单里，drill 自己给出结论 `--vote requested, but the chain does not allow this account to vote`。改用 `POLL_ADDRESS` 指向那份**开放**投票后通过。
 
-**`--refund` 未通过，且原因是种子状态而非代码缺陷。** 该标志有明确前置条件：`phase == PHASE_ENDED (2)` 且 `stake > 0`。两份种子投票都仍在投票期（`phase=1`）且账户押金为 0，drill 的**前置自检**因此直接失败，并打出 `phase=1 (needs 2) stake=0 wei (needs > 0)`。这与 `--vote` 在白名单投票上失败是同一类情况——断言在正确地做事。
+**`--refund` 起初未通过，追下去发现是 `ui-drill.ts` 自己的一个真实缺陷。**
 
-要真正跑通 `--refund`，需要先造一份**已结束且有押金**的投票（先投票再 `closeAfterDeadline()`）。本次没有构造，因此这条路径的浏览器端到端**仍未覆盖**；但原因不是"命令不存在"（`--refund` 是真实存在的标志），而是缺少符合前置条件的链上状态。
+第一次运行失败的原因是**种子状态**：该标志的前置条件是 `phase == Ended` 且 `stake > 0`，而两份种子投票都仍在投票期且押金为 0，drill 的前置自检直接拒绝，打出 `phase=1 (needs 2) stake=0 wei (needs > 0)`。这与 `--vote` 在白名单投票上失败是同一类情况——断言在正确地做事。
+
+于是补造状态：新增 `contracts/scripts/refund-state.ts`，它在一份**已 seed** 的链上追加一份"已结束且有押金"的投票，用 `closeAfterDeadline()` 而非 `endPoll()`（后者是 owner 的强制覆盖，而退款路径应当走普通截止流程），并把投票人固定为 `ui-drill` 默认签名所用的那个 Hardhat 账户。
+
+状态补齐后 drill **仍然失败**，而这一次暴露的是 drill 自身的问题：
+
+```
+chain  openToAll=true canVote=true hasVoted=true phase=3 stakeOf=1000000000000000 wei
+OK     the ballot rendered a refund button
+FAIL   the refund button is enabled exactly when the chain says the stake is refundable
+       — chainSaysRefundable=false (phase=3 stake=1000000000000000) enabled=true
+FAIL   --refund requested, but the chain does not allow this account to refund
+       — phase=3 (needs 2) stake=1000000000000000 wei (needs > 0)
+```
+
+链上说可取回、**页面也正确地启用了按钮**，而 drill 自己算出 `chainSaysRefundable=false`。根因是 `web/scripts/ui-drill.ts` 第 611 行写着 `const PHASE_ENDED = 2;`，而批一把 `Reveal` 插入合约枚举后 `Ended` 已从 2 变成**3**。
+
+**这是同一类缺陷在本仓库的第三次出现。** `web/test/ballot-labels.test.ts` 里早就留着一条注释记录这件事（"these assertions used to hard-code 1 and 2, and inserting Reveal into the contract's enum turned 2 into the wrong phase"），测试改用了具名成员 `PollPhase.Voting` / `PollPhase.Ended`，但**脚本被漏掉了**。讽刺的是，我自己写的 `refund-state.ts` 第一版也硬编码了 `2` 并因此失败——同一个陷阱在同一次会话里骗了两个人。
+
+修法是把 `PHASE_ENDED` 改为从生成的枚举派生（`PollPhase.Ended`），使这个错误**无法表达**。修复后：
+
+```
+OK  the refund button is enabled exactly when the chain says the stake is refundable
+    — chainSaysRefundable=true (phase=3 stake=1000000000000000) enabled=true
+OK  the refund reached a confirmed receipt
+OK  the chain shows the stake was returned — stakeOf=0 wei (was 1000000000000000)
+OK  the refund button disabled itself once the stake was gone
+OK  the page now says there is nothing to refund — refundReason="没有可取回的押金。"
+UI drill: all checks passed.
+```
+
+**教训**：凡是把合约枚举的**序号**写进代码的地方，都是一颗定时炸弹，而它在枚举插值时**不会报错**——只会安静地指向另一个阶段。所以第四个不变量式的规则是：**枚举一律用具名成员，永远不写序号**。这条已经写进 `ui-drill.ts` 的注释里。
 
 **两条计划自身的错误，一并记录：**
 
