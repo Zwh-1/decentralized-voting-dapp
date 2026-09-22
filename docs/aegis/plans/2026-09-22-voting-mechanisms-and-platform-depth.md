@@ -62,6 +62,12 @@
 1. **i18n 只做了一部分**。`ballot-reasons.ts`、塔标元数据、语言切换器、结果来源标签已参数化；`ballot-labels.ts` 的阶段/状态句与其余组件的文案仍是内联中文。英文界面目前是中英混杂，不是完整英文。详见 ADR-0040 的 Consequences。
 2. **两条浏览器路径没有端到端验证**：`ui-drill` 未覆盖英文语言切换，也未覆盖订阅按钮与草稿恢复（该 drill 从不访问创建页，因此没有加草稿断言——加了也是没有消费者的死代码）。图表已加入 `chartBarCount === optionActionCount` 断言，但该 drill 需要同时跑起 Next 服务、Playwright 与本地 Hardhat，本次未执行。
 
+**批四随后的收口提交** `dace051`：发现 `validateConfig` 的文档写着"Solidity 侧使用相同的顺序"，而它**没有**实现 `validateGovernance` 的两条规则（`quorumBps > 10000`、`quorumBps != 0 && openToAll`）。缺失本身是有意的、且已在 `templates.ts` 写明（没有调用方能设置 quorumBps，所以两条规则**不可达**而非"未检查"，为不可达分支写文案是死代码），但 `mechanisms.ts` 那侧没说，于是"声称自己是镜像、实际只镜像一部分"成了一个等人踩的坑。改动只做两件事：把注释改成实话并点名未镜像的规则与它当前安全的条件；在 `templates.test.ts` 加一条断言"表单能构造出的每种配置 `quorumBps` 都是 0"，作为那个条件的可执行形式。已做突变验证（把 `DEFAULT_CONFIG.quorumBps` 改成 100 → 精确失败 1 条，报 `produced a quorum`）。
+
+**同一次收口里重复踩到的坑**：突变验证时用 PowerShell `Set-Content` 改写 `mechanisms.ts`，文件被按 GBK 重新编码成非法 UTF-8（`read` 工具直接拒绝读取）。恢复方式为 `git checkout HEAD --` 取回已提交版本后用文件工具重做改动（已 diff 确认只剩预期的两处）。这与批三损坏 `pagination.test.ts` 是**同一个原因**。因此把批三那条教训升级为硬规则：**任何源码文件都不得经由 shell 重定向或 `Set-Content` 写入，包括临时性的突变验证**——要验证一条断言会响，也应改常量后立刻用文件工具改回，而不是让 shell 碰文件。
+
+**批四提交里混入的一次无关改动，如实记录**：`pnpm format` 被 prettier 用来格式化全仓库，包括 markdown，因此它把**另一个计划**的两份文档（`docs/aegis/plans/2026-09-22-containerization-cicd-and-observability.md` 与对应的 spec，由 `2dd10bd` 引入）的表格分隔行补齐了宽度。随后 `git add -A` 把这些改动一并扫进了批四提交 `8485d6b`。已核实：改动**只有表格分隔行的空格填充**（`| --- |` → `| ------ |`），没有语义变化；用 `--ignore-all-space` 查看后剩下的"实质"差异全部是这一类。它不会破坏任何东西，但把 337 行属于另一个计划的改动记在了一个标题为"前端体验"的提交上，会让人在那份计划的历史里看到一次无法解释的变动。此处选择不回改历史（为此重排 `8485d6b`/`dace051` 的代价大于表格填充本身），改为记录在案。教训：**`git add -A` 之前先看 `git status`**，格式化工具的作用范围是整仓库，不是本次改动。
+
 ## 0. Aegis Visibility
 
 本计划存在的理由：用户判定「项目在功能上还不够」，并且这不是观感问题而是**语义缺口**。当前的投票模型是"单一问题、一人一票、全程公开、结果不执行"——投票系统之所以成为投票系统的高级语义（多选、加权、委托、隐私、阈值执行）**一个都不存在**。
