@@ -79,9 +79,30 @@ export interface ConfigVerdict {
 /**
  * Whether a configuration may be used to create a poll.
  *
+ * ---------------------------------------------------------------------------
+ * This is a MIRROR, and it mirrors only some of the rules
+ * ---------------------------------------------------------------------------
+ *
  * Order matters and is part of the contract: the first failing rule wins, so a
- * configuration that breaks two rules reports the first one. The Solidity side
- * uses the same order.
+ * configuration that breaks two rules reports the first one. Solidity's
+ * `PollMechanisms.validate` uses the same order for the rules below.
+ *
+ * WHAT IS NOT MIRRORED, named explicitly because the sentence above used to read
+ * "the Solidity side uses the same order" and that was false:
+ * `PollMechanisms.validateGovernance` also refuses `quorumBps > 10000` and
+ * `quorumBps != 0 && openToAll`. Neither is implemented here. That is safe TODAY
+ * only because no caller can set `quorumBps`: `DEFAULT_CONFIG` fixes it at the
+ * contract default of 0, so both rules are unreachable rather than merely
+ * unchecked — and an unreachable branch is not worth mirroring.
+ *
+ * The two sentences live in `templates.ts`'s `describeConfigProblem`, which
+ * documents the same absence and states the same condition for closing it.
+ *
+ * The moment a quorum becomes settable from the form, this function stops being
+ * a mirror and would let a reader submit a config the contract rejects with an
+ * `InvalidConfig` revert. The two rules belong here first, with the matching
+ * Chinese copy arriving in `describeConfigProblem` in the same change.
+ * `templates.test.ts` has a test that fails at exactly that moment.
  */
 export function validateConfig(config: PollConfig): ConfigVerdict {
   if (config.multiSelect) {

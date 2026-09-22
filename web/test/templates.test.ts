@@ -216,6 +216,32 @@ describe("buildPollConfig", () => {
     assert.deepEqual({ ...templateConfig(multi) }, before);
   });
 
+  it("keeps quorumBps at 0, which is the ONLY thing making two contract rules unreachable", () => {
+    // `PollMechanisms.validateGovernance` refuses `quorumBps > 10000` and
+    // `quorumBps != 0 && openToAll`. `validateConfig` implements neither, and
+    // that is deliberate: no caller can set a quorum, so both rules are
+    // unreachable rather than unchecked.
+    //
+    // This test is what keeps that reasoning honest. The moment quorumBps becomes
+    // settable from the form, the guard stops covering the contract and a reader
+    // can submit a config that reverts on chain — so this fails, and the fix is
+    // to mirror the two rules in `mechanisms.ts` (with their Chinese sentences in
+    // `describeConfigProblem`) rather than to relax this assertion.
+    for (const template of POLL_TEMPLATES) {
+      for (const openToAll of [true, false]) {
+        for (const optionCount of [0, 2, 4, 7]) {
+          const config = buildPollConfig(template, { openToAll }, optionCount);
+
+          assert.equal(
+            config.quorumBps,
+            0,
+            `${template.id} openToAll=${openToAll} optionCount=${optionCount} produced a quorum`,
+          );
+        }
+      }
+    }
+  });
+
   it("marks the weighted template as weighted and as needing a per-address weight", () => {
     assert.ok(weighted);
 
