@@ -7,43 +7,43 @@
 
 ## Progress
 
-| 批次 | 任务                                              | 状态   | 证据 |
-| ---- | ------------------------------------------------- | ------ | ---- |
-| 零   | Task 0.1 修复 Docker 引擎                         | 未开始 | —    |
-| 零   | Task 0.2 服务器初始化                             | 未开始 | —    |
-| 零   | Task 0.3 GitHub / Docker Hub 准备                 | 未开始 | —    |
-| 零   | Task 0.4 Sepolia 工厂重新部署 + 演示投票          | 未开始 | —    |
-| 零   | Task 0.5 域名与 TLS                               | 未开始 | —    |
-| 零   | Task 0.6 邮件（SMTP）接收端准备                   | 未开始 | —    |
-| 一   | Task 1.1 standalone 产物                          | 未开始 | —    |
-| 一   | Task 1.2 Dockerfile 与 .dockerignore              | 未开始 | —    |
-| 一   | Task 1.3 compose base 扩写                        | 未开始 | —    |
-| 一   | Task 1.4 indexer worker 入口                      | 未开始 | —    |
-| 一   | Task 1.5 migrate 一次性服务                       | 未开始 | —    |
-| 一   | Task 1.6 本地 override                            | 未开始 | —    |
-| 一   | Task 1.7 一键拉起验收（含负向对照）               | 未开始 | —    |
-| 二   | Task 2.1 `/api/metrics`                           | 未开始 | —    |
-| 二   | Task 2.2 metrics 不暴露公网                       | 未开始 | —    |
-| 二   | Task 2.3 Prometheus 采集与告警规则                | 未开始 | —    |
-| 二   | Task 2.4 exporters                                | 未开始 | —    |
-| 二   | Task 2.5 Alertmanager 与邮件                      | 未开始 | —    |
-| 二   | Task 2.6 Grafana provisioning 与看板              | 未开始 | —    |
-| 二   | Task 2.7 部署版本可见性                           | 未开始 | —    |
-| 二   | Task 2.8 三类故障演练                             | 未开始 | —    |
-| 三   | Task 3.1 `ci.yml` 增加 `workflow_call`            | 未开始 | —    |
-| 三   | Task 3.2 `release.yml`（门 → 构建 → 扫描 → 推送） | 未开始 | —    |
-| 三   | Task 3.3 部署脚本三件套                           | 未开始 | —    |
-| 三   | Task 3.4 SSH 部署 job                             | 未开始 | —    |
-| 三   | Task 3.5 `rollback.yml`                           | 未开始 | —    |
-| 三   | Task 3.6 流水线端到端验收                         | 未开始 | —    |
-| 四   | Task 4.1 nginx 与上游模板                         | 未开始 | —    |
-| 四   | Task 4.2 prod compose 双槽定义                    | 未开始 | —    |
-| 四   | Task 4.3 `deploy.sh` 双槽流程                     | 未开始 | —    |
-| 四   | Task 4.4 `rollback.sh` 秒级回滚                   | 未开始 | —    |
-| 四   | Task 4.5 零停机证据与负向对照                     | 未开始 | —    |
-| 四   | Task 4.6 expand-contract runbook                  | 未开始 | —    |
-| 五   | Task 5.1 七条 ADR 落地                            | 未开始 | —    |
-| 五   | Task 5.2 基线记录与简历材料                       | 未开始 | —    |
+| 批次 | 任务                                              | 状态     | 证据                                              |
+| ---- | ------------------------------------------------- | -------- | ------------------------------------------------- |
+| 零   | Task 0.1 修复 Docker 引擎                         | **阻塞** | 根因见 §14；解除需管理员提权 + 重启，本会话做不到 |
+| 零   | Task 0.2 服务器初始化                             | 未开始   | —                                                 |
+| 零   | Task 0.3 GitHub / Docker Hub 准备                 | 未开始   | —                                                 |
+| 零   | Task 0.4 Sepolia 工厂重新部署 + 演示投票          | 未开始   | —                                                 |
+| 零   | Task 0.5 域名与 TLS                               | 未开始   | —                                                 |
+| 零   | Task 0.6 邮件（SMTP）接收端准备                   | 未开始   | —                                                 |
+| 一   | Task 1.1 standalone 产物                          | 未开始   | —                                                 |
+| 一   | Task 1.2 Dockerfile 与 .dockerignore              | 未开始   | —                                                 |
+| 一   | Task 1.3 compose base 扩写                        | 未开始   | —                                                 |
+| 一   | Task 1.4 indexer worker 入口                      | 未开始   | —                                                 |
+| 一   | Task 1.5 migrate 一次性服务                       | 未开始   | —                                                 |
+| 一   | Task 1.6 本地 override                            | 未开始   | —                                                 |
+| 一   | Task 1.7 一键拉起验收（含负向对照）               | 未开始   | —                                                 |
+| 二   | Task 2.1 `/api/metrics`                           | 未开始   | —                                                 |
+| 二   | Task 2.2 metrics 不暴露公网                       | 未开始   | —                                                 |
+| 二   | Task 2.3 Prometheus 采集与告警规则                | 未开始   | —                                                 |
+| 二   | Task 2.4 exporters                                | 未开始   | —                                                 |
+| 二   | Task 2.5 Alertmanager 与邮件                      | 未开始   | —                                                 |
+| 二   | Task 2.6 Grafana provisioning 与看板              | 未开始   | —                                                 |
+| 二   | Task 2.7 部署版本可见性                           | 未开始   | —                                                 |
+| 二   | Task 2.8 三类故障演练                             | 未开始   | —                                                 |
+| 三   | Task 3.1 `ci.yml` 增加 `workflow_call`            | 未开始   | —                                                 |
+| 三   | Task 3.2 `release.yml`（门 → 构建 → 扫描 → 推送） | 未开始   | —                                                 |
+| 三   | Task 3.3 部署脚本三件套                           | 未开始   | —                                                 |
+| 三   | Task 3.4 SSH 部署 job                             | 未开始   | —                                                 |
+| 三   | Task 3.5 `rollback.yml`                           | 未开始   | —                                                 |
+| 三   | Task 3.6 流水线端到端验收                         | 未开始   | —                                                 |
+| 四   | Task 4.1 nginx 与上游模板                         | 未开始   | —                                                 |
+| 四   | Task 4.2 prod compose 双槽定义                    | 未开始   | —                                                 |
+| 四   | Task 4.3 `deploy.sh` 双槽流程                     | 未开始   | —                                                 |
+| 四   | Task 4.4 `rollback.sh` 秒级回滚                   | 未开始   | —                                                 |
+| 四   | Task 4.5 零停机证据与负向对照                     | 未开始   | —                                                 |
+| 四   | Task 4.6 expand-contract runbook                  | 未开始   | —                                                 |
+| 五   | Task 5.1 七条 ADR 落地                            | 未开始   | —                                                 |
+| 五   | Task 5.2 基线记录与简历材料                       | 未开始   | —                                                 |
 
 ---
 
@@ -1782,3 +1782,71 @@ time ssh deploy@<server> 'cd /srv/voting && ./ops/deploy/rollback.sh'
 - **第 6 条 Retirement completeness**：`chain` 服务已登记退役；prod 中 web 的索引循环已退役但代码保留（dev 便利），须确认没有"两份都在推进游标"的实际路径。
 - **第 7 条 Entropy flow**：新增约 22 个文件。须证明每一项都对应一条验收项，且没有引入第二处 schema 定义、第二处健康数据来源或第二处发布状态真相。
 - **第 3 条 Contract changes**：`/api/health` 不变、`/api/metrics` 新增、compose 的 mysql 定义不变——三处都需在批五逐条登记。
+
+---
+
+## 14. 阻塞记录
+
+### 14.1 Task 0.1 无法在本会话内解除（2026-09-22 19:27 实测）
+
+**症状**：`docker version` 报 `failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified`。
+
+**排查路径与证据**
+
+| 步骤                    | 检查                                                                        | 结果                                                                 |
+| ----------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Docker Desktop 是否在跑 | `Get-Process com.docker.backend`                                            | 无进程                                                               |
+| 可执行文件是否存在      | `Test-Path 'C:\Program Files\Docker\Docker\Docker Desktop.exe'`             | True（已安装）                                                       |
+| 启动后是否存活          | `Start-Process '…\Docker Desktop.exe'`                                      | 进程随即消失，210 秒内引擎未就绪                                     |
+| WSL 发行版              | `wsl -l -v`                                                                 | `Ubuntu` 与 `docker-desktop` 均 `Stopped` 且无法启动                 |
+| WSL 启动失败原因        | `wsl -d Ubuntu -- true`                                                     | `Wsl/Service/CreateInstance/CreateVm/HCS/HCS_E_HYPERV_NOT_INSTALLED` |
+| 虚拟机监控程序          | `(Get-CimInstance Win32_ComputerSystem).HypervisorPresent`                  | **False**                                                            |
+| BIOS 虚拟化             | `VirtualizationFirmwareEnabled` / `SecondLevelAddressTranslationExtensions` | True / True（**不需要进 BIOS**）                                     |
+| Docker Windows 服务     | `Get-Service com.docker.service`                                            | `Stopped` / `Manual`                                                 |
+| 当前权限                | `WindowsPrincipal.IsInRole(Administrator)`                                  | **False**                                                            |
+| 功能状态                | `Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform`    | **`requires elevation`（连查询都要提权）**                           |
+
+**根因**：Windows 可选功能 `VirtualMachinePlatform`（WSL2 依赖的虚拟机平台）**未启用**，因此 WSL2 无法创建虚拟机，Docker Desktop 的 WSL2 后端也就无法启动引擎。这是 Windows 功能缺失，不是 Docker 配置问题。
+
+**解除方式**（需管理员权限，且**必须重启**；本会话审批提示被禁用，故无法自行执行）
+
+```powershell
+# 以管理员身份打开 PowerShell（Win+X → 终端(管理员)）
+dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
+dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
+Restart-Computer
+```
+
+等价单命令：`wsl --install --no-distribution`（同样需要提权与重启）。
+
+重启后验证：
+
+```powershell
+wsl -l -v                     # 两个发行版应可启动，VERSION 为 2
+docker version                # 引擎版本非空
+docker run --rm hello-world   # 成功
+```
+
+**影响范围**：Task 0.1 是批一至批四全部"实测证据"的前提。解除前，Task 1.2–1.7 只能编写、不能验证；按本项目纪律，未验证不得标记完成。
+
+**不依赖 Docker 的可推进项**（若选择并行推进）：Task 1.1（standalone 产物，`pnpm build:web` 可验证）、Task 2.1（`/api/metrics`，`pnpm test` / `pnpm typecheck` 可验证）、Task 5.1（七条 ADR，`aegis-workspace.py check` 可验证）。
+
+### 14.2 仓库存在并发写入者（2026-09-22 19:27 实测）
+
+**证据**：`d801bba`（19:19:12，i18n 批次）提交后，工作区在数分钟内再次变脏，且文件 mtime 与查询时刻几乎重合：
+
+```text
+19:26:56  web/src/lib/i18n/messages.ts
+19:27:03  web/test/i18n.test.ts
+19:27:24  web/src/lib/templates.ts
+查询时刻  19:27:26
+```
+
+**含义**：本仓库当前**不是**单一写入者。`executing-plans` 要求协调者是唯一的 Git 变更所有者，而并发者在同一工作区写 `web/` 会让两件事同时失效：
+
+1. **验证结果不可归因**——测试变红可能是对方的中间态，而不是本计划的改动；
+2. **构建产物互相破坏**——两个 `next build` 同时写同一个 `web/.next` 目录。这是本计划刻意不启动 `web/` 构建的直接原因。
+
+**附带发现**：本计划文件在提交前被外部 `pnpm format` 重新格式化过（Progress 表格出现对齐填充），说明并发会话会运行全仓库 prettier。因此本计划的任何 markdown 编辑都要以 `pnpm format:check` 通过为准，否则会让 CI 的 format 作业失败。
+
+**处置**：在并发写入停止或明确协调之前，不启动 `web/` 的构建与测试，也不提交任何 `web/` 路径。
