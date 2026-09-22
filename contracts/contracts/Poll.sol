@@ -652,6 +652,17 @@ contract Poll is Ownable, ReentrancyGuard {
     error AlreadyQueued();
     error ExecutionAlreadyDone();
 
+    /// @dev The mirror of `DelegatorHasVoted`: the delegate has cast the ballot
+    ///      that carries this subject's weight, so the authority can no longer
+    ///      be taken back without counting that weight twice.
+    error DelegateHasVoted(address delegate);
+
+    /// @dev An address holding other subjects' authority may not hand its own
+    ///      onward. The mirror of `CannotDelegateToADelegate`: together they make
+    ///      a delegation chain impossible from either end, so authority always
+    ///      moves exactly one step.
+    error DelegateCannotDelegate(address delegate);
+
     // ---------------------------------------------------------------------
     // Construction
     // ---------------------------------------------------------------------
@@ -830,13 +841,60 @@ contract Poll is Ownable, ReentrancyGuard {
         if (_votedOptions[msg.sender].length != 0) revert DelegatorHasVoted(msg.sender);
 
         address current = delegatedTo[msg.sender];
-        if (current == to) revert AlreadyDelegated(msg.sender, to);
+
+        // A delegate may not hand ITS OWN authority onward while it still holds
+        // someone else's.
+        //
+        // The single-level rule already refuses delegating TO a delegate. This
+        // is the same rule at the other end, and it exists because the two
+        // halves are not symmetric on their own: without it, A delegates to B
+        // and B delegates to C, and A's weight is stranded. B's authority moved
+        // to C, but A's surplus is still recorded against B — and B, having
+        // delegated, reports `controlledPowerOf == 0`. A's weight is then in
+        // neither address's total.
+        //
+        // Found by the conservation property, which failed with a sum that was
+        // short by exactly one subject's weight. Refusing forces the chain to be
+        // unwound explicitly, which is visible in the events.
+        // Revocation (`to == address(0)`) is exempt, and must be: it is the way
+        // out of exactly this situation. Blocking it would make the stranded
+        // state permanent.
+        if (to != address(0) && delegateCountOf[msg.sender] != 0) {
+            revert DelegateCannotDelegate(msg.sender);
+        }
+
+        if (current == to) {
+            // Delegating to the address you already delegated to is a mistake
+            // worth reporting. Revoking when there is nothing to revoke is not:
+            // `delegate(address(0))` is how a caller says "make sure I hold my
+            // own authority", and that is already true. Reverting would make the
+            // idempotent form fail while the state it asks for is exactly the
+            // state it is in.
+            if (to == address(0)) return;
+            revert AlreadyDelegated(msg.sender, to);
+        }
 
         if (to != address(0)) {
             // An unlisted address cannot hold authority: it has no vote of its
             // own and no weight, so a delegation to it would create power out of
             // nothing.
             if (!whitelistedFor(to)) revert DelegateNotEligible(to);
+
+            // A delegate that has ALREADY VOTED cannot take on more authority.
+            //
+            // Its ballot is already in the tally and its power is already fixed
+            // at `votingPowerOf[to]`, which is what `controlledPowerOf` reports
+            // for an address that has acted. A subject delegating afterwards
+            // adds to `_delegatedSurplus`, which that view no longer reads — so
+            // the weight would be recorded against an address whose total had
+            // already been settled, and would count for nothing.
+            //
+            // This is the third face of one rule — authority moves exactly once
+            // per poll. The other two are `DelegatorHasVoted` (a subject may not
+            // delegate after voting) and `DelegateHasVoted` (a subject may not
+            // revoke after its delegate voted). The conservation property found
+            // this one by a sum short by exactly the late subject's weight.
+            if (votingPowerOf[to] != 0) revert DelegateHasVoted(to);
 
             // THE SINGLE-LEVEL RULE, and the check is on the RIGHT side of the
             // relationship: what is refused is a delegate handing its AUTHORITY
@@ -859,6 +917,23 @@ contract Poll is Ownable, ReentrancyGuard {
         // second half skipped, so the counters cannot disagree about how they
         // are maintained.
         if (current != address(0)) {
+            // The delegate has already voted, so the subject's weight is IN that
+            // ballot. Taking the authority back would leave the weight counted
+            // both in the cast ballot and on the subject's own account — the
+            // tally would say one thing and `controlledPowerOf` another.
+            //
+            // This is the mirror of `DelegatorHasVoted` above: a subject may not
+            // hand authority away after voting, and may not take it back after
+            // its delegate has voted. Both are the same rule — authority moves
+            // exactly once per poll — applied from either end.
+            //
+            // Found by `PollPowerConservation.t.sol`, which is why that file
+            // exists: the fixed scenarios in `PollDelegation.t.sol` covered
+            // delegating and revoking, but not revoking AFTER the delegate had
+            // acted, and the conservation property failed by exactly the
+            // subject's weight.
+            if (votingPowerOf[current] != 0) revert DelegateHasVoted(current);
+
             _delegatedSurplus[current] -= _ownPowerOf(msg.sender);
             delegateCountOf[current] -= 1;
         }

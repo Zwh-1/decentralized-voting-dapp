@@ -264,7 +264,22 @@ contract PollDelegationTest is Test {
         assertEq(_countOf(2), 1, "the revocation restored exactly one vote");
     }
 
-    function test_Delegate_RevokingTwiceIsRefused() public {
+    /// @dev Revoking when there is nothing to revoke is a NO-OP, not an error.
+    ///
+    ///      This assertion is the reverse of what this test originally checked,
+    ///      and the change was deliberate: `delegate(address(0))` is also how a
+    ///      caller says "make sure I hold my own authority", and that is already
+    ///      true. Reverting made the idempotent form fail while the state it asks
+    ///      for was the state it was already in.
+    ///
+    ///      The original behaviour was not wrong so much as unconsidered — it
+    ///      fell out of `current == to` serving two different meanings, "already
+    ///      delegated there" (a mistake worth reporting) and "already holding
+    ///      your own authority" (not a mistake). The two are now distinguished.
+    ///
+    ///      Delegating twice to the SAME non-zero address is still refused; that
+    ///      is the next test.
+    function test_Delegate_RevokingTwiceIsANoOp() public {
         poll = _openPoll();
 
         vm.prank(bob);
@@ -274,8 +289,19 @@ contract PollDelegationTest is Test {
         poll.delegate(address(0));
 
         vm.prank(bob);
-        vm.expectRevert(abi.encodeWithSelector(Poll.AlreadyDelegated.selector, bob, address(0)));
-        poll.delegate(address(0));
+        poll.delegate(address(0)); // must not revert
+
+        assertEq(poll.delegatedTo(bob), address(0), "still holding its own authority");
+        assertEq(poll.delegateCountOf(alice), 0);
+    }
+
+    function test_Delegate_RevokingWithNothingDelegatedIsAccepted() public {
+        poll = _openPoll();
+
+        vm.prank(bob);
+        poll.delegate(address(0)); // never delegated; must not revert
+
+        assertEq(poll.delegatedTo(bob), address(0));
     }
 
     /// @dev Changing one's mind about WHO to delegate to must move the weight,

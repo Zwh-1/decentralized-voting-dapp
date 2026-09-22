@@ -48,6 +48,13 @@ contract PollMechanismMatrixTest is Test {
     address internal creator = makeAddr("matrixCreator");
 
     uint256 internal constant VOTER_COUNT = 12;
+
+    /// @dev How many options a multi-select ballot may pick in this matrix.
+    ///      A named constant because the ceiling assertion below must be derived
+    ///      from the SAME number the config is built with: when the two were
+    ///      separate literals the assertion silently assumed 1 and failed on
+    ///      correct behaviour.
+    uint256 internal constant MATRIX_MAX_SELECTIONS = 2;
     uint256 internal constant OPTION_COUNT = 3;
     uint256 internal constant ROUNDS = 200;
     uint256 internal constant STAKE = 0.001 ether;
@@ -257,7 +264,7 @@ contract PollMechanismMatrixTest is Test {
         PollMechanisms.PollConfig memory config = PollMechanisms.PollConfig({
             openToAll: false,
             multiSelect: mechanism.multiSelect,
-            maxSelections: mechanism.multiSelect ? 2 : 0,
+            maxSelections: mechanism.multiSelect ? MATRIX_MAX_SELECTIONS : 0,
             weighted: mechanism.weighted,
             delegable: mechanism.delegable,
             commitReveal: mechanism.commitReveal,
@@ -356,17 +363,38 @@ contract PollMechanismMatrixTest is Test {
             );
         }
 
-        // 3. Bounded growth. The ceiling is deliberately loose because weighting
-        //    makes the tight form mechanism-dependent; what it catches is a
-        //    mechanism that lets one address add power on every round. Mutation:
-        //    count the delegated surplus twice in `vote` — fails here.
+        // 3. Bounded growth. The ceiling is DERIVED from the mechanism rather
+        //    than guessed, and it has to be: on a multi-select poll one ballot
+        //    credits `power` to EACH option it selects, so the sum across options
+        //    is legitimately a multiple of the eligible set. A flat ceiling of
+        //    `VOTER_COUNT * VOTER_COUNT` was the first attempt and it was wrong
+        //    for exactly that reason — `weighted+delegable+multi-select` reached
+        //    156, which is not growth but two selections per ballot.
+        //
+        //    The tight form is therefore: every unit of eligible power may be
+        //    counted at most once PER SELECTABLE OPTION. With equal weights that
+        //    is `VOTER_COUNT * selections`; weighting raises the base.
+        //
+        //    What this still catches: a mechanism that lets one address add power
+        //    on every round, since that exceeds any fixed bound. Mutation: count
+        //    the delegated surplus twice in `vote` — fails here.
+        uint256 perBallotCeiling = mechanism.multiSelect ? MATRIX_MAX_SELECTIONS : 1;
+        // The largest total weight the fixture can assign: weights are 1..N, so
+        // the sum is N(N+1)/2. Derived rather than written as 78 so that changing
+        // VOTER_COUNT does not silently invalidate the bound.
+        uint256 weightCeiling = (VOTER_COUNT * (VOTER_COUNT + 1)) / 2;
+        uint256 ceiling = weightCeiling * perBallotCeiling;
+
         (, uint256 tally) = poll.results();
-        if (tally > VOTER_COUNT * VOTER_COUNT) {
+        if (tally > ceiling) {
             revert(
                 string.concat(
                     mechanism.name,
-                    ": the tally must stay bounded by the eligible set (tally ",
+                    ": the tally must stay bounded by the eligible set times the "
+                    "selectable options (tally ",
                     vm.toString(tally),
+                    ", ceiling ",
+                    vm.toString(ceiling),
                     ")"
                 )
             );

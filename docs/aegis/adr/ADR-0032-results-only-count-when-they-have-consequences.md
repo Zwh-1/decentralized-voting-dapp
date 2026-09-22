@@ -114,6 +114,25 @@ Related: `docs/aegis/adr/ADR-0029-rules-commitment-makes-edits-visible.md`（分
 - `docs/aegis/adr/ADR-0031-commit-reveal-replaces-public-ballots.md`（`PollPhase` 镜像失效的教训）
 - `docs/aegis/plans/2026-09-22-voting-mechanisms-and-platform-depth.md` Task 5、Task 6
 
+## Implementation Record
+
+### 本 ADR 的第四点曾被实现成它的反面，由测试纠正
+
+`execute()` 的第一版在失败路径上 `revert ExecutionFailedOnChain(reason)`。这与上面第四点**直接矛盾**，而且矛盾的方式值得记录，因为它不是笔误：
+
+写第一版时把"把失败告诉调用方"和"把失败记录下来"当成了同一件事。它们不是。`revert` 会回滚整个交易，**包括这一分支刚刚写下的 `lastError`**。于是那次 `revert` 的净效果是：调用方看到了原因，链上什么也没留下，`execution.done` 也不需要清——因为整个状态都退回去了。
+
+抓到它的是一条本来为别的东西写的断言：`test_Execute_FailureLeavesTheVoteIntactAndTheQueueRetryable` 在失败后检查 `lastError.length > 0`，得到 `0 <= 0`。如果当时只断言"调用方收到 revert"，这个缺陷会原样通过——因为从调用方视角看，行为完全正确。
+
+**修正后 `execute()` 在失败路径上不 `revert`，正常返回。** 代价被明确写下并写进事件注释：调用方**必须**读 `ExecutionFailed` 事件或 `execution().lastError`，不能依赖交易状态判断执行是否成功。这是这个设计的真实成本，不是可以省略的细节。
+
+### 关于"分母冻结"与白名单可编辑的关系
+
+实现时先写下的测试断言"投票期改白名单必须 revert"，跑出来发现 `setWhitelist` 在 `Voting` 期**本来就不 revert**（只拒绝 `Ended`）。查证后确认这是既有设计：ADR-0029 的规则哈希专门用来让创建后的白名单改动**可见**，若改动本身就该被禁止，那个哈希就没有存在意义。
+
+因此测试改写成断言真正成立的那件事——**改动被允许，但不会移动分数线**。冻结的是分母，不是名单。中途加入的人可以投票，且 `frozenEligiblePower` 不变，所以"五成出席"这句话的含义在投票开始后就固定了。这两条断言（"改白名单被拒绝" vs "改白名单不影响分母"）看起来相近，实际只有第二条为真。
+
+
 ## Boundary
 
 This ADR is an advisory Aegis Method Pack record. It does not grant completion authority or replace project-authoritative architecture sources.
