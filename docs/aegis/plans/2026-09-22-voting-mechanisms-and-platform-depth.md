@@ -110,6 +110,10 @@
 
 `--vote` 首次运行失败，原因是**测试账户选择**而非缺陷：默认账户不在白名单里，drill 自己给出结论 `--vote requested, but the chain does not allow this account to vote`。改用 `POLL_ADDRESS` 指向那份**开放**投票后通过。
 
+**`--refund` 未通过，且原因是种子状态而非代码缺陷。** 该标志有明确前置条件：`phase == PHASE_ENDED (2)` 且 `stake > 0`。两份种子投票都仍在投票期（`phase=1`）且账户押金为 0，drill 的**前置自检**因此直接失败，并打出 `phase=1 (needs 2) stake=0 wei (needs > 0)`。这与 `--vote` 在白名单投票上失败是同一类情况——断言在正确地做事。
+
+要真正跑通 `--refund`，需要先造一份**已结束且有押金**的投票（先投票再 `closeAfterDeadline()`）。本次没有构造，因此这条路径的浏览器端到端**仍未覆盖**；但原因不是"命令不存在"（`--refund` 是真实存在的标志），而是缺少符合前置条件的链上状态。
+
 **两条计划自身的错误，一并记录：**
 
 1. `Verification` 段把命令写作 `ui:drill`，实际脚本名是 `ui-drill`（连字符，无冒号）。
