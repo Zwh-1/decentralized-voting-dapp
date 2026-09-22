@@ -49,9 +49,10 @@
 
 **批四验收结果**（2026-09-22）：
 
-- `pnpm test`：350 合约（287 solidity + 63 nodejs）+ 658 web，全通过；`pnpm typecheck`、`pnpm format`、`pnpm build:web` 均干净。
+- `pnpm test`：350 合约（287 solidity + 63 nodejs）+ 659 web，全通过；`pnpm typecheck`、`pnpm format`、`pnpm build:web` 均干净。
 - `pnpm build:web` 输出确认 `/notifications`、`/api/notifications`、`/api/subscriptions` 已注册为动态路由。
 - 新增 ADR-0040（语言由读者选择、合约名不翻译）、ADR-0041（通知是推导的、订阅不是授权）、ADR-0042（服务端 SVG 图表）、ADR-0043（移动端连接的依赖树代价）。
+- `ui-drill` 补跑：只读、`--vote`、`--change` 三条**全部 all checks passed**；`check-consistency` 为 `consistent`。这一轮抓到两个真实缺陷（`seed:local` 自批二起损坏、批四的 `console.warn` 触发断言），详见下方"补做"一节。
 
 **批四新增测试 111 个**：`result-chart.test.ts`、`i18n.test.ts`（8 个 describe）、`wallet-connectors.test.ts`、`templates.test.ts` 26、`draft.test.ts` 25、`notify.test.ts` 28、`event-branches.test.ts` 21，以及 `ballot-reasons.test.ts` 追加的 6 条**语言覆盖**用例。
 
@@ -60,13 +61,63 @@
 **批四的两处未完成，如实记录**：
 
 1. **i18n 只做了一部分**。`ballot-reasons.ts`、塔标元数据、语言切换器、结果来源标签已参数化；`ballot-labels.ts` 的阶段/状态句与其余组件的文案仍是内联中文。英文界面目前是中英混杂，不是完整英文。详见 ADR-0040 的 Consequences。
-2. **两条浏览器路径没有端到端验证**：`ui-drill` 未覆盖英文语言切换，也未覆盖订阅按钮与草稿恢复（该 drill 从不访问创建页，因此没有加草稿断言——加了也是没有消费者的死代码）。图表已加入 `chartBarCount === optionActionCount` 断言，但该 drill 需要同时跑起 Next 服务、Playwright 与本地 Hardhat，本次未执行。
+2. **两条浏览器路径仍然没有端到端覆盖**：`ui-drill` 未覆盖英文语言切换，也未覆盖订阅按钮与草稿恢复（该 drill 从不访问创建页，因此没有加草稿断言——加了也是没有消费者的死代码）。图表断言**已加入并实测通过**（`bars=3 options=3`）。这三条路径目前分别只有 `i18n.test.ts`、`notify.test.ts`、`draft.test.ts` 的纯函数覆盖。
 
 **批四随后的收口提交** `dace051`：发现 `validateConfig` 的文档写着"Solidity 侧使用相同的顺序"，而它**没有**实现 `validateGovernance` 的两条规则（`quorumBps > 10000`、`quorumBps != 0 && openToAll`）。缺失本身是有意的、且已在 `templates.ts` 写明（没有调用方能设置 quorumBps，所以两条规则**不可达**而非"未检查"，为不可达分支写文案是死代码），但 `mechanisms.ts` 那侧没说，于是"声称自己是镜像、实际只镜像一部分"成了一个等人踩的坑。改动只做两件事：把注释改成实话并点名未镜像的规则与它当前安全的条件；在 `templates.test.ts` 加一条断言"表单能构造出的每种配置 `quorumBps` 都是 0"，作为那个条件的可执行形式。已做突变验证（把 `DEFAULT_CONFIG.quorumBps` 改成 100 → 精确失败 1 条，报 `produced a quorum`）。
 
 **同一次收口里重复踩到的坑**：突变验证时用 PowerShell `Set-Content` 改写 `mechanisms.ts`，文件被按 GBK 重新编码成非法 UTF-8（`read` 工具直接拒绝读取）。恢复方式为 `git checkout HEAD --` 取回已提交版本后用文件工具重做改动（已 diff 确认只剩预期的两处）。这与批三损坏 `pagination.test.ts` 是**同一个原因**。因此把批三那条教训升级为硬规则：**任何源码文件都不得经由 shell 重定向或 `Set-Content` 写入，包括临时性的突变验证**——要验证一条断言会响，也应改常量后立刻用文件工具改回，而不是让 shell 碰文件。
 
 **批四提交里混入的一次无关改动，如实记录**：`pnpm format` 被 prettier 用来格式化全仓库，包括 markdown，因此它把**另一个计划**的两份文档（`docs/aegis/plans/2026-09-22-containerization-cicd-and-observability.md` 与对应的 spec，由 `2dd10bd` 引入）的表格分隔行补齐了宽度。随后 `git add -A` 把这些改动一并扫进了批四提交 `8485d6b`。已核实：改动**只有表格分隔行的空格填充**（`| --- |` → `| ------ |`），没有语义变化；用 `--ignore-all-space` 查看后剩下的"实质"差异全部是这一类。它不会破坏任何东西，但把 337 行属于另一个计划的改动记在了一个标题为"前端体验"的提交上，会让人在那份计划的历史里看到一次无法解释的变动。此处选择不回改历史（为此重排 `8485d6b`/`dace051` 的代价大于表格填充本身），改为记录在案。教训：**`git add -A` 之前先看 `git status`**，格式化工具的作用范围是整仓库，不是本次改动。
+
+### 基线 §5.2 五条不变量：批四结束时的实测登记
+
+`Baseline Sync Signals` 要求"第 1/2/3/5 条不得破坏，需在每批结束时逐条登记实测结论"。**这一登记此前四批都没有做过**，属于本次才补上的遗漏——补记于此，并注明每条的**证据来源**，而不是只写"未破坏"。批四本身**没有改动任何合约代码与 ABI**（`git show --name-only` 确认两处提交均未触及 `contracts/`），所以下面是复核而非新风险。
+
+| #   | 不变量                                            | 批四结论 | 证据                                                                                                                                                                                                                                       |
+| --- | ------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | 链上是唯一事实源；MySQL 可 DROP 后从事件完整重建  | 未破坏   | 本批新增的 `subscriptions` 表**只存水位线**，通知完全由事件推导（ADR-0041），因此删库重建后订阅数据是唯一需要重设的用户状态，且它不参与任何票数计算                                                                                        |
+| 2   | 后端永不持有任何私钥                              | 未破坏   | 实测 `web/src/**` 下无任何文件引用 `privateKey`/`PRIVATE_KEY`（grep 结果为空）；唯一引用处是 `web/scripts/preflight.ts`，那是部署 CLI，不是应用后端                                                                                        |
+| 3   | 事件消费幂等                                      | 未破坏   | 本批未新增事件表；既有的 `UNIQUE(tx_hash, log_index)` 未被触碰（`schema.ts` 里的 `uk_*` 键），`INSERT IGNORE` 语义不变                                                                                                                     |
+| 4   | 每个合格主体的票权至多被计入一次（ADR-0034 重述） | 未破坏   | `contracts/contracts/PollPowerConservation.t.sol` 九条属性测试通过，含 `test_Conservation_HoldsUnderRandomisedSequences`、`test_Conservation_TurnoutNeverExceedsOneHundredPercent`、`test_Conservation_FrozenDenominatorEqualsThePowerSum` |
+| 5   | 事件插入与游标推进同一事务提交                    | 未破坏   | 实测 `web/src/lib/indexer/sync.ts`：`beginTransaction()`（L219）→ 事件插入（L334）→ 游标推进（L338）→ `commit()`（L344），异常走 `rollback()`（L348）。四步同处一个连接与事务                                                              |
+
+**批四实际测得的数字**：350 合约（287 solidity + 63 nodejs）+ 659 web，全通过；`typecheck`、`format:check`、`build:web` 干净。
+
+**最初记为"未执行"的 `ui:drill`，后来补跑并抓到两个真实缺陷。**
+
+上面的判断（"需要运行中的 Next 服务、Playwright 浏览器与本地 Hardhat 部署，四条都没执行"）在当时是准确的，但**环境其实具备条件**：Chrome 已安装、8545 上有活链、3306 有 MySQL、`.env` 完整——缺的只是一个 `next start`。补跑之后抓到两个**与界面无关**的真实缺陷：
+
+**缺陷一：`pnpm seed:local` 自批二起就是坏的，没有任何测试能发现。** 首轮 drill 的 CSV 导出返回 503，根因链是：
+
+1. 本地部署早于批三，部署出的 `Poll` 实现**没有** `whitelistedCount()`（批三 `635c502` 才加入），而导出路由调用它 → `function selector was not recognized and there's no fallback function`。
+2. 重新部署后再跑 seed，立刻失败：`ABI encoding params/values length mismatch. Expected length (params): 5, Given length (values): 4`。
+3. `createPoll` 在**批二**增加了第 5 个参数 `address[] executionTargets`。`CreatePollForm.tsx` 同步更新了（并注释说明为何传空数组），**`seed-local.ts` 没有**。
+4. 修掉 arity 后立刻露出第二个：`TypeError: Cannot convert undefined to a BigInt` —— `PollConfig` 在批二还多了 `quorumBps` 与 `timelockSeconds`，而 seed 的 `DEFAULT_CONFIG()` 只给了 7 个字段，缺这两个。
+
+**为什么批二和批四都没发现**：`seed:local` 是开发便利脚本，**在 `pnpm test` 之外**。合约改签名时全部测试保持绿色，只有这个脚本静静地烂掉。这是批一那条教训（"派生值一律从单一来源生成，不手写第二份"）的又一个实例——只不过这次的"第二份"是**调用签名**。
+
+**缺陷二：批四自己引入的 `console.warn` 让 drill 的一条断言失败。** 为缺失的 WalletConnect project id 加的 `console.warn` 触发了 `ui-drill` 的"页面不得记录 info 以上任何东西"断言。那条断言的用途是抓 **hydration mismatch** 这类 DOM 看不出来的缺陷——React 会在客户端重渲染，页面看起来完全正常，上面每一条 DOM 断言都会通过。
+
+一个**故意的配置提示**不是缺陷。若为此放宽断言，下一个人就会把这类消息当作噪音，而这条断言恰恰是唯一能抓 hydration mismatch 的东西。改法是**降级为 `console.info`**：该提示在每个读者的每次页面加载时都会打印，而它报告的是"少了一个可选连接器"，不是"有东西坏了"——桌面端有注入钱包的读者毫无损失。提示与断言都保住了。
+
+**实跑结果（全部通过）：**
+
+| 命令                                   | 结果                                                                                            |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `pnpm ui-drill`（只读）                | **all checks passed**，含新增断言 `the result chart drew one bar per option — bars=3 options=3` |
+| `pnpm ui-drill --vote`（针对开放投票） | **all checks passed**，`the transaction reached a confirmed receipt`                            |
+| `pnpm ui-drill --change`               | **all checks passed**，`the change reached a confirmed receipt`，页面把新选项标为"我的"         |
+
+`--vote` 首次运行失败，原因是**测试账户选择**而非缺陷：默认账户不在白名单里，drill 自己给出结论 `--vote requested, but the chain does not allow this account to vote`。改用 `POLL_ADDRESS` 指向那份**开放**投票后通过。
+
+**两条计划自身的错误，一并记录：**
+
+1. `Verification` 段把命令写作 `ui:drill`，实际脚本名是 `ui-drill`（连字符，无冒号）。
+2. 该段列出的 `--delegate` 与 `--commit` **两个标志在 `ui-drill.ts` 里根本不存在**；实际支持的是 `--vote`、`--change`、`--refund`、`--reject`。这两条命令**不可执行**，而先前"未执行"的记录恰好掩盖了这一点。
+
+**顺带完成一次不变量 1 的实测**：重跑 drill 需要重新部署并重建索引，`DROP DATABASE` 之后 `indexer:drain` 重放 416 条事件（`inserted: 416`、`duplicatesIgnored: 0`），`check-consistency` 报告 `consistent`（200/200 与 5/5；执行写操作后为 6/6），`divergentPolls: 0`。
+
+**一次环境状态教训**：`seed:local` 会**自己部署一份工厂**并覆盖 `deployments/31337.json`，因此正确顺序是 `seed:local` **之后**再 `export-abi`；我按 `deploy:local` → `export-abi` → `seed:local` 的顺序做，导致应用指向的工厂与实际播种的工厂不是同一个，表现为索引重放 0 条事件而链上确有事件。诊断它花了几轮，最终靠**直接解码那条孤零零的日志**定位——它是 `OwnershipTransferred`（`0x8be0079c…`）而不是 `PollCreated`，说明那份工厂上根本没有投票。教训：**"索引重放 0 条"要先怀疑目标地址，不要先怀疑解码器。**
 
 ## 0. Aegis Visibility
 
@@ -816,8 +867,18 @@ pnpm indexer:reorg-drill          # 新增执行事件后重组自愈仍需正�
 **批四额外必跑：**
 
 ```bash
-TEST_ACCOUNT=0x… pnpm ui:drill              # 只读
-TEST_ACCOUNT=0x… pnpm ui:drill --vote
-TEST_ACCOUNT=0x… pnpm ui:drill --delegate   # 新增
-TEST_ACCOUNT=0x… pnpm ui:drill --commit     # 新增
+# 脚本名是 `ui-drill`（连字符，无冒号）。需要三样东西同时就绪：
+#   1. 一份用**当前代码**做的本地部署  2. 跑起来的 Next 服务  3. 已安装的 Chrome
+pnpm deploy:local && pnpm seed:local && pnpm export-abi   # 顺序不可颠倒，见下
+pnpm indexer:migrate && pnpm indexer:drain
+cd web && PORT=3100 pnpm start                             # 另开一个终端
+TEST_ACCOUNT=0x… APP_URL=http://127.0.0.1:3100/ pnpm ui-drill           # 只读
+TEST_ACCOUNT=0x… APP_URL=http://127.0.0.1:3100/ pnpm ui-drill --vote    # 该账户必须能投票
+TEST_ACCOUNT=0x… APP_URL=http://127.0.0.1:3100/ pnpm ui-drill --change
 ```
+
+`ui-drill.ts` 实际支持的标志只有 `--vote`、`--change`、`--refund`、`--reject`。本文档早先写的 `--delegate` 与 `--commit` **并不存在**，那两条命令无法执行（已于批四补跑时发现并更正）。
+
+`--vote` 会**先自检**账户能否投票，不能投时直接失败并说明原因。在一份白名单投票上用默认账户必然失败，这是设计如此：要么换一个在白名单内的账户，要么用 `POLL_ADDRESS` 指向一份开放投票。
+
+`seed:local` 会**自己部署一份工厂**并覆盖 `deployments/<chainId>.json`，所以 `seed` 必须在 `export-abi` **之前**。顺序颠倒不会报错，而是让应用指向的工厂与实际播种的工厂不同，表现为索引重放 0 条事件。

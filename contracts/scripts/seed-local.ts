@@ -56,6 +56,13 @@ function DEFAULT_CONFIG(openToAll: boolean) {
     delegable: false,
     commitReveal: false,
     revealWindowSeconds: 0n,
+    // The two governance fields were added to `PollConfig` in batch 2 and were
+    // missing here, which made every `createPoll` call fail to encode. Both are
+    // deliberately zero: "no quorum" and "no execution delay" are the mechanism
+    // set the consistency check's baseline numbers were measured against, so
+    // seeding anything else here would move the baseline out from under it.
+    quorumBps: 0n,
+    timelockSeconds: 0n,
   };
 }
 
@@ -125,6 +132,15 @@ const createHash = await factory.write.createPoll([
   // Every mechanism is off: this is the default configuration, which is what
   // the consistency check's baseline numbers are measured against.
   DEFAULT_CONFIG(false),
+  // The fifth argument is the execution target list. Empty means the poll may
+  // only call itself, which is the safe default and the same choice the create
+  // form makes. This argument was MISSING here until it was caught by running
+  // `ui-drill` against a fresh deployment: `createPoll` gained the parameter in
+  // batch 2 and this script was not updated with it, so `pnpm seed:local` failed
+  // with "ABI encoding params/values length mismatch" while every test kept
+  // passing — the seed script is a dev convenience outside `pnpm test`, so
+  // nothing in the suite could notice.
+  [],
 ]);
 const createReceipt = await publicClient.waitForTransactionReceipt({ hash: createHash });
 
@@ -198,6 +214,9 @@ const secondHash = await factory.write.createPoll([
   // one of each mode keeps both admission paths present on a fresh local chain,
   // so a UI regression in either one is reachable without hand-built state.
   DEFAULT_CONFIG(true),
+  // No execution targets, for the same reason as the first poll: an empty list
+  // keeps a passed vote from reaching anything but the poll itself.
+  [],
 ]);
 await publicClient.waitForTransactionReceipt({ hash: secondHash });
 

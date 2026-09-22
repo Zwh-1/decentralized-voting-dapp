@@ -85,10 +85,22 @@ const walletConnectStatus = resolveWalletConnect(walletConnectProjectId);
 const walletConnectWarning = walletConnectNotice(walletConnectStatus);
 
 if (walletConnectWarning !== null && typeof window !== "undefined") {
-  // Console rather than the UI. A missing optional connector is an operator
-  // problem, not something a reader can act on, and a banner about it would be
-  // noise on every page for everyone.
-  console.warn(walletConnectWarning);
+  /*
+    `info`, not `warn`, and the level is load-bearing rather than cosmetic.
+
+    This fires on EVERY page load in EVERY reader's browser, and what it reports
+    is that one optional extra connector is not offered — not that anything is
+    broken. A desktop reader with an injected wallet has lost nothing at all.
+
+    `ui-drill` asserts that the page logs nothing above info level, because its
+    job is to catch defects the DOM cannot show (a hydration mismatch still
+    renders a correct-looking page). Marking a deliberate configuration notice as
+    a warning makes that assertion fail for a non-defect, which would train the
+    next person to loosen the assertion — and then it stops catching the real
+    thing. Measured: at `warn` the drill reported "1 failure(s)" naming only this
+    message.
+  */
+  console.info(walletConnectWarning);
 }
 
 /**
