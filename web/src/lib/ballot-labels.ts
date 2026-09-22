@@ -27,6 +27,7 @@
 import type { HealthResponse, SyncResponse } from "./types";
 import { isPlausibleCid, type MetadataResult } from "./ipfs";
 import { formatEth, phaseLabel } from "./voting";
+import { ballotPhrasesFor, DEFAULT_LOCALE, interpolate, type Locale } from "./i18n";
 
 /**
  * Where a tally's numbers came from, in the words this app uses for it.
@@ -40,8 +41,13 @@ import { formatEth, phaseLabel } from "./voting";
  * The parameter is written out rather than taking `TallyResponse["source"]` so
  * this module does not import the wire types just for one field name.
  */
-export function tallySourceLabel(source: "chain" | "index"): string {
-  return source === "index" ? "MySQL 索引" : "链上直读";
+export function tallySourceLabel(
+  source: "chain" | "index",
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  const phrases = ballotPhrasesFor(locale);
+
+  return source === "index" ? phrases.tallyFromIndex : phrases.tallyFromChain;
 }
 
 /**
@@ -50,23 +56,28 @@ export function tallySourceLabel(source: "chain" | "index"): string {
  * "We could not find out" is a different claim from "the answer is zero", and the
  * page must not answer the second when it means the first.
  */
-export function tallyLabels(query: {
-  isPending: boolean;
-  isError: boolean;
-  source?: "chain" | "index";
-  total?: number;
-  candidateCount: number;
-}): { source: string; total: string; candidates: string } {
+export function tallyLabels(
+  query: {
+    isPending: boolean;
+    isError: boolean;
+    source?: "chain" | "index";
+    total?: number;
+    candidateCount: number;
+  },
+  locale: Locale = DEFAULT_LOCALE,
+): { source: string; total: string; candidates: string } {
+  const phrases = ballotPhrasesFor(locale);
+
   if (query.isError) {
-    return { source: "读取失败", total: "—", candidates: "—" };
+    return { source: phrases.readFailed, total: phrases.nothing, candidates: phrases.nothing };
   }
 
   if (query.isPending || query.source === undefined) {
-    return { source: "读取中…", total: "—", candidates: "—" };
+    return { source: phrases.reading, total: phrases.nothing, candidates: phrases.nothing };
   }
 
   return {
-    source: tallySourceLabel(query.source),
+    source: tallySourceLabel(query.source, locale),
     total: String(query.total ?? 0),
     candidates: String(query.candidateCount),
   };
@@ -94,12 +105,15 @@ export function readText<T>(
   state: ReadState,
   value: T | undefined,
   format: (value: T) => string,
+  locale: Locale = DEFAULT_LOCALE,
 ): string {
   if (state === "ready" && value !== undefined) {
     return format(value);
   }
 
-  return state === "failed" ? "读取失败" : "读取中…";
+  const phrases = ballotPhrasesFor(locale);
+
+  return state === "failed" ? phrases.readFailed : phrases.reading;
 }
 
 /**
@@ -110,20 +124,25 @@ export function readText<T>(
  * used to print 未知 for all of them — including for a chain whose contract was
  * never even queried.
  */
-export function phaseText(input: {
-  contractKnown: boolean;
-  status: ReadState;
-  phase: number | undefined;
-}): string {
+export function phaseText(
+  input: {
+    contractKnown: boolean;
+    status: ReadState;
+    phase: number | undefined;
+  },
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  const phrases = ballotPhrasesFor(locale);
+
   if (!input.contractKnown) {
-    return "—";
+    return phrases.nothing;
   }
 
   if (input.status === "ready" && input.phase !== undefined) {
     return phaseLabel(input.phase);
   }
 
-  return input.status === "failed" ? "读取失败" : "读取中…";
+  return input.status === "failed" ? phrases.readFailed : phrases.reading;
 }
 
 export interface MyStatusLabels {
@@ -141,16 +160,25 @@ export interface MyStatusLabels {
  * two rows still answering `否` / `—` from a request that had not completed, and
  * 押金 was still answering `0 ETH` through `stakeOf.data ?? 0n`.
  */
-export function myStatusLabels(input: {
-  mounted: boolean;
-  isConnected: boolean;
-  contractKnown: boolean;
-  hasVoted: { status: ReadState; value: boolean | undefined };
-  votedFor: { status: ReadState; value: number | undefined };
-  stake: { status: ReadState; value: bigint | undefined };
-  whitelisted: { status: ReadState; value: boolean | undefined };
-}): MyStatusLabels {
-  const blank: MyStatusLabels = { hasVoted: "—", votedFor: "—", stake: "—", whitelisted: "—" };
+export function myStatusLabels(
+  input: {
+    mounted: boolean;
+    isConnected: boolean;
+    contractKnown: boolean;
+    hasVoted: { status: ReadState; value: boolean | undefined };
+    votedFor: { status: ReadState; value: number | undefined };
+    stake: { status: ReadState; value: bigint | undefined };
+    whitelisted: { status: ReadState; value: boolean | undefined };
+  },
+  locale: Locale = DEFAULT_LOCALE,
+): MyStatusLabels {
+  const phrases = ballotPhrasesFor(locale);
+  const blank: MyStatusLabels = {
+    hasVoted: phrases.nothing,
+    votedFor: phrases.nothing,
+    stake: phrases.nothing,
+    whitelisted: phrases.nothing,
+  };
 
   if (!input.mounted) {
     return blank;
@@ -158,7 +186,7 @@ export function myStatusLabels(input: {
 
   if (!input.isConnected) {
     // Not an absence of an answer: there is no address to ask about.
-    return { ...blank, hasVoted: "未连接" };
+    return { ...blank, hasVoted: phrases.notConnected };
   }
 
   if (!input.contractKnown) {
@@ -166,15 +194,30 @@ export function myStatusLabels(input: {
   }
 
   return {
-    hasVoted: readText(input.hasVoted.status, input.hasVoted.value, (voted) =>
-      voted ? "是" : "否",
+    hasVoted: readText(
+      input.hasVoted.status,
+      input.hasVoted.value,
+      (voted) => (voted ? phrases.yes : phrases.no),
+      locale,
     ),
-    votedFor: readText(input.votedFor.status, input.votedFor.value, (id) =>
-      id === 0 ? "—" : `候选人 #${id}`,
+    votedFor: readText(
+      input.votedFor.status,
+      input.votedFor.value,
+      // A zero option id is the contract's "no vote", not a candidate numbered 0.
+      (id) => (id === 0 ? phrases.nothing : interpolate(phrases.candidateNumbered, { id })),
+      locale,
     ),
-    stake: readText(input.stake.status, input.stake.value, (wei) => `${formatEth(wei)} ETH`),
-    whitelisted: readText(input.whitelisted.status, input.whitelisted.value, (allowed) =>
-      allowed ? "是" : "否",
+    stake: readText(
+      input.stake.status,
+      input.stake.value,
+      (wei) => `${formatEth(wei)} ETH`,
+      locale,
+    ),
+    whitelisted: readText(
+      input.whitelisted.status,
+      input.whitelisted.value,
+      (allowed) => (allowed ? phrases.yes : phrases.no),
+      locale,
     ),
   };
 }
@@ -212,30 +255,36 @@ export function optionMetadataLabel(
   cid: string,
   result: MetadataResult | undefined,
   query: { isPending: boolean; isError: boolean },
+  locale: Locale = DEFAULT_LOCALE,
 ): string {
+  const phrases = ballotPhrasesFor(locale);
+
   if (!isMetadataCid(cid)) {
-    return "不是元数据 CID，显示原文";
+    return phrases.metadataNotACid;
   }
 
   if (result === undefined) {
     if (query.isError) {
-      return "读取元数据时发生了未预期的错误";
+      return phrases.metadataUnexpectedError;
     }
 
-    return query.isPending ? "读取中…" : "元数据状态未知";
+    return query.isPending ? phrases.reading : phrases.metadataUnknown;
   }
 
   switch (result.status) {
     case "ok":
-      return "已解析";
+      return phrases.metadataResolved;
     case "invalid-cid":
       // Unreachable for a string that passed the shape check, and kept so the
       // union stays exhaustively handled if the two ever disagree.
-      return "CID 格式无效，无法解析";
+      return phrases.metadataInvalidCid;
     case "unreachable":
-      return `${result.attempts} 个网关均不可达，已降级显示编号`;
+      return interpolate(phrases.metadataGatewaysUnreachable, { attempts: result.attempts });
     case "no-metadata":
-      return `网关可访问（${result.answered}/${result.attempts} 个已作答），但没有返回可用的选项元数据`;
+      return interpolate(phrases.metadataNoUsableDocument, {
+        answered: result.answered,
+        attempts: result.attempts,
+      });
     default: {
       const exhaustive: never = result;
 
@@ -251,12 +300,19 @@ export function optionMetadataLabel(
  * rather than numbering the option, which would hide the only human-readable
  * thing the poll has.
  */
-export function optionName(id: number, cid: string, result: MetadataResult | undefined): string {
+export function optionName(
+  id: number,
+  cid: string,
+  result: MetadataResult | undefined,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
   if (!isMetadataCid(cid)) {
     return cid;
   }
 
-  return result?.status === "ok" ? result.metadata.name : `选项 #${id}`;
+  return result?.status === "ok"
+    ? result.metadata.name
+    : interpolate(ballotPhrasesFor(locale).optionNumbered, { id });
 }
 
 /** Decimal strings from the API, or null when the value is not one. */
@@ -274,45 +330,64 @@ function decimal(value: string | null): bigint | null {
  * `11748968 / 链头 11748973` with `落后区块 0`, five blocks apparently missing.
  * The raw head has its own row now, and it says what the difference is.
  */
-export function indexHeightText(health: HealthResponse | undefined): string {
+export function indexHeightText(
+  health: HealthResponse | undefined,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  const phrases = ballotPhrasesFor(locale);
+
   if (health === undefined) {
-    return "读取中…";
+    return phrases.reading;
   }
 
   if (!health.indexConfigured) {
-    return "未启用";
+    return phrases.notAvailable;
   }
 
   const head = decimal(health.chainHead);
   const safe = head === null ? null : head - BigInt(health.confirmations);
 
-  return `${health.lastIndexedBlock ?? "—"} / 安全头 ${
-    safe === null || safe < 0n ? "—" : safe.toString()
-  }`;
+  return interpolate(phrases.indexHeight, {
+    indexed: health.lastIndexedBlock ?? phrases.nothing,
+    safeHead: safe === null || safe < 0n ? phrases.nothing : safe.toString(),
+  });
 }
 
 /** The 链头 row: the raw head, and the blocks still inside the confirmation window. */
-export function chainHeadText(health: HealthResponse | undefined): string {
+export function chainHeadText(
+  health: HealthResponse | undefined,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  const phrases = ballotPhrasesFor(locale);
+
   if (health === undefined) {
-    return "读取中…";
+    return phrases.reading;
   }
 
   if (health.chainHead === null) {
-    return "—";
+    return phrases.nothing;
   }
 
   return health.confirmations > 0
-    ? `${health.chainHead}（最近 ${health.confirmations} 块待确认）`
+    ? interpolate(phrases.chainHeadWithPending, {
+        head: health.chainHead,
+        confirmations: health.confirmations,
+      })
     : health.chainHead;
 }
 
 /** The 落后区块 row. Never a number when there is no index to be behind. */
-export function lagText(health: HealthResponse | undefined): string {
+export function lagText(
+  health: HealthResponse | undefined,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  const phrases = ballotPhrasesFor(locale);
+
   if (health === undefined) {
-    return "读取中…";
+    return phrases.reading;
   }
 
-  return health.indexConfigured ? (health.lagBlocks ?? "—") : "未启用";
+  return health.indexConfigured ? (health.lagBlocks ?? phrases.nothing) : phrases.notAvailable;
 }
 
 /**
@@ -322,22 +397,29 @@ export function lagText(health: HealthResponse | undefined): string {
  * sync route looked exactly like a successful pass. Each outcome the route can
  * return now has its own sentence, including the one where there is no database.
  */
-export function syncSummary(result: SyncResponse): string {
+export function syncSummary(result: SyncResponse, locale: Locale = DEFAULT_LOCALE): string {
+  const phrases = ballotPhrasesFor(locale);
+
   if (!result.enabled) {
-    return result.reason ?? "索引未启用，没有可同步的数据库。";
+    return result.reason ?? phrases.syncDisabled;
   }
 
   switch (result.status) {
     case "synced":
-      return `已索引区块 ${result.fromBlock ?? "—"}–${result.toBlock ?? "—"}，读取 ${
-        result.seen ?? 0
-      } 个事件，写入 ${result.inserted ?? 0} 行。`;
+      return interpolate(phrases.syncSynced, {
+        from: result.fromBlock ?? phrases.nothing,
+        to: result.toBlock ?? phrases.nothing,
+        seen: result.seen ?? 0,
+        inserted: result.inserted ?? 0,
+      });
     case "rewound":
-      return `检测到链重组，已回退到区块 ${result.toBlock ?? "—"}，被孤立的行已删除。`;
+      return interpolate(phrases.syncRewound, { block: result.toBlock ?? phrases.nothing });
     case "idle":
-      return `索引已经追上安全头（${result.lastIndexedBlock ?? "—"}），没有新的可索引区块。`;
+      return interpolate(phrases.syncIdle, {
+        block: result.lastIndexedBlock ?? phrases.nothing,
+      });
     default:
-      return "同步完成。";
+      return phrases.syncDone;
   }
 }
 
@@ -442,26 +524,32 @@ const REQUEST_ALREADY_PENDING = -32002;
  * own markers. This one is about the reader's own wallet, is rendered in the DOM,
  * and its evidence is EIP-1193 codes.
  */
-export function describeWriteFailure(error: unknown): WriteFailure {
+export function describeWriteFailure(
+  error: unknown,
+  locale: Locale = DEFAULT_LOCALE,
+): WriteFailure {
+  const phrases = ballotPhrasesFor(locale);
   const shape = writeErrorShape(error);
   const text = shape.message;
+
+  // Every branch below returns the SAME `classified` value in every language:
+  // classification is a decision about the error, not about the wording, and a
+  // translation must never be able to move an error between "explained" and
+  // "sent to the console".
 
   if (
     shape.codes.includes(USER_REJECTED) ||
     shape.names.some((name) => /UserRejected|UserDenied/i.test(name)) ||
     /user (rejected|denied)|denied (transaction|message) signature|rejected the request/i.test(text)
   ) {
-    return { text: "你在钱包里拒绝了这笔交易，链上没有任何变化。", classified: true };
+    return { text: phrases.writeUserRejected, classified: true };
   }
 
   if (
     shape.codes.includes(REQUEST_ALREADY_PENDING) ||
     /request.*already pending|already pending/i.test(text)
   ) {
-    return {
-      text: "你的钱包里已经有一个待处理的请求，请先在上面那个弹窗里处理完，再重试；链上没有任何变化。",
-      classified: true,
-    };
+    return { text: phrases.writeAlreadyPending, classified: true };
   }
 
   if (
@@ -471,20 +559,14 @@ export function describeWriteFailure(error: unknown): WriteFailure {
     shape.codes.includes(4902) ||
     /chain mismatch|does not match the (target|current) chain|unrecognized chain/i.test(text)
   ) {
-    return {
-      text: "钱包所在的网络与页面配置的网络不是同一条链，交易没有发出。请切换钱包网络后重试。",
-      classified: true,
-    };
+    return { text: phrases.writeWrongChain, classified: true };
   }
 
   if (
     /insufficient funds|exceeds the balance|insufficient balance/i.test(text) ||
     (shape.codes.includes(-32000) && /funds|balance/i.test(text))
   ) {
-    return {
-      text: "钱包余额不足以支付押金和网络费，交易没有发出，链上没有任何变化。",
-      classified: true,
-    };
+    return { text: phrases.writeInsufficientFunds, classified: true };
   }
 
   if (
@@ -495,24 +577,15 @@ export function describeWriteFailure(error: unknown): WriteFailure {
     // The one class where something *may* have reached the chain: "already known"
     // means the node has this transaction, so the reader must not be told that
     // nothing happened.
-    return {
-      text: "钱包或节点认为这笔交易已经提交过，链上可能已经有一笔相同的交易。请等它确认，或刷新页面查看状态，不要重复提交。",
-      classified: true,
-    };
+    return { text: phrases.writeAlreadyKnown, classified: true };
   }
 
   if (
     shape.names.some((name) => /ContractFunction|ExecutionReverted|Reverted/i.test(name)) ||
     /execution reverted|reverted with|reverted:|\bVM Exception\b/i.test(text)
   ) {
-    return {
-      text: "合约回滚了这笔交易：链上状态没有改变（这笔交易若已被打包，网络费仍会消耗）。",
-      classified: true,
-    };
+    return { text: phrases.writeReverted, classified: true };
   }
 
-  return {
-    text: "交易没有完成：钱包或节点返回了一个页面无法归类的错误。原始错误已输出到浏览器控制台。",
-    classified: false,
-  };
+  return { text: phrases.writeUnclassified, classified: false };
 }

@@ -53,7 +53,15 @@ import path from "node:path";
 import { createPublicClient, defineChain, http } from "viem";
 
 import { loadServerConfig } from "../src/lib/config";
-import { factoryAbi, pollAbi } from "../src/lib/contracts";
+// `PollPhase` rather than literals: these were hard-coded as 1 and 2, and batch
+// one inserted `Reveal` into the contract's enum, shifting `Ended` from 2 to 3.
+// The effect was that this script believed a genuinely refundable poll was not
+// refundable — `chainSaysRefundable=false (phase=3 stake=1000000000000000)` on a
+// poll whose refund button the page had correctly enabled. The web app's own
+// tests already carry a comment about being bitten by the same literals; the
+// script was missed. Deriving from the generated enum makes the mistake
+// inexpressible.
+import { factoryAbi, pollAbi, PollPhase } from "../src/lib/contracts";
 import { isPlausibleCid } from "../src/lib/ipfs";
 import { formatEth } from "../src/lib/voting";
 import { CdpBrowser, DEBUG_PORT, shorten, sleep } from "./lib/cdp";
@@ -607,8 +615,8 @@ async function main(): Promise<number> {
     const votedForOption: number | null =
       voter.currentOptionId === 0n ? null : Number(voter.currentOptionId);
 
-    const PHASE_VOTING = 1;
-    const PHASE_ENDED = 2;
+    const PHASE_VOTING = PollPhase.Voting;
+    const PHASE_ENDED = PollPhase.Ended;
     const STAKE_WEI = 1_000_000_000_000_000n;
 
     // Whether the poll admits everyone is read from the poll, not inferred from

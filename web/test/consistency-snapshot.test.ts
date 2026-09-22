@@ -3,7 +3,7 @@
  * The consistency check reads three things that only mean something together: the
  * index's tally, the cursor that tally was committed with, and a single height on
  * the chain. Each pair was previously read at a different moment, and each
- * mismatch has the same symptom 鈥?a healthy index accused of diverging, which is
+ * mismatch has the same symptom — a healthy index accused of diverging, which is
  * the one verdict the whole M-6 check exists to make trustworthy.
  *
  * Measured before the fix, driving a real vote while polling `/api/results`:

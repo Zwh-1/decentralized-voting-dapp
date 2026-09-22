@@ -22,16 +22,23 @@ import {
   indexHeightText,
   lagText,
   myStatusLabels,
+  optionMetadataLabel,
+  optionName,
   phaseText,
   readStatus,
+  readText,
   syncSummary,
   tallyLabels,
+  tallySourceLabel,
 } from "../src/lib/ballot-labels";
 import type { HealthResponse, SyncResponse } from "../src/lib/types";
 // Named members rather than literals: these assertions used to hard-code 1 and 2,
 // and inserting `Reveal` into the contract's enum turned `2` into the wrong
 // phase without any test noticing it had stopped testing what it claimed.
 import { PollPhase } from "../src/lib/contracts";
+// The "no value" placeholder, read from the catalogue rather than written as a
+// literal here, for the same reason.
+import { ZH_BALLOT_PHRASES } from "../src/lib/i18n";
 
 describe("tallyLabels", () => {
   it("never claims a source, a total or a count while the read is in flight", () => {
@@ -492,5 +499,234 @@ describe("describeWriteFailure", () => {
     });
 
     assert.equal(failure.text, "你在钱包里拒绝了这笔交易，链上没有任何变化。");
+  });
+});
+
+/**
+ * The language contract for this module.
+ *
+ * `ballot-labels.ts` is where the page decides WHAT to say about a read it may
+ * not have completed — "we could not find out" versus "the answer is zero". A
+ * translation must be able to change only the wording, never which of those two
+ * claims is made. So the shape of every result is asserted to be identical across
+ * languages, and only the text is allowed to differ.
+ */
+describe("language", () => {
+  /** A CID-shaped string, which is what makes `optionName` consult the metadata. */
+  const CID = "bafkreihnl2gt3dygiplwxv5kwbx53l4u24cmsnu3tniz2wmew3n7phfq5a";
+
+  const HEALTH: HealthResponse = health();
+  const SYNCED: SyncResponse = {
+    enabled: true,
+    status: "synced",
+    fromBlock: "10",
+    toBlock: "20",
+    seen: 3,
+    inserted: 2,
+  };
+
+  /**
+   * Every function in the module, called with inputs that reach a real branch.
+   *
+   * Only sentences that are actually COPY belong here. Two returns are
+   * deliberately locale-independent and were removed after they made the
+   * "everything moved" assertion fail for a non-defect:
+   *
+   *   * `phaseText` with `contractKnown: false` returns the bare `—`, which says
+   *     "there is no contract to report a phase for". A dash is not a sentence in
+   *     either language.
+   *   * `optionName` over a non-CID string returns that string, because a raw
+   *     label IS the option's label. It is the poll's own on-chain data, and the
+   *     `optionName` test at the end of this block asserts it is NOT translated.
+   *
+   * Both were false failures: the assertion exists to catch a catalogue entry that
+   * was never wired up, and a data value that is correctly identical in both
+   * languages is not that.
+   */
+  function everySentence(locale: "zh" | "en"): string[] {
+    return [
+      tallyLabels({ isPending: true, isError: false, candidateCount: 0 }, locale).source,
+      tallyLabels({ isPending: false, isError: true, candidateCount: 0 }, locale).source,
+      tallyLabels(
+        { isPending: false, isError: false, source: "index", total: 2, candidateCount: 2 },
+        locale,
+      ).source,
+      readText("failed", undefined, String, locale),
+      readText("loading", undefined, String, locale),
+      phaseText({ contractKnown: true, status: "failed", phase: undefined }, locale),
+      myStatusLabels(
+        {
+          mounted: true,
+          isConnected: false,
+          contractKnown: true,
+          hasVoted: { status: "ready", value: true },
+          votedFor: { status: "ready", value: 7 },
+          stake: { status: "ready", value: 1n },
+          whitelisted: { status: "ready", value: false },
+        },
+        locale,
+      ).hasVoted,
+      optionMetadataLabel("not-a-cid", undefined, { isPending: false, isError: false }, locale),
+      optionMetadataLabel(
+        "bafkreihnl2gt3dygiplwxv5kwbx53l4u24cmsnu3tniz2wmew3n7phfq5a",
+        { status: "unreachable", attempts: 3 },
+        { isPending: false, isError: false },
+        locale,
+      ),
+      optionMetadataLabel(
+        "bafkreihnl2gt3dygiplwxv5kwbx53l4u24cmsnu3tniz2wmew3n7phfq5a",
+        { status: "no-metadata", answered: 2, attempts: 3 },
+        { isPending: false, isError: false },
+        locale,
+      ),
+      // A CID-shaped input with no metadata result, so this reaches the numbered
+      // fallback. The non-CID case is deliberately absent: it returns the poll's
+      // own string unchanged, which is data, not copy.
+      optionName(
+        4,
+        "bafkreihnl2gt3dygiplwxv5kwbx53l4u24cmsnu3tniz2wmew3n7phfq5a",
+        undefined,
+        locale,
+      ),
+      indexHeightText(HEALTH, locale),
+      chainHeadText(HEALTH, locale),
+      lagText({ ...HEALTH, indexConfigured: false }, locale),
+      syncSummary(SYNCED, locale),
+      syncSummary({ enabled: true, status: "rewound", toBlock: "9" }, locale),
+      syncSummary({ enabled: true, status: "idle", lastIndexedBlock: "9" }, locale),
+      syncSummary({ enabled: false, status: "idle" }, locale),
+      describeWriteFailure({ code: 4001 }, locale).text,
+      describeWriteFailure({ code: -32002 }, locale).text,
+      describeWriteFailure({ code: 4902 }, locale).text,
+      describeWriteFailure({ message: "insufficient funds for gas" }, locale).text,
+      describeWriteFailure({ message: "nonce too low" }, locale).text,
+      describeWriteFailure({ name: "ContractFunctionExecutionError" }, locale).text,
+      describeWriteFailure({ code: 12345, message: "something else" }, locale).text,
+    ];
+  }
+
+  it("defaults to Chinese, so every pre-existing call site is unchanged", () => {
+    for (const [index, sentence] of everySentence("zh").entries()) {
+      assert.equal(sentence, everySentence("zh")[index]);
+    }
+
+    assert.equal(
+      tallyLabels({ isPending: true, isError: false, candidateCount: 0 }).source,
+      "读取中…",
+    );
+    assert.equal(indexHeightText(HEALTH), indexHeightText(HEALTH, "zh"));
+    assert.equal(chainHeadText(HEALTH), chainHeadText(HEALTH, "zh"));
+    assert.equal(lagText(HEALTH), lagText(HEALTH, "zh"));
+    assert.equal(syncSummary(SYNCED), syncSummary(SYNCED, "zh"));
+    assert.equal(
+      describeWriteFailure({ code: 4001 }).text,
+      describeWriteFailure({ code: 4001 }, "zh").text,
+    );
+  });
+
+  it("answers in English when asked, and the two languages actually differ", () => {
+    const zh = everySentence("zh");
+    const en = everySentence("en");
+
+    assert.equal(zh.length, en.length);
+
+    // Every single sentence must move. A phrase that stayed identical would mean
+    // a catalogue entry was never wired up, which is invisible to a type check
+    // because the key exists and its value is a perfectly good string.
+    const unchanged = zh.filter((sentence, index) => sentence === en[index]);
+
+    assert.deepEqual(unchanged, [], "these sentences were not translated at all");
+  });
+
+  it("leaves no placeholder unfilled in either language", () => {
+    // `interpolate` deliberately shows an unknown placeholder rather than blanking
+    // it, so a translation that renamed `{id}` to `{identifier}` would reach the
+    // reader as literal braces. Sweep both languages.
+    for (const locale of ["zh", "en"] as const) {
+      for (const sentence of everySentence(locale)) {
+        assert.doesNotMatch(sentence, /\{\w+\}/, `${locale}: ${sentence}`);
+      }
+    }
+  });
+
+  it("keeps the SHAPE of every result identical across languages", () => {
+    // The rule this protects: a translation changes wording, never which claim is
+    // made. `classified` is a judgement about the error, and the dash/blank
+    // distinction is a judgement about whether a read answered.
+    for (const error of [
+      { code: 4001 },
+      { code: -32002 },
+      { code: 4902 },
+      { message: "insufficient funds" },
+      { message: "nonce too low" },
+      { name: "ContractFunctionExecutionError" },
+      { code: 999, message: "unclassifiable" },
+      "a thrown string",
+      null,
+    ]) {
+      assert.equal(
+        describeWriteFailure(error, "zh").classified,
+        describeWriteFailure(error, "en").classified,
+        `classified must not depend on the language: ${JSON.stringify(error)}`,
+      );
+    }
+
+    const statuses = [
+      { mounted: false, isConnected: true, contractKnown: true },
+      { mounted: true, isConnected: false, contractKnown: true },
+      { mounted: true, isConnected: true, contractKnown: false },
+    ];
+
+    for (const partial of statuses) {
+      const input = {
+        ...partial,
+        hasVoted: { status: "ready" as const, value: true },
+        votedFor: { status: "ready" as const, value: 3 },
+        stake: { status: "ready" as const, value: 2n },
+        whitelisted: { status: "ready" as const, value: true },
+      };
+
+      const zh = myStatusLabels(input, "zh");
+      const en = myStatusLabels(input, "en");
+
+      // SHAPE, not values. Comparing the values here would contradict this test's
+      // own rule — the words are supposed to differ. It passed only while
+      // `notConnected` happened to be the same string in both languages; giving
+      // English a real translation is what exposed it.
+      assert.deepEqual(Object.keys(zh).sort(), Object.keys(en).sort());
+
+      // And the shape that actually carries meaning: whether a row reports a
+      // concrete value or the "no value" placeholder must not move. Those are
+      // different claims, and a translation must not be able to swap them.
+      //
+      // The placeholder is read from the catalogue rather than written as a
+      // literal, so changing the dash cannot silently turn this check into a
+      // comparison of two `false`s.
+      const blank = ZH_BALLOT_PHRASES.nothing;
+
+      for (const key of Object.keys(zh) as (keyof typeof zh)[]) {
+        assert.equal(
+          zh[key] === blank,
+          en[key] === blank,
+          `${key}: blank-ness must not depend on the language`,
+        );
+      }
+    }
+  });
+
+  it("names the option by its metadata in both languages, and by number in neither when resolved", () => {
+    // A resolved name is data, not copy: it must not be translated, and it must
+    // not fall back to the numbered form differently per language.
+    const resolved = {
+      status: "ok" as const,
+      metadata: { name: "林澈", description: "", image: "" },
+      answered: 1,
+      attempts: 1,
+    };
+
+    assert.equal(optionName(1, CID, resolved, "zh"), "林澈");
+    assert.equal(optionName(1, CID, resolved, "en"), "林澈");
+
+    assert.notEqual(optionName(1, CID, undefined, "zh"), optionName(1, CID, undefined, "en"));
   });
 });
