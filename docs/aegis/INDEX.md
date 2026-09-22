@@ -58,3 +58,4 @@ Entries are workspace records, not authoritative runtime decisions.
 | 2026-09-22 | artifact | docs/aegis/work/2026-09-22-close-known-gaps/drift-check-draft.json                       | 关闭已登记的未完成项（P0/P1/P2） drift check draft                                       |
 | 2026-09-22 | artifact | docs/aegis/work/2026-09-22-close-known-gaps/resume-state-hint.json                       | 2026-09-22-close-known-gaps resume state hint                                            |
 | 2026-09-22 | spec | docs/aegis/specs/2026-09-22-containerization-cicd-and-observability-design.md | 容器化、CI/CD 与可观测性设计规格 |
+| 2026-09-22 | plan | docs/aegis/plans/2026-09-22-containerization-cicd-and-observability.md | 实施计划：容器化、CI/CD 与可观测性 |
