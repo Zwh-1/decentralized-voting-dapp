@@ -1,0 +1,117 @@
+{
+  "uid": "voting-api-probe",
+  "title": "Voting: API reachability and process",
+  "description": "Observations made from outside the application process. This is deliberately not a RED dashboard: per-request request-rate and error-ratio series do not exist in this deployment, and a dashboard that promises them while showing empty panels is worse than one that does not. See Task 2.3 in the plan for why adding request-level instrumentation was out of scope.",
+  "tags": ["voting", "api"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Probe success",
+      "description": "1 when the health endpoint answered 200 to an external probe. This is the only check that survives the application dying: a process that has stopped also stops exporting, so its last exported values stay frozen and every panel built on them keeps looking healthy.",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "DOWN", "color": "red" },
+                "1": { "text": "UP", "color": "green" }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [{ "refId": "probe", "legendFormat": "{{scope}}", "expr": "probe_success" }]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Probe duration",
+      "description": "How long the health endpoint took to answer, measured from outside. The endpoint reads the chain and the index, so rising latency is the first symptom of either -- it appears well before requests start failing.",
+      "gridPos": { "h": 7, "w": 12, "x": 6, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 2 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "duration",
+          "legendFormat": "{{scope}}",
+          "expr": "probe_duration_seconds"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Scrape target up",
+      "description": "Prometheus's own view of whether each configured target answered. Covers the exporters as well as the app, so a monitor that has died is reported rather than silently believed.",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 7 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "down", "color": "red" },
+                "1": { "text": "up", "color": "green" }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [{ "refId": "up", "legendFormat": "{{job}}", "expr": "up" }]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Server resident memory",
+      "description": "Reported by the application itself. Worth watching beside the probe panels because a slow leak shows up here first, and the container's memory limit is what turns a leak into a restart.",
+      "gridPos": { "h": 7, "w": 12, "x": 6, "y": 7 },
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "rss",
+          "legendFormat": "rss",
+          "expr": "voting_process_resident_memory_bytes"
+        }
+      ]
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "name": "deploys",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "enable": true,
+        "iconColor": "blue",
+        "expr": "changes(voting_deploy_timestamp_seconds[1m]) > 0",
+        "titleFormat": "deploy",
+        "textFormat": "{{tag}} on {{slot}}"
+      }
+    ]
+  }
+}

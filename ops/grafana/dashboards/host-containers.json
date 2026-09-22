@@ -1,0 +1,120 @@
+{
+  "uid": "voting-host-containers",
+  "title": "Voting: host and containers",
+  "description": "The questions the application's own metrics cannot answer: is the disk filling, is a container being killed, is the host out of memory. All series come from node-exporter and cadvisor.",
+  "tags": ["voting", "host"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Host CPU (non-idle)",
+      "description": "CPU actually in use, derived from the idle counter rather than from a ready-made percentage so the units are unambiguous.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": { "drawStyle": "line", "fillOpacity": 10 }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "cpu",
+          "legendFormat": "used",
+          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Host memory available",
+      "description": "MemAvailable rather than MemFree: the kernel's own estimate of what a new workload could get, which counts reclaimable cache. MemFree reads alarmingly low on a healthy host that is caching disk, and an alert built on it would be ignored within a week.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "mem",
+          "legendFormat": "available",
+          "expr": "node_memory_MemAvailable_bytes"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Filesystem space available",
+      "description": "tmpfs and overlay are filtered out because neither is the disk that fills up for real reasons; including them adds lines that never move and hides the one that does. This is the series the predicted-full alert is built on.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "fs",
+          "legendFormat": "{{mountpoint}}",
+          "expr": "node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay\"}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Container restarts",
+      "description": "How many times each container's start time changed in the last hour. A restart is the shape an out-of-memory kill takes, and it is otherwise invisible: the container comes back, every gauge resets, and nothing looks wrong unless you were watching at that second.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 60 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "restarts",
+          "legendFormat": "{{name}}",
+          "expr": "changes(container_start_time_seconds{name!=\"\"}[1h])"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Container memory usage",
+      "description": "Working set per container, against the limits set in the compose file. This is what explains a restart that panel 4 only reports.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "workingset",
+          "legendFormat": "{{name}}",
+          "expr": "container_memory_working_set_bytes{name!=\"\"}"
+        }
+      ]
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "name": "deploys",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "enable": true,
+        "iconColor": "blue",
+        "expr": "changes(voting_deploy_timestamp_seconds[1m]) > 0",
+        "titleFormat": "deploy",
+        "textFormat": "{{tag}} on {{slot}}"
+      }
+    ]
+  }
+}

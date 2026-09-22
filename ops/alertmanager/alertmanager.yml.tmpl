@@ -1,0 +1,72 @@
+global:
+  # Values marked ${...} are substituted at container start by entrypoint.sh.
+  # Alertmanager has no environment interpolation of its own, which is the entire
+  # reason this file is a template: without it the SMTP password would have to be
+  # committed in plaintext.
+  smtp_smarthost: "${SMTP_SMARTHOST}"
+  smtp_from: "${SMTP_FROM}"
+  smtp_auth_username: "${SMTP_USERNAME}"
+  smtp_auth_password: "${SMTP_PASSWORD}"
+  smtp_require_tls: true
+  resolve_timeout: 5m
+
+route:
+  receiver: email
+  # Grouping by alertname and instance keeps a single failing host from arriving
+  # as twenty separate messages -- but not so coarsely that unrelated incidents
+  # are merged into one thread and resolved together by accident.
+  group_by: [alertname, instance]
+  group_wait: 30s
+  group_interval: 5m
+  # Four hours between repeats of an unresolved alert. Long enough not to train
+  # the reader to filter the sender, short enough that an incident outlasting a
+  # shift is still on screen when someone new starts.
+  repeat_interval: 4h
+  routes:
+    # Critical goes out as soon as grouping allows.
+    - matchers:
+        - severity = "critical"
+      receiver: email
+      group_wait: 10s
+      repeat_interval: 1h
+      continue: false
+    # Everything else waits, so a burst of warnings does not delay a critical.
+    - matchers:
+        - severity = "warning"
+      receiver: email
+      group_wait: 5m
+      repeat_interval: 12h
+
+inhibit_rules:
+  # A host that is out of disk is the cause; the container alerts it produces are
+  # symptoms. Without this, the one alert that matters is buried under the ones it
+  # explains.
+  - source_matchers:
+      - alertname = "HostDiskWillFillIn4Hours"
+    target_matchers:
+      - severity =~ "warning|critical"
+    equal: [instance]
+
+  # A container that is down cannot report its own application metrics, so the
+  # rules built on those metrics fire too. Reporting both is noise: the missing
+  # container is the actionable fact.
+  - source_matchers:
+      - alertname = "ContainerDown"
+    target_matchers:
+      - alertname =~ "VotingIndexLagHigh|VotingIndexLagUnknown|VotingIndexErrors"
+    equal: [instance]
+
+  # Likewise for the database: MySQLDown explains the index alerts that follow it.
+  - source_matchers:
+      - alertname = "MySQLDown"
+    target_matchers:
+      - alertname =~ "VotingIndexLagHigh|VotingIndexLagUnknown|VotingIndexErrors"
+    equal: [instance]
+
+receivers:
+  - name: email
+    email_configs:
+      - to: "${ALERT_EMAIL_TO}"
+        send_resolved: true
+        headers:
+          Subject: "[voting-dapp] {{ .Status | toUpper }}: {{ .CommonLabels.alertname }}"

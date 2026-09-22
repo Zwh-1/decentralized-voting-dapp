@@ -29,6 +29,16 @@ die() {
   exit 1
 }
 
+# Wrong arguments are a different kind of failure from "the work did not succeed",
+# and they have different responses: a usage error is fixed by reading the usage
+# line, an operational failure is investigated. `health-gate.sh` established 2 for
+# the former, so the rest of these scripts use it too rather than collapsing both
+# into 1 and making the log ambiguous about which happened.
+usage() {
+  printf 'usage: %s\n' "$*" >&2
+  exit 2
+}
+
 # Reports only the NAME of a variable that is missing.
 #
 # The deploy log is kept on disk and read by people after an incident; echoing a

@@ -1,0 +1,117 @@
+{
+  "uid": "voting-business",
+  "title": "Voting: index and chain",
+  "description": "Whether the index is keeping up with the chain. Every series here is exported by GET /api/metrics; see ops/prometheus/rules/voting.yml for the provenance list.",
+  "tags": ["voting", "business"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Chain head vs indexed height",
+      "description": "The two lines are the whole story: they should move together. When the lower one flattens while the upper one keeps climbing, the index has stopped advancing and every page that reads it is serving stale data. Both series are absent rather than zero when the chain cannot be read, so a gap here means 'unknown', not 'zero'.",
+      "gridPos": { "h": 9, "w": 14, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 0 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "head",
+          "legendFormat": "chain head",
+          "expr": "voting_chain_head_block"
+        },
+        {
+          "refId": "indexed",
+          "legendFormat": "indexed height",
+          "expr": "voting_index_last_block"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Index lag (blocks)",
+      "description": "Safe blocks not yet indexed. A flat zero is healthy; a gap in the line is the interesting case, because the series is omitted entirely when the deployment cannot answer how far behind it is -- see the VotingIndexLagUnknown alert, which is the only rule that notices that state.",
+      "gridPos": { "h": 9, "w": 10, "x": 14, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "line", "fillOpacity": 10 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 25 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [{ "refId": "lag", "legendFormat": "lag", "expr": "voting_index_lag_blocks" }]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Polls on the factory",
+      "description": "Read straight from the contract. Absent when the chain was unreadable, which is why an empty panel here is a signal and not a zero.",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [{ "refId": "polls", "legendFormat": "polls", "expr": "voting_poll_count" }]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Index errors per minute",
+      "description": "Transitions into an index error, as a rate. The counter resets when the process restarts -- which is what happens after a failure -- so the raw value would drop to zero exactly when the situation is worst. The rate is what stays meaningful.",
+      "gridPos": { "h": 7, "w": 9, "x": 6, "y": 9 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 60 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "errors",
+          "legendFormat": "errors/min",
+          "expr": "rate(voting_index_errors_total[10m]) * 60"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Index configured",
+      "description": "1 when the deployment expects an index at all. This is the flag the VotingIndexLagUnknown rule pairs with an absent lag series to tell 'no index by design' apart from 'index broken'.",
+      "gridPos": { "h": 7, "w": 9, "x": 15, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "no" }, "1": { "text": "yes" } } }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "refId": "configured", "legendFormat": "configured", "expr": "voting_index_configured" }
+      ]
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "name": "deploys",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "enable": true,
+        "iconColor": "blue",
+        "expr": "changes(voting_deploy_timestamp_seconds[1m]) > 0",
+        "titleFormat": "deploy",
+        "textFormat": "{{tag}} on {{slot}}"
+      }
+    ]
+  }
+}

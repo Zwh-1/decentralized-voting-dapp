@@ -1,0 +1,22 @@
+apiVersion: 1
+
+# Grafana reads its datasource list from disk at startup, so the datasource
+# exists the moment the container does. Configured by hand instead, it would exist
+# only on the machine where someone clicked it, and the "one command brings up
+# the whole environment" claim would be false for the monitoring stack.
+datasources:
+  - name: Prometheus
+    type: prometheus
+    # `proxy` means the browser talks to Grafana and Grafana talks to Prometheus.
+    # The alternative, `direct`, would require Prometheus to be reachable from the
+    # reader's browser -- which it deliberately is not: it is on the internal
+    # network and never published.
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    # Read-only in the UI. The file is the source of truth; an edit that lives
+    # only in Grafana's database would be lost on the next volume replacement and
+    # would make this file a lie in the meantime.
+    editable: false
+    jsonData:
+      timeInterval: 15s

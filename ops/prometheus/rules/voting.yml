@@ -1,0 +1,198 @@
+# Alerting rules for the voting dApp.
+#
+#   promtool check rules /etc/prometheus/rules/voting.yml
+#
+# Every rule here has a series behind it that some part of this repository
+# actually produces, and each `description` says what failure it defends against
+# rather than restating the expression. A rule whose series nobody exports does
+# not error -- it simply never fires, which looks exactly like "nothing is wrong"
+# and is the most expensive kind of monitoring mistake. The provenance of every
+# series is listed at the bottom of this file so that the next person adding a
+# rule can check it in one place.
+
+groups:
+  - name: voting-index
+    rules:
+      # The index is running but falling behind. Fires on the number itself, so
+      # it needs the series to be present -- when the reading cannot be taken at
+      # all, VotingIndexLagUnknown below is the rule that notices.
+      - alert: VotingIndexLagHigh
+        expr: voting_index_lag_blocks > 25
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The index is more than 25 blocks behind the chain head"
+          description: >-
+            Defends against a silently stalled index: the site keeps serving,
+            every page still renders, and the only visible symptom is that recent
+            polls and votes are missing. 25 blocks at 12s is roughly five minutes
+            of lag, which is above the normal catch-up jitter and below the point
+            where a user would notice.
+
+      # The single most important rule in this file.
+      #
+      # `lagBlocks` is null whenever the deployment cannot answer how far behind
+      # the index is, and the exporter omits the series entirely rather than
+      # reporting 0 -- because 0 means "perfectly caught up", the most reassuring
+      # possible reading of the worst possible state. A comparison rule cannot
+      # see a series that is not there, so `voting_index_lag_blocks > 25` would
+      # stay silent forever in exactly the situation it exists to catch. This
+      # rule covers that gap, and the `and on() (voting_index_configured == 1)`
+      # clause is what keeps it quiet on a deployment that has no index at all by
+      # design -- there, a missing series is correct rather than alarming.
+      - alert: VotingIndexLagUnknown
+        expr: absent(voting_index_lag_blocks) and on() (voting_index_configured == 1)
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The index is configured but its lag cannot be read"
+          description: >-
+            Defends against an index that is broken in a way no other rule can
+            see. The database is unreachable, or its cursor is unreadable, so the
+            lag series is absent -- and an absent series satisfies no comparison,
+            so without this rule the outage would produce no alert at all. The
+            ten-minute window is what distinguishes a scrape that briefly failed
+            from a deployment that has genuinely lost sight of its own index.
+
+      # The index errored at least once in the last ten minutes. A rate rather
+      # than the raw counter, because the counter resets whenever the process is
+      # restarted -- which is precisely what happens after a failure, so the raw
+      # value would drop to zero exactly when the problem is worst.
+      - alert: VotingIndexErrors
+        expr: increase(voting_index_errors_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The index entered an error state at least once in 10 minutes"
+          description: >-
+            Defends against intermittent failures that self-heal. A single
+            transient RPC error is normal and the indexer retries; a pattern of
+            them is not, and it would otherwise be invisible because the index
+            catches up between occurrences. The counter counts transitions into
+            an error rather than every scrape, so a sustained outage alerts once.
+
+  - name: voting-availability
+    rules:
+      # The application answered something other than 200, or did not answer.
+      - alert: VotingHealthDegraded
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The health endpoint is not returning 200"
+          description: >-
+            Defends against the failure the application's own metrics cannot
+            report: a process that has stopped serving also stops exporting, so
+            its last values stay frozen in Prometheus and every graph looks
+            healthy. This probe is an outside observation, which is the only kind
+            that survives the process being gone.
+
+      # It answers, but slowly.
+      - alert: VotingApiSlow
+        expr: probe_duration_seconds > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The health endpoint is taking longer than 2 seconds"
+          description: >-
+            Defends against degradation that is not yet an outage. The endpoint
+            reads the chain and the index, so a slow response is the first
+            symptom of either, and it appears well before requests start timing
+            out. Five minutes of it rules out a single slow scrape.
+
+      - alert: ContainerDown
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "A scrape target has been unreachable for 5 minutes"
+          description: >-
+            Defends against a container that is not running. Covers every job
+            at once, including the exporters themselves, which is why a monitor
+            that has died is itself reported rather than silently believed.
+
+      - alert: MySQLDown
+        expr: mysql_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MySQL is not accepting connections"
+          description: >-
+            Defends against the database being gone. `up` alone cannot see this:
+            the exporter is a separate process and keeps answering even when the
+            database behind it is unreachable, so without this rule a dead
+            database looks like a healthy container.
+
+  - name: voting-host
+    rules:
+      # Predicting the disk full rather than reporting it full. A full disk stops
+      # MySQL, which stops everything; four hours of lead time is enough to act
+      # on, and a threshold would either fire far too late or on every normal
+      # growth curve.
+      - alert: HostDiskWillFillIn4Hours
+        expr: predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[6h], 4 * 3600) < 0
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: "A filesystem is predicted to fill within 4 hours"
+          description: >-
+            Defends against the host running out of disk, which takes the
+            database and every container with it. The 6h window and the 30m
+            `for` keep a single burst of writes from being read as a trend.
+
+  - name: voting-deploy
+    rules:
+      # A release was attempted, and what is running is not it.
+      #
+      # `voting_expected_info` is written by deploy.sh before the health gate, and
+      # `voting_deploy_info` only after it passes. So a deploy that failed the
+      # gate leaves the expected tag recorded with no matching running tag, and
+      # this fires. Comparing the two label values is what `unless on(tag)` does:
+      # the left-hand series survives only when no right-hand series carries the
+      # same tag.
+      #
+      # This detects a mismatch, not a lag. A host that is simply one release
+      # behind, with no deploy in flight, is not drift and is not alerted on --
+      # that distinction is the whole reason it compares against an expectation
+      # instead of an age.
+      - alert: DeployVersionDrift
+        expr: voting_expected_info unless on(tag) voting_deploy_info
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A deploy was attempted for a tag that is not what is running"
+          description: >-
+            Defends against the CI job reporting success while the host is still
+            serving the previous release. The health gate can only prove that
+            something answers on that port -- an untouched old container answers
+            just as happily -- so without this rule "we deployed" and "the new
+            version is live" are two different claims with nothing checking the
+            second one.
+
+# ---------------------------------------------------------------------------
+# Where every series referenced above comes from
+# ---------------------------------------------------------------------------
+#
+#   voting_index_lag_blocks, voting_index_configured, voting_index_errors_total
+#       -> GET /api/metrics, web/src/lib/metrics.ts (Task 2.1)
+#   probe_success, probe_duration_seconds
+#       -> blackbox-exporter via the blackbox-internal job (Task 2.4)
+#   up
+#       -> Prometheus itself, one series per configured target (Task 2.3)
+#   mysql_up
+#       -> mysqld-exporter (Task 2.4)
+#   node_filesystem_avail_bytes
+#       -> node-exporter (Task 2.4)
+#   voting_expected_info, voting_deploy_info
+#       -> ops/deploy/publish-version.sh, called by deploy.sh and rollback.sh
+#
+# Adding a rule whose series is not on this list means adding a producer first.

@@ -20,7 +20,7 @@
 #            been touched.
 #   migrate  before the new version starts, while the old one is still serving.
 #            Every migration must be backward compatible, because during the
-#            overlap two versions run against one schema — and on a rollback the
+#            overlap two versions run against one schema 鈥?and on a rollback the
 #            old version runs against the *new* schema. ops/runbook/migrations.md.
 #   start    the new version, then gate it on its own health before any traffic
 #            is pointed at it.
@@ -32,7 +32,7 @@
 # ---------------------------------------------------------------------------
 #
 # This deploys one service. Starting the new version *replaced* the old one, so a
-# failed gate cannot leave the previous release serving — the plan originally
+# failed gate cannot leave the previous release serving 鈥?the plan originally
 # said it could, and that is only true once there are two slots. So a failed gate
 # stops the service and fails, and recovery is rollback.sh.
 #
@@ -48,7 +48,7 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$here/lib.sh"
 
 tag=${1:-}
-[ -n "$tag" ] || die "usage: $0 <tag>"
+[ -n "$tag" ] || usage "$0 <tag>"
 
 require_env WEB_IMAGE
 
@@ -87,6 +87,12 @@ if ! compose up -d --no-deps "$service"; then
   append_deploy_log "abort tag=$tag stage=start"
   die "could not start $service"
 fi
+
+# Record the intent before the gate, so that a gate which never passes leaves a
+# trace saying a release was attempted. Without this, a failed deploy and no
+# deploy at all look identical to Prometheus, and DeployVersionDrift has nothing
+# to compare against.
+"$here/publish-version.sh" --expected "$tag" "$service"
 
 log "gating on health at $health_url (budget ${health_timeout}s)"
 if ! "$here/health-gate.sh" "$health_url" "$health_timeout"; then

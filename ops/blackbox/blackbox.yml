@@ -1,0 +1,37 @@
+# blackbox-exporter probe modules.
+#
+# Only the two HTTP modules this deployment needs are defined. A probe is an
+# observation from outside the process it is probing, which is what makes it able
+# to report a failure the application's own metrics cannot: a process that has
+# stopped serving also stops exporting, so its last exported values stay frozen
+# and every graph built on them keeps looking healthy.
+
+modules:
+  # Used by both probe jobs.
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      preferred_ip_protocol: ip4
+      # The public URL is expected to redirect http to https, and a probe that
+      # stopped at the redirect would report a 301 as a failure.
+      follow_redirects: true
+
+  # For a deployment that terminates TLS with a certificate nothing trusts yet --
+  # a bare IP address, or a domain before its certificate is issued. Verification
+  # is off, which is a real loss: the probe then proves reachability and nothing
+  # about identity. It is a separate module rather than a flag on the one above so
+  # that using it is a visible choice in the config, not an inherited default.
+  http_2xx_insecure:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      preferred_ip_protocol: ip4
+      follow_redirects: true
+      tls_config:
+        insecure_skip_verify: true

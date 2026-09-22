@@ -1,0 +1,117 @@
+# Prometheus scrape and evaluation configuration.
+#
+#   docker compose --profile observability up -d
+#
+# ---------------------------------------------------------------------------
+# Every target below must exist, and that is not a style preference
+# ---------------------------------------------------------------------------
+#
+# A static target naming a service that has not been started yet is not a
+# placeholder: Prometheus reports it as `up 0`, and an `up == 0` rule fires. So a
+# "we'll fill this in later" target is an alert that is wrong from the moment it
+# is written, and the usual response to a permanently-firing alert is to stop
+# believing alerts. The blue/green slots are therefore NOT listed here until the
+# deploy topology actually has them; see the note on the `web` job.
+#
+# ---------------------------------------------------------------------------
+# Why the external probe reads from a file
+# ---------------------------------------------------------------------------
+#
+# The public URL is not known at the time this file is written -- it depends on
+# the domain the deployment is given. Prometheus does not interpolate environment
+# variables into most of its config (`expand-external-labels` covers external
+# labels only), so a literal placeholder here would be a target that fails
+# forever. It reads an empty file instead, and the server setup step writes the
+# real URL into it. Zero targets means no series, which is honest; a placeholder
+# would mean a green dashboard hiding a probe that never ran.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: voting-dapp
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  # The application's own metrics endpoint. The address is the compose service
+  # name, reachable because Prometheus joins the `backend` network -- which is
+  # also why this endpoint never needs to be exposed publicly. The server answers
+  # 403 there from outside, deliberately; see the nginx site config.
+  #
+  # When the deploy topology splits web into blue and green, this becomes two
+  # targets and the job is what makes a deploy visible as a target change.
+  - job_name: web
+    metrics_path: /api/metrics
+    static_configs:
+      - targets:
+          - web:3000
+        labels:
+          service: web
+
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  - job_name: node-exporter
+    static_configs:
+      - targets:
+          - node-exporter:9100
+
+  - job_name: cadvisor
+    static_configs:
+      - targets:
+          - cadvisor:8080
+
+  - job_name: mysqld-exporter
+    static_configs:
+      - targets:
+          - mysqld-exporter:9104
+
+  # Probes the health endpoint from inside the network. This answers "is the
+  # application serving", which the application's own metric cannot answer on its
+  # own: a process that has stopped responding serves no metrics either, so the
+  # failure would look identical to the monitor being broken.
+  - job_name: blackbox-internal
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://web:3000/api/health
+        labels:
+          scope: internal
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # Probes the public URL. Separate from the internal probe on purpose: they are
+  # two different claims ("the app is up" and "the app is reachable from where
+  # users are"), and a single probe cannot make both. Written by the server setup
+  # step; empty until then.
+  - job_name: blackbox-external
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/external.json
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

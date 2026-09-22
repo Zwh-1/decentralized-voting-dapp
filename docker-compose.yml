@@ -124,6 +124,181 @@ services:
     # against /api/health. Two definitions would be two owners of "is this
     # healthy", and they would disagree the first time one of them changed.
 
+  # ---------------------------------------------------------------------------
+  # Observability. Every service here is behind a profile, so the application
+  # comes up without any of it and, more importantly, keeps running when the
+  # whole stack is stopped. That is a property worth being able to demonstrate:
+  # monitoring that the monitored system depends on is a way to turn a broken
+  # dashboard into an outage.
+  #
+  #   docker compose --profile observability up -d
+  #
+  # Only the services whose readiness gates something else carry a healthcheck.
+  # The exporters do not: Prometheus's own `up` series already reports whether
+  # each one answered, and the ContainerDown rule alerts on it. A container
+  # healthcheck on top of that would be a second owner of "is it alive", and the
+  # two would disagree the first time one of them changed.
+  # ---------------------------------------------------------------------------
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # 15 days: long enough to compare this week against the last one, short
+      # enough that the disk cost stays predictable on a small server.
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/rules:/etc/prometheus/rules:ro
+      # Empty by default: the public URL is written here during server setup, so
+      # that a probe of a domain that does not exist yet cannot fire an alert.
+      - ./ops/prometheus/targets:/etc/prometheus/targets:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    mem_limit: 512m
+    networks:
+      - backend
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    # The stock entrypoint is replaced because the config has to be rendered from
+    # a template: Alertmanager cannot read the SMTP password from the environment
+    # on its own, and the alternative is that password in a committed file.
+    entrypoint: ["/bin/sh", "/etc/alertmanager/entrypoint.sh"]
+    volumes:
+      - ./ops/alertmanager/alertmanager.yml.tmpl:/etc/alertmanager/alertmanager.yml.tmpl:ro
+      - ./ops/alertmanager/entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SMTP_SMARTHOST: ${SMTP_SMARTHOST:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9093/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 256m
+    networks:
+      - backend
+
+  # Host-level metrics. Without these there is no answer to "is the disk filling"
+  # -- the application's own metrics describe the application and nothing about
+  # the machine it is standing on.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    profiles: ["observability"]
+    restart: unless-stopped
+    pid: host
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      # Where publish-version.sh writes the deployed tag. node-exporter reads the
+      # directory on every scrape, which is how a deploy becomes visible on the
+      # same timeline as everything else.
+      - --collector.textfile.directory=/var/lib/node_exporter/textfile
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - /srv/voting/state/textfile:/var/lib/node_exporter/textfile:ro
+    mem_limit: 128m
+    networks:
+      - backend
+
+  # Per-container metrics. `privileged` is not decorative: reading cgroup
+  # accounting requires it, and there is no narrower grant that works. Said
+  # plainly rather than buried, because a container running with full privileges
+  # on the host is something a reader should be told about, not discover.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    profiles: ["observability"]
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    command:
+      - --housekeeping_interval=30s
+      - --docker_only=true
+    mem_limit: 256m
+    networks:
+      - backend
+
+  mysqld-exporter:
+    image: prom/mysqld-exporter:v0.16.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    command:
+      - --mysqld.address=mysql:3306
+      - --mysqld.username=exporter
+    environment:
+      # The password comes from the environment, never from a config file and
+      # never from a committed .my.cnf: one fewer place a credential can be read
+      # out of the repository or out of an image layer.
+      MYSQLD_EXPORTER_PASSWORD: ${MYSQLD_EXPORTER_PASSWORD:-}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    mem_limit: 128m
+    networks:
+      - backend
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+    volumes:
+      - ./ops/blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    mem_limit: 128m
+    networks:
+      - backend
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Reachable over an SSH tunnel only. Nothing here is published, so the
+      # dashboards cannot be reached from the internet at all.
+      GF_SERVER_HTTP_PORT: "3000"
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    mem_limit: 256m
+    networks:
+      - backend
+
 networks:
   # No route out: the database is reachable only by the services on this network,
   # and MySQL itself cannot reach the internet.
@@ -135,3 +310,5 @@ networks:
 
 volumes:
   voting-mysql-data:
+  prometheus-data:
+  grafana-data:

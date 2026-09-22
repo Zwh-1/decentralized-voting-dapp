@@ -1,0 +1,22 @@
+apiVersion: 1
+
+# Dashboards are loaded from files, and the UI is not allowed to save over them.
+#
+# `allowUiUpdates: false` is the load-bearing setting. With it on, an edit made in
+# the browser would be stored in Grafana's own database and would take precedence
+# over the file until the next restart -- so the committed dashboard and the one
+# on screen would disagree, and the file would only be restored by luck. With it
+# off, the files in this repository are the only source of truth, which is what
+# makes a dashboard a deliverable rather than a personal Christmas decoration.
+providers:
+  - name: voting
+    orgId: 1
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      # Flat directory: the three dashboards are peers, and nesting them in
+      # folders named after their filenames would only add a click.
+      foldersFromFilesStructure: false

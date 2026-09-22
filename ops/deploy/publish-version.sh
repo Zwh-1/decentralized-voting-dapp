@@ -3,7 +3,13 @@
 #
 # Publishes the release that is actually serving, for node-exporter to collect.
 #
-#   usage: publish-version.sh <tag> <slot>
+#   usage: publish-version.sh <tag> <slot>              # record what is running
+#          publish-version.sh --expected <tag> <slot>   # record what is intended
+#
+# The two modes exist so that "we tried to deploy X" and "X is serving" are
+# separate observations with separate timestamps. Collapsing them into one write
+# would make a failed deploy indistinguishable from no deploy at all, and the
+# DeployVersionDrift rule needs exactly that difference.
 #
 # ---------------------------------------------------------------------------
 # Why the deploy has to publish its own outcome
@@ -31,26 +37,54 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # shellcheck source=lib.sh
 . "$here/lib.sh"
 
+mode=running
+if [ "${1:-}" = "--expected" ]; then
+  mode=expected
+  shift
+fi
+
 tag=${1:-}
 slot=${2:-}
-[ -n "$tag" ] || die "usage: $0 <tag> <slot>"
-[ -n "$slot" ] || die "usage: $0 <tag> <slot>"
+if [ "$mode" = "expected" ]; then
+  [ -n "$tag" ] || usage "$0 --expected <tag> <slot>"
+else
+  [ -n "$tag" ] || usage "$0 <tag> <slot>"
+fi
+[ -n "$slot" ] || usage "$0 [--expected] <tag> <slot>"
 
 dir="$(state_dir)/textfile"
 mkdir -p "$dir"
 
-tmp="$dir/.voting_deploy.prom.$$"
+# Two files rather than one. node-exporter's collector reads every *.prom in the
+# directory, so keeping the expectation and the observation apart means each is a
+# single independent rename -- no read-modify-write, and no window in which a
+# crash could leave one of the two missing while claiming the other was updated.
+if [ "$mode" = "expected" ]; then
+  metric=voting_expected_info
+  stamp=voting_expected_timestamp_seconds
+  help_info="The release the deploy script is attempting. Written before the health gate."
+  help_stamp="Unix time of the last attempted release."
+  file="$dir/voting_expected.prom"
+else
+  metric=voting_deploy_info
+  stamp=voting_deploy_timestamp_seconds
+  help_info="The release the deploy script last confirmed healthy."
+  help_stamp="Unix time of the last confirmed release."
+  file="$dir/voting_deploy.prom"
+fi
+
+tmp="$file.$$"
 {
-  printf '# HELP voting_deploy_info The release the deploy script last confirmed healthy.\n'
-  printf '# TYPE voting_deploy_info gauge\n'
-  printf 'voting_deploy_info{tag="%s",slot="%s"} 1\n' \
-    "$(escape_label_value "$tag")" "$(escape_label_value "$slot")"
-  printf '# HELP voting_deploy_timestamp_seconds Unix time of the last confirmed release.\n'
-  printf '# TYPE voting_deploy_timestamp_seconds gauge\n'
-  printf 'voting_deploy_timestamp_seconds %s\n' "$(date +%s)"
+  printf '# HELP %s %s\n' "$metric" "$help_info"
+  printf '# TYPE %s gauge\n' "$metric"
+  printf '%s{tag="%s",slot="%s"} 1\n' \
+    "$metric" "$(escape_label_value "$tag")" "$(escape_label_value "$slot")"
+  printf '# HELP %s %s\n' "$stamp" "$help_stamp"
+  printf '# TYPE %s gauge\n' "$stamp"
+  printf '%s %s\n' "$stamp" "$(date +%s)"
 } >"$tmp"
 
-mv "$tmp" "$dir/voting_deploy.prom"
-chmod 0644 "$dir/voting_deploy.prom"
+mv "$tmp" "$file"
+chmod 0644 "$file"
 
-log "published voting_deploy_info{tag=\"$tag\",slot=\"$slot\"}"
+log "published $metric{tag=\"$tag\",slot=\"$slot\"}"

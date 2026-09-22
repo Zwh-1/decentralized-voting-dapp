@@ -138,6 +138,10 @@ assert_has "it stopped the release that never became healthy" " stop" "$FAKE_LOG
 assert_eq "active-tag is still the old release" "oldtag" "$(cat "$STATE_DIR/active-tag")"
 assert_lacks "no success line was appended" "ok tag=newtag" "$STATE_DIR/deploy.log"
 assert_eq "no version was published" "" "$(cat "$STATE_DIR/textfile/voting_deploy.prom" 2>/dev/null || true)"
+# The attempt itself must survive, or a failed deploy is indistinguishable from no
+# deploy at all -- which is exactly what the DeployVersionDrift rule compares.
+assert_has "the attempt was recorded even though it failed" \
+  'voting_expected_info{tag="newtag",slot="web"} 1' "$STATE_DIR/textfile/voting_expected.prom"
 
 # ---------------------------------------------------------------------------
 printf '\ncase 3: a healthy release is recorded and published\n'
@@ -193,6 +197,28 @@ run "$here/publish-version.sh" 'ab"c' 'we"b'
 assert_eq "exits 0" "0" "$RC"
 assert_has "the quote is escaped, keeping the payload parseable" \
   'voting_deploy_info{tag="ab\"c",slot="we\"b"} 1' "$STATE_DIR/textfile/voting_deploy.prom"
+
+# ---------------------------------------------------------------------------
+printf '\ncase 7: the two publish modes write different files\n'
+new_case
+run "$here/publish-version.sh" --expected attempted tried
+assert_eq "the expected mode exits 0" "0" "$RC"
+assert_has "it records what was intended" \
+  'voting_expected_info{tag="attempted",slot="tried"} 1' "$STATE_DIR/textfile/voting_expected.prom"
+assert_eq "and does not touch the running record" "" \
+  "$(cat "$STATE_DIR/textfile/voting_deploy.prom" 2>/dev/null || true)"
+
+run "$here/publish-version.sh" confirmed tried
+assert_eq "the running mode exits 0" "0" "$RC"
+assert_has "it records what is serving" \
+  'voting_deploy_info{tag="confirmed",slot="tried"} 1' "$STATE_DIR/textfile/voting_deploy.prom"
+assert_has "the earlier expectation is left alone" \
+  'voting_expected_info{tag="attempted",slot="tried"} 1' "$STATE_DIR/textfile/voting_expected.prom"
+assert_has "the timestamp is published too" \
+  "voting_deploy_timestamp_seconds " "$STATE_DIR/textfile/voting_deploy.prom"
+
+run "$here/publish-version.sh" --expected onlyonetag
+assert_eq "exit 2 when the slot is missing" "2" "$RC"
 
 # ---------------------------------------------------------------------------
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
