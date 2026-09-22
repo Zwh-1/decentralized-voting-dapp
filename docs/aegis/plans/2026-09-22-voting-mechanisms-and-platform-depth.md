@@ -4,6 +4,32 @@
 > 它不是完成授权，也不替代规格与基线；执行中的完成声明仍需证据。
 > 前序计划：`2026-09-21-multi-tenant-voting-platform.md`（多租户改造，已完成并实测）。
 
+## Progress
+
+| 批次 | 任务                          | 状态      | 证据                                                                   |
+| ---- | ----------------------------- | --------- | ---------------------------------------------------------------------- |
+| 一   | Task 1-2 多选 + 加权          | 完成      | `PollMultiSelect.t.sol`、`PollMechanisms.t.sol`；commit `02ef5a5`      |
+| 一   | Task 3 委托投票               | 完成      | `PollDelegation.t.sol`（21 测试）；ADR-0035；commit `367ef19`          |
+| 一   | Task 4 commit-reveal          | 完成      | `PollCommitReveal.t.sol`；`commit-reveal-drill` 21/21；commit `dcecef5` |
+| 一   | 机制矩阵属性测试              | 完成      | `PollMechanismMatrix.t.sol`（6 机制 × 200 轮，突变验证）               |
+| 二   | Task 5-7 quorum/timelock/execute + 创建准入 | 未开始 | —                                                          |
+| 三   | Task 8-10 数据与接口层        | 未开始    | —                                                                      |
+| 四   | Task 11-13 前端体验           | 未开始    | —                                                                      |
+
+**批一验收结果**（2026-09-22）：
+
+- `pnpm test`：272 合约 + 371 web，全通过；`pnpm typecheck`、`pnpm format:check`、`pnpm build:web` 均干净。
+- 证伪点 `pnpm indexer:check-consistency` 在重建索引后为 `consistent`（`divergentPolls: 0`）。
+- 负向对照（全部实测失败后已回滚）：`tamper-drill` → `divergent`；commit-reveal 两处突变各失败对应用例；机制矩阵突变 → `commit-reveal: balance != totalStaked`；`sync.ts` 允许列表改回旧写法 → 回归测试失败。
+
+**批一暴露的三次「同一条规则写在两个地方」**（详见 ADR-0031「Implementation Record」）：
+
+1. `uk_votes_log` 唯一键漏掉 `option_id`，多选事件的第二行被 `INSERT IGNORE` 静默丢弃；
+2. `PollPhase` 在 `export-abi.ts` 里是手写字符串，插入 `Reveal` 后 `Ended` 错位（`trust.ts` 里还有第二份）；
+3. `sync.ts` 的「是否已投过票」规则与测试 FakePool 各写一份，导致真代码错误时测试仍全绿。
+
+因此批二起的默认做法是：**派生值一律从单一来源生成，不手写第二份**。
+
 ## 0. Aegis Visibility
 
 本计划存在的理由：用户判定「项目在功能上还不够」，并且这不是观感问题而是**语义缺口**。当前的投票模型是"单一问题、一人一票、全程公开、结果不执行"——投票系统之所以成为投票系统的高级语义（多选、加权、委托、隐私、阈值执行）**一个都不存在**。
