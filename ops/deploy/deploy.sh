@@ -20,7 +20,7 @@
 #            been touched.
 #   migrate  before the new version starts, while the old one is still serving.
 #            Every migration must be backward compatible, because during the
-#            overlap two versions run against one schema 鈥?and on a rollback the
+#            overlap two versions run against one schema -- and on a rollback the
 #            old version runs against the *new* schema. ops/runbook/migrations.md.
 #   start    the new version, then gate it on its own health before any traffic
 #            is pointed at it.
@@ -32,7 +32,7 @@
 # ---------------------------------------------------------------------------
 #
 # This deploys one service. Starting the new version *replaced* the old one, so a
-# failed gate cannot leave the previous release serving 鈥?the plan originally
+# failed gate cannot leave the previous release serving -- the plan originally
 # said it could, and that is only true once there are two slots. So a failed gate
 # stops the service and fails, and recovery is rollback.sh.
 #
