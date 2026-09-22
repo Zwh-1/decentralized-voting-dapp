@@ -1,0 +1,47 @@
+# Build context hygiene.
+#
+# The build context is the repository root, not web/, because pnpm-workspace.yaml
+# and pnpm-lock.yaml live here: a context of web/ would either fail
+# --frozen-lockfile or install a dependency tree that differs from CI's.
+#
+# .env is excluded because the entire context is sent to the daemon, and anything
+# in the context can end up in the build cache. This is necessary and NOT
+# sufficient: `next build` writes its own copy of web/.env into
+# .next/standalone/web/.env, which no context filter can reach, so the Dockerfile
+# also deletes it after copying. Both halves are required; a context filter alone
+# leaves credentials in the published image. See the plan's section 14.4.
+
+.git
+.gitignore
+.github
+
+node_modules
+**/node_modules
+
+# Build output. Rebuilt inside the image; copying it in would let a stale build
+# be published as if it were fresh, and would also defeat layer caching.
+**/.next
+**/dist
+
+# Contract build output. The app consumes only the exported ABI, which is
+# checked in under web/src/lib/contracts/ -- so the image never needs Hardhat's
+# artifacts, and keeping them out also keeps the context small.
+**/artifacts
+**/cache
+**/typechain-types
+
+**/coverage
+**/*.log
+**/*.tsbuildinfo
+
+# Secrets. .env.example stays so the image and the repository agree on which
+# variables exist; it holds names and placeholders, never values.
+.env
+.env.*
+!.env.example
+
+# Documentation and editor state are not read by the build.
+docs
+**/*.md
+**/.vscode
+.gitmsg*

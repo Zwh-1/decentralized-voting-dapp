@@ -1,11 +1,22 @@
-# Reproducible MySQL for the indexer.
+# One command to bring up the whole dApp.
 #
-#   docker compose up -d mysql
-#   mysql://voting:voting@127.0.0.1:3307/voting
+#   docker compose up -d              # database, migrations, indexer, web
+#   docker compose up -d mysql        # the database alone, and this keeps working
 #
-# Port 3307 is used on purpose so this never collides with an existing local
-# MySQL on 3306. The schema itself is applied by the indexer (`pnpm migrate`),
-# not by an init script, so there is exactly one definition of the schema.
+# Build the image first, from the repository root:
+#
+#   docker build -f web/Dockerfile -t voting-web:dev .
+#
+# The schema is applied by the `migrate` service, and only there. There is
+# deliberately no docker-entrypoint-initdb.d mount and no seed .sql file: the
+# schema has exactly one owner, web/src/lib/db/schema.ts, which the application
+# and the deploy scripts both go through. A second definition living in a mounted
+# script is the failure this arrangement exists to prevent -- it would drift, and
+# the drift would only show up as an indexer reading a column that is not there.
+#
+# Port 3307 on the host is used on purpose so this never collides with an existing
+# local MySQL on 3306.
+
 services:
   mysql:
     image: mysql:8.4
@@ -17,7 +28,11 @@ services:
       MYSQL_USER: voting
       MYSQL_PASSWORD: voting
     ports:
-      - "3307:3306"
+      # Bound to loopback, not to every interface. The documented way to reach it
+      # is 127.0.0.1:3307, which this preserves exactly, while a database that is
+      # not exposed to the network at all is the better default on a host that
+      # has a public address.
+      - "127.0.0.1:3307:3306"
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
@@ -28,6 +43,95 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    networks:
+      - backend
+
+  # Applies the schema, once, before anything that reads it starts.
+  #
+  # It runs the same image as the app because it uses the same schema module. The
+  # scripts execute TypeScript directly, which is why the image carries that
+  # source and tsx -- see the Dockerfile.
+  migrate:
+    image: ${WEB_IMAGE:-voting-web}:${WEB_IMAGE_TAG:-dev}
+    command: ["node", "--import", "tsx", "web/scripts/migrate.ts"]
+    working_dir: /app
+    restart: "no"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    env_file:
+      # Optional so that `docker compose config` validates on a fresh clone, where
+      # no .env exists yet. It is required to actually run anything: without it
+      # the app reports its configuration as unreadable and the migration fails
+      # loudly, which is the intended outcome.
+      - path: .env
+        required: false
+    environment:
+      INDEXER_ENABLED: "false"
+    networks:
+      - backend
+
+  # Advances the index, one bounded drain at a time.
+  #
+  # Its own service rather than the app's in-process loop: two processes draining
+  # the same cursor would race, and the loop inside the server is a development
+  # convenience that does not survive a restart.
+  indexer:
+    image: ${WEB_IMAGE:-voting-web}:${WEB_IMAGE_TAG:-dev}
+    command: ["/app/ops/indexer/entrypoint.sh"]
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # It is the worker; the server's own loop must stay off in this service.
+      INDEXER_ENABLED: "false"
+    networks:
+      # backend to reach MySQL, egress to reach the chain. A container whose only
+      # network is internal has no route out, so an indexer on `backend` alone
+      # could not read a single block -- which is the whole thing it does.
+      - backend
+      - egress
+
+  web:
+    image: ${WEB_IMAGE:-voting-web}:${WEB_IMAGE_TAG:-dev}
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Indexing belongs to the indexer service. Two drains on one cursor is a
+      # race, and the loser's work is silently discarded.
+      INDEXER_ENABLED: "false"
+    networks:
+      # egress carries the outbound RPC calls the server makes to answer
+      # /api/health and to render a ballot.
+      - backend
+      - egress
+    # No published port here on purpose. Locally the port comes from the
+    # development override; in production it comes from nginx.
+    #
+    # The healthcheck is not repeated here because the image already defines one
+    # against /api/health. Two definitions would be two owners of "is this
+    # healthy", and they would disagree the first time one of them changed.
+
+networks:
+  # No route out: the database is reachable only by the services on this network,
+  # and MySQL itself cannot reach the internet.
+  backend:
+    internal: true
+  # Outbound access and ingress. The indexer and the server both call an RPC
+  # endpoint, and the server is what nginx will talk to.
+  egress:
 
 volumes:
   voting-mysql-data:
