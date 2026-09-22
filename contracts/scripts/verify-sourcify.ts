@@ -116,6 +116,32 @@ for (const file of buildInfoFiles) {
       contractIdentifier: target.identifier,
     };
 
+    // Ask first, submit second. A contract that is already verified comes back
+    // from a submission as HTTP 409 with `runtimeMatch: exact_match` in the
+    // message, so treating any non-OK response as failure made a second run of
+    // an already-passing command fail — and made this script unusable as a
+    // re-runnable check.
+    //
+    // No `fields` selector: `match` is not a valid one and asking for it makes
+    // the lookup fail with `invalid_parameter`, which is indistinguishable from
+    // "not verified" unless the response is actually checked.
+    const existingResponse = await fetch(
+      `${SOURCIFY}/v2/contract/${record.chainId}/${target.address}`,
+    );
+
+    if (existingResponse.ok) {
+      const existing = (await existingResponse.json()) as { runtimeMatch?: string | null };
+
+      if (existing.runtimeMatch === "exact_match") {
+        results.push({
+          label: target.label,
+          address: target.address,
+          outcome: "exact_match (already verified)",
+        });
+        continue;
+      }
+    }
+
     const response = await fetch(`${SOURCIFY}/v2/verify/${record.chainId}/${target.address}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -128,6 +154,10 @@ for (const file of buildInfoFiles) {
       customCode?: string;
     };
 
+    // A 409 says the contract is already verified; the earlier lookup above
+    // already handled the passing case, so reaching here means it is verified
+    // with a *different* match level, which is not something this script calls
+    // success.
     if (!response.ok || payload.verificationId === undefined) {
       results.push({
         label: target.label,
@@ -175,7 +205,9 @@ let failed = false;
 
 for (const result of results) {
   console.log(`  ${result.label.padEnd(22)} ${result.address}  ->  ${result.outcome}`);
-  if (result.outcome !== "exact_match") failed = true;
+  // A contract verified on an earlier run is exactly as verified as one this
+  // run submitted, so both forms count as success.
+  if (!result.outcome.startsWith("exact_match")) failed = true;
 }
 
 console.log("");

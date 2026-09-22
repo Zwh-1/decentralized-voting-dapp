@@ -30,10 +30,10 @@ export const CHAIN_IDS = {
 export const deployments: Record<number, Deployment> = {
   11155111: {
     chainId: 11155111,
-    factory: "0xc6c080938113b7b069d9ba64a2d9c062399a22b2",
-    implementation: "0x07d1f6bc75ad4117172cd6994f9934a5d0bf1a45",
+    factory: "0xcf01c9d51911f189b40d9287bcf21a638c36bf92",
+    implementation: "0xb853ce67cdfa7e7d67c2ce0c2ef4f62a3d0add6b",
     deployer: "0x409da00516d14a11b180df8460e3ffd68a239589",
-    blockNumber: 11754540,
+    blockNumber: 11754569,
   },
   31337: {
     chainId: 31337,
