@@ -106,6 +106,17 @@ ADR-0003 当初**考虑过并拒绝了** commit-reveal，给出的两条理由�
 - Reason: 规格 §11 将"投票隐私"列为非目标。本 ADR 只实现其一个受限子集（投票过程中不可见），因此 §11 需改为"不做零知识匿名与抗串谋；commit-reveal 作为可选机制提供"，而不是整条删除——把边界写准比写宽更重要。
 - Also: `CONTRIBUTING.md` 与 README 的隐私声明需同步。
 
+## Implementation Record
+
+**2026-09-22（Task 4 落地）**：本条决策在实现时曾被**投影层**违反一次，由 `pnpm indexer:commit-reveal-drill` 抓到，已修复并留下回归测试。
+
+- `sync.ts` 的 `_votersAlreadyRecorded` 原本问的是 `event_type <> 'withdrawn'`，把"已 commit 未 reveal"的行算作**已投过票**。
+- 后果：一个先 commit 再 reveal 的投票者，其 reveal 产生的 `VoteRecorded` 被判为 `changed`——活动日志会告诉它"你改投了"，而它从未投过第一次。这正是上面「未揭示必须与'没参与'分开报告」禁止的谎报。
+- 修法：两面都改成**已计票类型的白名单**（`cast` / `changed`），而不是对 `withdrawn` 做特例。白名单使未来新增的非投票事件**默认不计票**（fail closed），特例写法则会让它默认计票。
+- 同一轮里还有一个更值得记的教训：单元测试的 FakePool **自带了一份规则副本**，因此 `sync.ts` 写错时测试仍然全绿——`pnpm test` 18/18 通过，而真代码是错的。现在 FakePool 从**收到的 SQL 文本**里解析允许列表，改坏 `sync.ts` 会让测试失败（负向对照已验证）。
+
+这两个缺陷是同一个模式：**同一条规则被写在了两个地方**。"两处写死就会漂移"在本批次已出现三次（`uk_votes_log` 唯一键、`PollPhase` 镜像、本条），因此默认做法应当是**从单一来源派生**，而不是同步维护。
+
 ## Evidence References
 
 - `contracts/contracts/Poll.sol`（现有 `VoteCast` 明文事件与 public `votedFor`）

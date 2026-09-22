@@ -76,6 +76,16 @@ function voteRecorded(
  * factory's log and the poll's own `OptionAdded` logs share a block number and
  * differ only by log index.
  */
+/** A `Committed` for a poll, at the given coordinates. */
+function committed(blockNumber: bigint, logIndex: number, poll: string = POLL_A): RawLog {
+  return encode(
+    pollAbi as unknown as Abi,
+    "Committed",
+    { voter: VOTER, commitment: `0x${"7a".repeat(32)}` },
+    { address: poll, blockNumber, logIndex },
+  );
+}
+
 function pollCreation(blockNumber: bigint, poll = POLL_A, firstLogIndex = 0): RawLog[] {
   return [
     encode(
@@ -126,6 +136,30 @@ function logsFor(logs: readonly RawLog[], address: string, fromBlock: bigint, to
  * fake that always answered "no polls" would hide the bug the multi-address
  * tests exist to catch.
  */
+/**
+ * The event types a `votes` query counts, read OUT OF THE SQL ITSELF.
+ *
+ * This is the whole point of the fake's read side: the rule about what counts as
+ * a prior vote lives in exactly one place — `sync.ts`'s query — and the fake
+ * derives its answer from that text rather than restating the rule. A fake that
+ * carried its own copy kept passing while the real query was wrong, which is how
+ * a sealed `committed` row came to be counted as a prior vote (ADR-0011).
+ *
+ * Throws rather than guessing when the allow-list is absent, so a future query
+ * that changes shape fails loudly instead of silently answering "nothing".
+ */
+function countedTypesIn(sql: string): string[] {
+  const allowed = /event_type IN \(([^)]*)\)/.exec(sql)?.[1];
+
+  if (allowed === undefined) {
+    throw new Error(
+      `FakePool cannot tell which event types this votes query counts: ${sql.replace(/\s+/g, " ")}`,
+    );
+  }
+
+  return allowed.split(",").map((part) => part.trim().replace(/^'|'$/g, ""));
+}
+
 class FakePool {
   cursor: bigint | null = null;
   inserts: { table: string; rows: unknown[][] }[] = [];
@@ -134,16 +168,15 @@ class FakePool {
   /** `polls.address` values, as the sync loop would have persisted them. */
   pollRows: string[] = [];
   /**
-   * `(poll_address, voter)` pairs already carrying a recorded vote.
+   * `(poll_address, voter)` pairs the index holds, mapped to the event type of
+   * the row that put them there.
    *
-   * Modelled rather than merely recorded, because `persistBatch` READS it: the
-   * `cast`/`changed` distinction is derived from what is already stored, so a
-   * fake that always answered "nothing recorded" would make every change look
-   * like a first vote and hide exactly the defect these tests exist to catch.
-   * Withdrawals are excluded, matching the real query: on chain a withdrawal
-   * clears the selection, so a later vote is a first vote again.
+   * The event type is kept, not just the pair, so the `cast`/`changed`
+   * derivation can be checked against the ALLOW-LIST THE REAL QUERY USES rather
+   * than a rule restated here. The previous version of this fake carried its own
+   * copy of the rule and therefore kept passing while `sync.ts` was wrong.
    */
-  recordedVoters = new Set<string>();
+  recordedVoters = new Map<string, string>();
   /** How many `INSERT IGNORE` batches per table, so double-writes are visible. */
   counts = new Map<string, number>();
 
@@ -156,16 +189,17 @@ class FakePool {
       return [this.pollRows.map((address) => ({ address })), []];
     }
     if (sql.includes("FROM votes")) {
-      // The real statement filters by poll and voter; the fake answers from the
-      // set it holds. `params` is `[polls, voters]`, each an array, so the
-      // intersection is what a real `IN` would return.
       const polls = (params?.[0] as string[] | undefined) ?? [];
       const voters = (params?.[1] as string[] | undefined) ?? [];
       const rows: { poll_address: string; voter: string }[] = [];
 
-      for (const pair of this.recordedVoters) {
+      for (const [pair, eventType] of this.recordedVoters) {
         const [poll, voter] = pair.split("|");
-        if (polls.includes(poll!) && voters.includes(voter!)) {
+        if (
+          countedTypesIn(sql).includes(eventType) &&
+          polls.includes(poll!) &&
+          voters.includes(voter!)
+        ) {
           rows.push({ poll_address: poll!, voter: voter! });
         }
       }
@@ -218,13 +252,10 @@ class FakePool {
               const voter = String(row[1]).toLowerCase();
               const eventType = String(row[3]);
 
-              if (eventType === "withdrawn") {
-                // A withdrawal clears the selection on chain, so the address has
-                // no current vote and a later one is a first vote again.
-                self.recordedVoters.delete(`${poll}|${voter}`);
-              } else {
-                self.recordedVoters.add(`${poll}|${voter}`);
-              }
+              // Record what this row says, and let the READ side decide what
+              // counts as a prior vote — by parsing the real query's allow-list.
+              // The write side deliberately encodes no rule of its own.
+              self.recordedVoters.set(`${poll}|${voter}`, eventType);
             }
           }
 
@@ -256,9 +287,13 @@ class FakePool {
           const voters = (params?.[1] as string[] | undefined) ?? [];
           const rows: { poll_address: string; voter: string }[] = [];
 
-          for (const pair of self.recordedVoters) {
+          for (const [pair, eventType] of self.recordedVoters) {
             const [poll, voter] = pair.split("|");
-            if (polls.includes(poll!) && voters.includes(voter!)) {
+            if (
+              countedTypesIn(sql).includes(eventType) &&
+              polls.includes(poll!) &&
+              voters.includes(voter!)
+            ) {
               rows.push({ poll_address: poll!, voter: voter! });
             }
           }
@@ -406,6 +441,71 @@ describe("syncOnce", () => {
     assert.equal(votes[0]?.[2], 1);
     assert.equal(votes[0]?.[3], "cast");
     assert.equal(votes[0]?.[4], "1", "block numbers are stored as strings, not floats");
+  });
+
+  /**
+   * The regression the commit-reveal drill caught in the real query.
+   *
+   * `_votersAlreadyRecorded` used to ask `event_type <> 'withdrawn'`, which
+   * counted a SEALED `committed` row as a prior vote. A voter that committed and
+   * then revealed therefore had its reveal labelled `changed` — the activity log
+   * telling it, and everyone reading, that it had changed a vote it never cast.
+   */
+  it("does not treat a sealed commitment as a prior vote", async () => {
+    const { pool, chain, deps } = setup();
+    // `chunkBlocks` is 10, so each pass advances at most ten blocks — two log
+    // sites ten blocks apart is exactly two passes.
+    chain.head = 20n;
+    pool.pollRows = [POLL_A.toLowerCase()];
+
+    // A commitment in the first range...
+    chain.logs = [committed(1n, 0)];
+    await syncOnce(deps);
+
+    assert.equal(rowsOf(pool, "votes")[0]?.[3], "committed", "the commitment is recorded");
+
+    // ...and the reveal in the NEXT one. The head has to move for there to be a
+    // later range at all: the first pass syncs up to the confirmation window, so
+    // without this the second call would find nothing new and the assertion
+    // below would fail for the wrong reason — the "0 counted rows" the real
+    // drill first produced looked exactly like a decode bug.
+    chain.head = 40n;
+    chain.logs = [committed(1n, 0), voteRecorded([1n], 12n, 0)];
+    await syncOnce(deps);
+
+    const counted = rowsOf(pool, "votes").filter(
+      (row) => row[3] === "cast" || row[3] === "changed",
+    );
+
+    assert.equal(counted.length, 1, "one counted row resulted");
+    assert.equal(
+      counted[0]?.[3],
+      "cast",
+      "a revealed first ballot is a cast, not a change of a vote that never existed",
+    );
+  });
+
+  /**
+   * The negative control for the rule above: a genuine second vote IS a change.
+   * Without this, an implementation that labelled everything `cast` would pass
+   * the test above.
+   */
+  it("still labels a real second vote as changed", async () => {
+    const { pool, chain, deps } = setup();
+    chain.head = 20n;
+    pool.pollRows = [POLL_A.toLowerCase()];
+
+    chain.logs = [voteRecorded([1n], 1n, 0)];
+    await syncOnce(deps);
+
+    chain.head = 40n;
+    chain.logs = [voteRecorded([1n], 1n, 0), voteRecorded([2n], 12n, 0)];
+    await syncOnce(deps);
+
+    const all = rowsOf(pool, "votes");
+    assert.equal(all.length, 2);
+    assert.equal(all[0]?.[3], "cast", "the first is a cast");
+    assert.equal(all[1]?.[3], "changed", "the second is a change");
   });
 
   it("reports an empty range without inserting anything", async () => {

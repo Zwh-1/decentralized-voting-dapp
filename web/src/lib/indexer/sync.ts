@@ -112,24 +112,37 @@ export async function readCursor(pool: Pool | PoolConnection): Promise<bigint | 
  * it was created in.
  */
 /**
- * Which (poll, voter) pairs already have a recorded vote in the index.
+ * Which (poll, voter) pairs already have a COUNTED vote in the index.
  *
  * Used to label an incoming `VoteRecorded` as `cast` or `changed`. Bounded by
  * the voters in one batch rather than by the table, so this stays a small `IN`
  * query even after the index has grown large.
  *
- * A voter who previously WITHDREW is deliberately treated as having no prior
- * record, because on chain they have none: `withdrawVote` clears the selection,
- * so a later vote is a first vote again and the activity log should say so. That
- * is why the query filters withdrawals out rather than counting any row.
+ * Only counted rows qualify, and the list of what does NOT count is the part
+ * that has to stay correct:
+ *
+ *   * `withdrawn` — `withdrawVote` clears the selection on chain, so a later
+ *     vote is a first vote again and the activity log should say so.
+ *   * `committed` — a sealed ballot is not counted yet. Counting it here would
+ *     label the reveal's `VoteRecorded` as `changed`, telling the reader they
+ *     had changed a vote they never cast. This is not hypothetical: it is what
+ *     the commit-reveal drill caught, and the misreport is exactly the kind
+ *     ADR-0011 exists to prevent.
+ *   * `expired` — never counted at all.
+ *
+ * Stated as an allow-list of counted types rather than a deny-list, so a future
+ * event that is also not a vote fails closed (it is treated as not-counted)
+ * instead of silently being counted as one.
  */
 async function _votersAlreadyRecorded(
   connection: PoolConnection | Pool,
   votes: readonly VoteRow[],
 ): Promise<Set<string>> {
+  const COUNTED = new Set<VoteRow["eventType"]>(["cast", "changed"]);
+
   const pairs = new Set<string>();
   for (const row of votes) {
-    if (row.eventType !== "withdrawn") {
+    if (COUNTED.has(row.eventType)) {
       pairs.add(`${row.pollAddress}|${row.voter}`);
     }
   }
@@ -146,7 +159,7 @@ async function _votersAlreadyRecorded(
   >(
     `SELECT DISTINCT poll_address, voter
        FROM votes
-      WHERE event_type <> 'withdrawn'
+      WHERE event_type IN ('cast', 'changed')
         AND poll_address IN (?)
         AND voter IN (?)`,
     [polls, voters],

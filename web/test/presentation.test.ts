@@ -19,7 +19,11 @@ import { accentClass, badgeClass, phaseTone, sharePercent } from "../src/lib/pre
 
 const SETUP = 0;
 const VOTING = 1;
-const ENDED = 2;
+// Inlined rather than imported so an enum renumbering fails here. It did: when
+// `Reveal` was inserted, ENDED moved from 2 to 3 and these cases failed until
+// updated — the guard working as intended.
+const REVEAL = 2;
+const ENDED = 3;
 
 describe("phaseTone", () => {
   it("calls a live poll votable", () => {
@@ -54,6 +58,21 @@ describe("phaseTone", () => {
     assert.notEqual(pastDue.label, ended.label);
     assert.equal(pastDue.label, "已过截止");
     assert.equal(ended.label, "已结束");
+  });
+
+  it("gives a commit-reveal poll's reveal window its own state", () => {
+    // The same trap as the pair above, in a new place. During `Reveal` the poll
+    // refuses votes and `refund()` still reverts — so it must not read as
+    // "已结束" (which would send readers at a rejected refund) and must not read
+    // as "投票中" either (which would tell someone who never committed that they
+    // still can).
+    const reveal = phaseTone(REVEAL, true);
+
+    assert.equal(reveal.votable, false, "votes are refused during the reveal window");
+    assert.notEqual(reveal.label, "已结束", "refund() reverts here, so this is not Ended");
+    assert.notEqual(reveal.label, "投票中", "and no new commitment is accepted either");
+    assert.equal(reveal.label, "揭示中");
+    assert.notEqual(reveal.tone, "closed", "the poll is mid-flight, not finished");
   });
 
   it("never reports a gone deadline as votable", () => {

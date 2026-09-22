@@ -32,6 +32,7 @@
     "indexer:reorg-drill": "pnpm --filter @voting/web reorg-drill",
     "indexer:refund-drill": "pnpm --filter @voting/web refund-drill",
     "indexer:tamper-drill": "pnpm --filter @voting/web tamper-drill",
+    "indexer:commit-reveal-drill": "pnpm --filter @voting/web commit-reveal-drill",
     "ui:drill": "pnpm --filter @voting/web ui-drill",
     "web:dev": "pnpm --filter @voting/web dev",
     "web:start": "pnpm --filter @voting/web start",

@@ -38,6 +38,18 @@ contract Poll is Ownable, ReentrancyGuard {
     enum Phase {
         Setup,
         Voting,
+        /// @dev A commit-reveal poll's second window: voting has closed but the
+        ///      deadline for revealing has not yet passed.
+        ///
+        ///      A phase rather than a flag checked against `Voting`, because the
+        ///      difference is observable and a reader has to be able to see it.
+        ///      During `Voting` a commit-reveal poll's counts are all zero BY
+        ///      CONSTRUCTION — the commitments carry no plaintext — whereas
+        ///      during `Reveal` they rise as people reveal. A single "Voting"
+        ///      phase covering both windows could not tell "nobody has voted"
+        ///      from "nobody has revealed yet", which is the misreport ADR-0011
+        ///      forbids.
+        Reveal,
         Ended
     }
 
@@ -376,6 +388,29 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      total without having to remember to add the weight themselves.
     mapping(address => uint256) private _delegatedSurplus;
 
+    /// @notice The commitment an address submitted, or zero when it has not
+    ///         committed. Consulted only when `config.commitReveal`.
+    ///
+    /// @dev A hash, not a placeholder. Storing the plaintext here — even
+    ///      privately — would leave it readable from the contract's storage, so
+    ///      the entire mechanism would be decorative. This is the one field whose
+    ///      VALUE carries the privacy guarantee rather than merely recording a
+    ///      decision.
+    ///
+    ///      DISTINCT FROM HAVING VOTED. A non-zero commitment means the address
+    ///      participated and has not yet revealed; `_votedOptions` being empty
+    ///      means no ballot is counted. Those are different facts and the UI has
+    ///      to report them differently — "committed, awaiting reveal" is not
+    ///      "did not vote" (ADR-0011).
+    mapping(address => bytes32) public commitmentOf;
+
+    /// @notice When the reveal window closes, set when `Voting` ends.
+    /// @dev Zero until then. Derived from `config.revealWindowSeconds` at the
+    ///      moment voting actually closes rather than from `endsAt`, so a poll
+    ///      closed EARLY by its creator still gives revealers the full window
+    ///      they were promised.
+    uint256 public revealEndsAt;
+
     // ---------------------------------------------------------------------
     // Events
     // ---------------------------------------------------------------------
@@ -429,6 +464,23 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      would have to correlate.
     event VoteDelegated(address indexed delegate, address indexed onBehalfOf, uint256 power);
 
+    /// @dev A commitment was recorded. Carries NO plaintext and no option ids —
+    ///      that is the point of the mechanism, and emitting them here would
+    ///      undo it in the one place everyone reads.
+    event Committed(address indexed voter, bytes32 commitment);
+
+    /// @dev A commitment was opened and its ballot counted.
+    event Revealed(address indexed voter, uint256[] optionIds, uint256 power);
+
+    /// @dev A commitment was recorded but never opened within the window.
+    ///
+    ///      Emitted when the poll leaves `Reveal` so that abstention is an
+    ///      OBSERVABLE FACT rather than something a reader infers from a missing
+    ///      `Revealed`. An index can then say "committed, did not reveal"
+    ///      instead of quietly showing nothing, which is the difference
+    ///      ADR-0011 is about. The stake stays refundable.
+    event CommitmentExpired(address indexed voter);
+
     // ---------------------------------------------------------------------
     // Errors
     // ---------------------------------------------------------------------
@@ -465,6 +517,13 @@ contract Poll is Ownable, ReentrancyGuard {
     error DelegatorHasVoted(address delegator);
     error DelegateNotEligible(address delegate);
     error NotADelegate(address caller);
+    error NotCommitReveal();
+    error AlreadyCommitted(address voter);
+    error HasNotCommitted(address voter);
+    error CommitmentMismatch(address voter);
+    error RevealWindowClosed(uint256 revealEndsAt);
+    error RevealWindowOpen(uint256 revealEndsAt);
+    error IncorrectCommitStake(uint256 expected, uint256 received);
 
     // ---------------------------------------------------------------------
     // Construction
@@ -793,12 +852,18 @@ contract Poll is Ownable, ReentrancyGuard {
         _setPhase(Phase.Voting);
     }
 
-    /// @notice Close the poll early and start the refund grace period.
+    /// @notice Close voting. On a commit-reveal poll this opens the reveal
+    ///         window rather than ending the poll.
+    ///
+    /// @dev `_closeVoting` is the single owner of "voting is over" because the
+    ///      two transitions differ only in their destination, and a poll that
+    ///      took the wrong one would either skip the reveal window entirely
+    ///      (losing every ballot) or leave a plain poll stuck in a phase nothing
+    ///      can advance.
     function endPoll() external onlyOwner {
         if (phase != Phase.Voting) revert InvalidPhase(Phase.Voting, phase);
 
-        votingEndedAt = block.timestamp;
-        _setPhase(Phase.Ended);
+        _closeVoting();
     }
 
     /// @notice Close the poll once its deadline has passed. Callable by anyone.
@@ -809,8 +874,141 @@ contract Poll is Ownable, ReentrancyGuard {
         if (phase != Phase.Voting) revert InvalidPhase(Phase.Voting, phase);
         if (block.timestamp < endsAt) revert DeadlineNotInFuture(endsAt);
 
+        _closeVoting();
+    }
+
+    /// @notice End the reveal window once it has passed. Callable by anyone.
+    /// @dev The counterpart of `closeAfterDeadline` for the second window. Also
+    ///      permissionless, for the same reason: a creator that walked away must
+    ///      not be able to freeze the poll in `Reveal` forever.
+    ///
+    ///      Unrevealed commitments expire here — each one is announced with
+    ///      `CommitmentExpired` so the abstention is a recorded fact. Their
+    ///      stakes are untouched and remain refundable through the ordinary
+    ///      `refund` path; a failed reveal costs the voter its say, never its
+    ///      money.
+    function closeRevealWindow() external {
+        if (phase != Phase.Reveal) revert InvalidPhase(Phase.Reveal, phase);
+        if (block.timestamp < revealEndsAt) revert RevealWindowOpen(revealEndsAt);
+
         votingEndedAt = block.timestamp;
         _setPhase(Phase.Ended);
+    }
+
+    /// @dev The one place `Voting` is left, so the two callers cannot disagree
+    ///      about where it goes or about what `votingEndedAt` becomes.
+    ///
+    ///      The reveal deadline is measured from NOW rather than from `endsAt`.
+    ///      A creator that closes early still owes revealers the full window
+    ///      they were promised by the configuration; deriving it from `endsAt`
+    ///      would silently shorten the window in exactly the case where someone
+    ///      is watching the clock.
+    function _closeVoting() private {
+        votingEndedAt = block.timestamp;
+
+        if (config.commitReveal) {
+            revealEndsAt = block.timestamp + config.revealWindowSeconds;
+            _setPhase(Phase.Reveal);
+        } else {
+            _setPhase(Phase.Ended);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Commit-reveal
+    // ---------------------------------------------------------------------
+
+    /// @notice The commitment an address must submit to vote privately.
+    ///
+    /// @dev A PURE HELPER, exposed so a client never has to reimplement the
+    ///      encoding. Getting it wrong produces a commitment the contract will
+    ///      reject at reveal time — after the voter has already paid for the
+    ///      commit and cannot fix it, because the window has closed. Shipping the
+    ///      exact formula is the difference between "the docs describe it" and
+    ///      "it cannot be got wrong".
+    ///
+    ///      The binding covers the VOTER and the POLL, not just their choices.
+    ///      Without the voter, anyone who saw a commitment in the mempool could
+    ///      copy it into their own transaction and front-run the original — both
+    ///      would then reveal the same set, and the copier would have stolen the
+    ///      ballot. Without the poll, the same commitment would be replayable
+    ///      against a different poll by the same address.
+    ///
+    ///      The salt does the remaining work: without it, the space of possible
+    ///      option sets is small enough to enumerate and match against the hash.
+    function computeCommitment(
+        address voter,
+        uint256[] calldata optionIds,
+        bytes32 salt
+    ) public view returns (bytes32) {
+        return keccak256(abi.encode(voter, address(this), optionIds, salt));
+    }
+
+    /// @notice Record a commitment. Costs exactly `STAKE`, like a plain vote.
+    ///
+    /// @dev The stake moves here rather than at reveal so that committing has
+    ///      the same cost as voting. Otherwise committing would be free and
+    ///      revealing costly, which inverts the incentive the stake exists for:
+    ///      an address could fill the poll with commitments it never intends to
+    ///      open, at no cost.
+    ///
+    ///      The commitment is recorded immediately and is NOT validated against
+    ///      anything — it cannot be, that is the point. A voter that commits a
+    ///      hash it cannot later open has simply wasted its stake's time; the
+    ///      money is still refundable, the vote is simply not counted.
+    function commit(bytes32 commitment) external payable nonReentrant {
+        if (!config.commitReveal) revert NotCommitReveal();
+        if (phase != Phase.Voting) revert InvalidPhase(Phase.Voting, phase);
+        if (block.timestamp >= endsAt && votingEndedAt == 0) revert PollAlreadyEnded(endsAt);
+        if (!openToAll && !isWhitelisted[msg.sender]) revert NotWhitelisted(msg.sender);
+        if (commitmentOf[msg.sender] != bytes32(0)) revert AlreadyCommitted(msg.sender);
+        if (msg.value != STAKE) revert IncorrectCommitStake(STAKE, msg.value);
+
+        commitmentOf[msg.sender] = commitment;
+        stakeOf[msg.sender] = msg.value;
+        totalStaked += msg.value;
+
+        emit Committed(msg.sender, commitment);
+    }
+
+    /// @notice Open a commitment and count its ballot.
+    ///
+    /// @dev `optionIds` and `salt` are the preimage; the contract rehashes them
+    ///      and compares. A mismatch is refused rather than ignored, because the
+    ///      alternatives are both worse: counting an unverified set would let a
+    ///      voter reveal something other than what it committed to, and silently
+    ///      dropping the ballot would hide a real mistake behind a successful
+    ///      transaction.
+    ///
+    ///      The commitment is cleared BEFORE `_recordVote` counts, so a reentrant
+    ///      or repeated call finds nothing to open. Revealing twice would
+    ///      otherwise count the same ballot twice — the double count ADR-0034
+    ///      forbids, arriving through the new path.
+    function reveal(uint256[] calldata optionIds, bytes32 salt) external nonReentrant {
+        if (phase != Phase.Reveal) revert InvalidPhase(Phase.Reveal, phase);
+        if (block.timestamp >= revealEndsAt) revert RevealWindowClosed(revealEndsAt);
+
+        bytes32 committed = commitmentOf[msg.sender];
+        if (committed == bytes32(0)) revert HasNotCommitted(msg.sender);
+
+        if (computeCommitment(msg.sender, optionIds, salt) != committed) {
+            revert CommitmentMismatch(msg.sender);
+        }
+
+        // Effects before counting: clearing first means the ballot can be
+        // opened exactly once even if a later call reenters.
+        delete commitmentOf[msg.sender];
+
+        uint256 power = _powerFor(msg.sender);
+
+        _recordVote(msg.sender, optionIds, power);
+
+        // `Revealed` carries the set and the power; the running per-option
+        // totals come from the `VoteRecorded` that `_recordVote` emits. Two
+        // events rather than one carrying everything, because `_recordVote` is
+        // the single owner of the tally and duplicating its totals here would
+        // create a second place for them to be wrong.
+        emit Revealed(msg.sender, optionIds, power);
     }
 
     // ---------------------------------------------------------------------
@@ -828,6 +1026,14 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      paths rather than necessity.
     function vote(uint256[] calldata optionIds) external payable nonReentrant {
         if (phase != Phase.Voting) revert InvalidPhase(Phase.Voting, phase);
+
+        // A commit-reveal poll accepts ballots ONLY through `commit`/`reveal`.
+        // Leaving the plain path open would make the privacy optional in the
+        // worst way: anyone willing to vote publicly could do so directly, so
+        // the mechanism would protect exactly the people who least needed it
+        // while the poll's own rules claimed otherwise.
+        if (config.commitReveal) revert NotCommitReveal();
+
         if (block.timestamp >= endsAt && votingEndedAt == 0) revert PollAlreadyEnded(endsAt);
         // The only admission check, and the only place `openToAll` is read on a
         // write path. Short-circuiting on the flag means an open poll costs one
@@ -889,6 +1095,15 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      double-counting ADR-0034 forbids.
     function changeVote(uint256[] calldata optionIds) external nonReentrant {
         if (phase != Phase.Voting) revert InvalidPhase(Phase.Voting, phase);
+
+        // On a commit-reveal poll there is no counted ballot to change during
+        // `Voting` — the choices are still sealed — so there is nothing here for
+        // this function to do. A change during `Reveal` would additionally be a
+        // contradiction: the ballot was just opened by proving it matched the
+        // commitment, and rewriting it afterwards would decouple the tally from
+        // the commitment it was verified against.
+        if (config.commitReveal) revert NotCommitReveal();
+
         if (block.timestamp >= endsAt && votingEndedAt == 0) revert PollAlreadyEnded(endsAt);
 
         uint256[] storage previous = _votedOptions[msg.sender];
@@ -922,6 +1137,18 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      second of the two genuine external-call sites in the contract.
     function withdrawVote() external nonReentrant {
         if (phase != Phase.Voting) revert InvalidPhase(Phase.Voting, phase);
+
+        // On a commit-reveal poll the sealed commitment IS the held vote, so
+        // this is how a voter changes its mind before the reveal: withdraw the
+        // commitment, get the stake back, and commit again if it wishes. Leaving
+        // this path reachable is what keeps committing from being a one-way
+        // door — without it, a voter that mis-typed its salt or simply changed
+        // its mind would have to wait for the poll to end.
+        if (config.commitReveal) {
+            _withdrawCommitment();
+            return;
+        }
+
         if (block.timestamp >= endsAt && votingEndedAt == 0) revert PollAlreadyEnded(endsAt);
 
         uint256[] storage previous = _votedOptions[msg.sender];
@@ -938,6 +1165,31 @@ contract Poll is Ownable, ReentrancyGuard {
         // Checks-Effects-Interactions: every piece of state is cleared BEFORE
         // the transfer, so a reentrant caller finds nothing left to take.
         _clearVote(msg.sender, previous);
+        stakeOf[msg.sender] = 0;
+        totalStaked -= amount;
+
+        (bool ok, ) = payable(msg.sender).call{ value: amount }("");
+        if (!ok) revert TransferFailed();
+
+        emit VoteWithdrawn(msg.sender, amount);
+    }
+
+    /// @dev Withdraws a sealed commitment and returns the stake.
+    ///
+    ///      Checks-Effects-Interactions, like the plain withdrawal: the
+    ///      commitment and the stake are cleared BEFORE the transfer, so a
+    ///      reentrant caller finds nothing to take and nothing to reopen.
+    ///
+    ///      The commitment is deleted rather than merely zeroed in the stake
+    ///      bookkeeping, because a stale non-zero commitment would keep the
+    ///      address in the "committed, awaiting reveal" set — reporting it as a
+    ///      participant that abstained, when in fact it withdrew.
+    function _withdrawCommitment() private {
+        if (commitmentOf[msg.sender] == bytes32(0)) revert HasNotCommitted(msg.sender);
+
+        uint256 amount = stakeOf[msg.sender];
+
+        delete commitmentOf[msg.sender];
         stakeOf[msg.sender] = 0;
         totalStaked -= amount;
 
@@ -1107,6 +1359,15 @@ contract Poll is Ownable, ReentrancyGuard {
         uint256 amount = stakeOf[msg.sender];
         if (amount == 0) revert NothingToRefund();
 
+        // A commitment still sealed at refund time is one that expired
+        // unrevealed. Clearing it here keeps the projection truthful: the
+        // address stops being a "committed participant awaiting reveal" the
+        // moment it takes its stake back.
+        if (commitmentOf[msg.sender] != bytes32(0)) {
+            delete commitmentOf[msg.sender];
+            emit CommitmentExpired(msg.sender);
+        }
+
         // Effect before interaction.
         stakeOf[msg.sender] = 0;
         totalStaked -= amount;
@@ -1245,6 +1506,16 @@ contract Poll is Ownable, ReentrancyGuard {
         ///      explain why the ballot is closed to it rather than showing a
         ///      button that would revert with `NotADelegate`.
         bool delegating;
+        /// @dev True when a SEALED commitment is on file and has not been
+        ///      revealed or withdrawn.
+        ///
+        ///      The reason this field exists at all: "committed, awaiting
+        ///      reveal" and "did not vote" are different facts, and a UI that
+        ///      rendered the first as the second would be reporting a
+        ///      participation that exists as a non-participation. `marked` is
+        ///      false in both cases — the ballot is not counted yet — so a reader
+        ///      given only `marked` cannot tell them apart (ADR-0011).
+        bool committed;
     }
 
     /// @dev `whitelisted` stays the raw mapping answer even when `openToAll` is
@@ -1274,6 +1545,7 @@ contract Poll is Ownable, ReentrancyGuard {
                 ? votingPowerOf[voter]
                 : _ownPowerOf(voter) + _delegatedSurplus[voter]);
         state.delegating = delegatedTo[voter] != address(0);
+        state.committed = commitmentOf[voter] != bytes32(0);
     }
 
     /// @dev Split out because `voterState` reads the mapping twice and the

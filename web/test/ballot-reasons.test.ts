@@ -13,7 +13,13 @@
  *
  * `PollPhase` values are inlined rather than imported so that a change to the
  * enum's numbering shows up here as a failure rather than silently re-pointing
- * every case at a different phase.
+ * every case at a different phase. That is exactly what happened when `Reveal`
+ * was inserted between `Voting` and `Ended`: ENDED used to be 2 and is now 3,
+ * and these cases failed until the constant was updated — which is the guard
+ * working, not a false alarm.
+ *
+ * So `REVEAL` is written down here too, even though no case uses it yet: leaving
+ * a hole in the sequence would let the next insertion slip through unnoticed.
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -31,7 +37,8 @@ import {
 
 const SETUP = 0;
 const VOTING = 1;
-const ENDED = 2;
+const REVEAL = 2;
+const ENDED = 3;
 
 const CHAIN_ID = 31337;
 
@@ -51,6 +58,7 @@ function inputs(overrides: Partial<BallotInputs> = {}): BallotInputs {
     marked: false,
     myOptionId: 0,
     myStake: undefined,
+    committed: false,
     ...overrides,
   };
 }
@@ -106,6 +114,16 @@ describe("sharedBlock", () => {
     assert.match(pastDeadline ?? "", /已过截止时间/);
     assert.match(ended ?? "", /投票已结束/);
     assert.notEqual(pastDeadline, ended);
+  });
+
+  it("sends a reveal-window voter to reveal, not to a rejected refund", () => {
+    // `Reveal` refuses votes AND `refund()` still reverts — so the sentence must
+    // name revealing as the next action and must NOT point at the refund button
+    // the way the Ended wording does.
+    const reason = sharedBlock(inputs({ phase: REVEAL }));
+
+    assert.match(reason ?? "", /揭示/);
+    assert.doesNotMatch(reason ?? "", /取回押金/);
   });
 
   it("separates a failed voter read from one still in flight", () => {
@@ -227,6 +245,21 @@ describe("withdrawReason", () => {
     const reason = withdrawReason(inputs({ marked: false }));
 
     assert.match(reason ?? "", /HasNotVoted/);
+  });
+
+  it("offers withdrawal for a sealed commitment that is not yet counted", () => {
+    // `marked` is false while a ballot is sealed, so the branch above would
+    // report HasNotVoted and refuse an action the contract accepts —
+    // `_withdrawCommitment` exists precisely to make committing reversible.
+    assert.equal(withdrawReason(inputs({ committed: true })), undefined);
+  });
+
+  it("refuses withdrawal during the reveal window", () => {
+    // Revealing is the only thing left to do; withdrawing here would throw the
+    // ballot away.
+    const reason = withdrawReason(inputs({ committed: true, phase: REVEAL }));
+
+    assert.match(reason ?? "", /揭示阶段/);
   });
 
   it("does not guess between never-voted and already-withdrawn", () => {

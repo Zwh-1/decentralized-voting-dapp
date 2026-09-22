@@ -73,6 +73,11 @@ export function resolveChainTarget(input: {
 export const PHASE_LABELS: Record<number, string> = {
   [PollPhase.Setup]: "设置中",
   [PollPhase.Voting]: "投票中",
+  // A commit-reveal poll's second window. Labelled distinctly rather than reusing
+  // "投票中" because the tally is frozen and rising at different times in the two
+  // windows, and a reader that saw the same label in both could not tell "nobody
+  // voted" from "nobody has revealed yet".
+  [PollPhase.Reveal]: "揭示中",
   [PollPhase.Ended]: "已结束",
 };
 

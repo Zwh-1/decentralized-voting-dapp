@@ -16,6 +16,7 @@
     "reorg-drill": "node --env-file-if-exists=.env --import tsx scripts/reorg-drill.ts",
     "refund-drill": "node --env-file-if-exists=.env --import tsx scripts/refund-drill.ts",
     "tamper-drill": "node --env-file-if-exists=.env --import tsx scripts/tamper-drill.ts",
+    "commit-reveal-drill": "node --env-file-if-exists=.env --import tsx scripts/commit-reveal-drill.ts",
     "ui-drill": "node --env-file-if-exists=.env --import tsx scripts/ui-drill.ts",
     "ui-drill:change": "node --env-file-if-exists=.env --import tsx scripts/ui-drill.ts --change"
   },

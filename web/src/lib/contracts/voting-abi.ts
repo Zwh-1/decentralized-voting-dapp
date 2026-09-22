@@ -277,6 +277,17 @@ export const pollAbi = [
     "inputs": [
       {
         "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      }
+    ],
+    "name": "AlreadyCommitted",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
         "name": "from",
         "type": "address"
       },
@@ -314,6 +325,17 @@ export const pollAbi = [
       }
     ],
     "name": "CannotDelegateToADelegate",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      }
+    ],
+    "name": "CommitmentMismatch",
     "type": "error"
   },
   {
@@ -384,6 +406,17 @@ export const pollAbi = [
         "type": "address"
       }
     ],
+    "name": "HasNotCommitted",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      }
+    ],
     "name": "HasNotDelegated",
     "type": "error"
   },
@@ -396,6 +429,22 @@ export const pollAbi = [
       }
     ],
     "name": "HasNotVoted",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "expected",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "received",
+        "type": "uint256"
+      }
+    ],
+    "name": "IncorrectCommitStake",
     "type": "error"
   },
   {
@@ -470,6 +519,11 @@ export const pollAbi = [
   },
   {
     "inputs": [],
+    "name": "NotCommitReveal",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "NotDelegable",
     "type": "error"
   },
@@ -536,6 +590,28 @@ export const pollAbi = [
   {
     "inputs": [],
     "name": "ReentrancyGuardReentrantCall",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "revealEndsAt",
+        "type": "uint256"
+      }
+    ],
+    "name": "RevealWindowClosed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "revealEndsAt",
+        "type": "uint256"
+      }
+    ],
+    "name": "RevealWindowOpen",
     "type": "error"
   },
   {
@@ -634,6 +710,38 @@ export const pollAbi = [
     ],
     "name": "ZeroWeight",
     "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      }
+    ],
+    "name": "CommitmentExpired",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "commitment",
+        "type": "bytes32"
+      }
+    ],
+    "name": "Committed",
+    "type": "event"
   },
   {
     "anonymous": false,
@@ -785,6 +893,31 @@ export const pollAbi = [
       }
     ],
     "name": "Refunded",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256[]",
+        "name": "optionIds",
+        "type": "uint256[]"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "power",
+        "type": "uint256"
+      }
+    ],
+    "name": "Revealed",
     "type": "event"
   },
   {
@@ -1039,6 +1172,74 @@ export const pollAbi = [
     "name": "closeAfterDeadline",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "closeRevealWindow",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "commitment",
+        "type": "bytes32"
+      }
+    ],
+    "name": "commit",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "commitmentOf",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256[]",
+        "name": "optionIds",
+        "type": "uint256[]"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "salt",
+        "type": "bytes32"
+      }
+    ],
+    "name": "computeCommitment",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -1436,6 +1637,37 @@ export const pollAbi = [
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "optionIds",
+        "type": "uint256[]"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "salt",
+        "type": "bytes32"
+      }
+    ],
+    "name": "reveal",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "revealEndsAt",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "rulesHash",
     "outputs": [
@@ -1697,6 +1929,11 @@ export const pollAbi = [
             "internalType": "bool",
             "name": "delegating",
             "type": "bool"
+          },
+          {
+            "internalType": "bool",
+            "name": "committed",
+            "type": "bool"
           }
         ],
         "internalType": "struct Poll.VoterState",
@@ -1767,9 +2004,10 @@ export const pollAbi = [
   }
 ] as const;
 
-/** Mirrors the on-chain `Poll.Phase` enum. */
+/** Mirrors the on-chain `Poll.Phase` enum. Generated from contracts/Poll.sol. */
 export enum PollPhase {
   Setup = 0,
   Voting = 1,
-  Ended = 2,
+  Reveal = 2,
+  Ended = 3,
 }

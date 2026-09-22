@@ -70,7 +70,8 @@ export interface VoteRow extends LogRowBase {
 }
 
 /**
- * The three things an address can do to a vote.
+ * The things an address can do to its vote, including the two events that
+ * record a ballot WITHOUT counting it.
  *
  * `cast` and `changed` are both produced by the contract's single
  * `VoteRecorded` event; which one a row is depends on whether the address had
@@ -78,8 +79,20 @@ export interface VoteRow extends LogRowBase {
  * an event type and not a state: the index takes "the last recorded set this
  * address submitted" and gets the right answer either way, and storing the
  * distinction as its own row keeps that derivation a view over the stream.
+ *
+ * `committed` and `expired` are a commit-reveal poll's two states that are NOT
+ * a vote. Keeping them in this stream rather than in a separate table is what
+ * makes "committed, awaiting reveal" expressible at all: the projection has to
+ * answer "did this address participate?" and an empty result cannot distinguish
+ * "no" from "yes, but sealed". A separate table would let the two drift, and the
+ * drift would show up as a UI telling a committed voter it had not voted —
+ * ADR-0011's misreport, arriving through the privacy feature.
+ *
+ * Neither carries a `power` or a real `optionId`: there is no plaintext yet.
+ * `optionId` is 0 for both, which is the same sentinel `withdrawn` uses, and
+ * the READ side must never treat a 0-option row as a selection.
  */
-export type VoteEventType = "cast" | "changed" | "withdrawn";
+export type VoteEventType = "cast" | "changed" | "withdrawn" | "committed" | "expired";
 
 export interface RefundRow extends LogRowBase {
   pollAddress: string;
@@ -272,6 +285,45 @@ export function decodeLogs(logs: readonly MinimalLog[]): DecodedEvents {
             power,
           });
         }
+        break;
+      }
+      case "Committed": {
+        // The commitment hash itself is deliberately NOT persisted. It is the
+        // voter's own secret to keep, and a projection that stored it would
+        // make the index a second place the private ballot could be attacked
+        // from — while also being useless, since nothing here can open it.
+        // What the projection needs is only the FACT of participation, which is
+        // what `eventType: "committed"` records.
+        const args = event.args as { voter: string };
+        result.votes.push({
+          ...base,
+          voter: args.voter.toLowerCase(),
+          optionId: 0,
+          eventType: "committed",
+          power: "0",
+        });
+        break;
+      }
+      case "Revealed": {
+        // A reveal DOES count, and it arrives as its own event rather than as a
+        // `VoteRecorded`. The contract emits both, and recording the plaintext
+        // once — from `VoteRecorded`, which carries the running totals — keeps
+        // the tally a fold over a single event shape.
+        //
+        // This case therefore records nothing. It exists so the event is
+        // recognised rather than falling through to the default branch, where a
+        // future reader would have to guess whether it was deliberately ignored.
+        break;
+      }
+      case "CommitmentExpired": {
+        const args = event.args as { voter: string };
+        result.votes.push({
+          ...base,
+          voter: args.voter.toLowerCase(),
+          optionId: 0,
+          eventType: "expired",
+          power: "0",
+        });
         break;
       }
       case "VoteWithdrawn": {

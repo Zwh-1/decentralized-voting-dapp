@@ -53,6 +53,16 @@ export interface BallotInputs {
   myOptionId: number;
   /** The stake held for the address, in wei. */
   myStake: bigint | undefined;
+
+  /**
+   * True when a SEALED commitment is on file and has not been revealed.
+   *
+   * Distinct from `marked`, which is "has a counted ballot". On a commit-reveal
+   * poll `marked` is false while a ballot is sealed, so a UI given only `marked`
+   * would tell a committed voter it had not voted — reporting participation as
+   * non-participation (ADR-0011).
+   */
+  committed: boolean;
 }
 
 /** The sentence for a write that has to wait; shared by every control. */
@@ -63,6 +73,20 @@ function votingClosed(input: BallotInputs): boolean {
   return (
     input.phase === PollPhase.Ended || (input.phase === PollPhase.Voting && input.deadlinePassed)
   );
+}
+
+/**
+ * A commit-reveal poll whose voting window has closed but whose reveal window is
+ * still open.
+ *
+ * A separate predicate rather than folding `Reveal` into `votingClosed`, because
+ * the REMEDY differs: on a closed poll a voter's next move is to take its stake
+ * back, whereas during `Reveal` its next move is to reveal — and `refund()`
+ * still reverts, so pointing at it would send the reader at a call the contract
+ * rejects.
+ */
+function isReveal(input: BallotInputs): boolean {
+  return input.phase === PollPhase.Reveal;
 }
 
 function isSetup(input: BallotInputs): boolean {
@@ -128,6 +152,14 @@ function checkUntilAdmission(input: BallotInputs): string | undefined {
 
   if (isSetup(input)) {
     return "投票尚未开始：发起人还没有调用 startPoll()，此刻合约不接受任何投票。";
+  }
+
+  if (isReveal(input)) {
+    // Gets its own sentence rather than falling into the `votingClosed` branch.
+    // The reader's next action here is to REVEAL, and `refund()` still reverts
+    // until the poll reaches `Ended` — so pointing at the refund button would
+    // send them at a call the contract rejects.
+    return "投票窗口已关闭，现在处于揭示阶段：合约不再接受新的投票或改投，只能揭示此前提交的承诺。揭示期结束后未揭示的承诺视为弃权，押金仍可取回。";
   }
 
   if (votingClosed(input)) {
@@ -238,12 +270,25 @@ export function withdrawReason(input: BallotInputs): string | undefined {
       : "正在读取合约状态…";
   }
 
+  if (isReveal(input)) {
+    return "揭示阶段不能撤票：此时撤票等于放弃这一票。未揭示的承诺会在揭示期结束后自动视为弃权，押金仍可取回。";
+  }
+
   if (votingClosed(input)) {
     return "投票已经结束，撤票只在投票进行中可用；押金请用「取回押金」拿回。";
   }
 
   if (isSetup(input)) {
     return "投票尚未开始。";
+  }
+
+  if (input.committed) {
+    // On a commit-reveal poll the sealed commitment IS the held vote, so this is
+    // reachable and useful: withdrawing is how a voter changes its mind before
+    // the reveal, and `_withdrawCommitment` returns the stake. Reporting
+    // "HasNotVoted" here — which is what the `marked` check below would do, since
+    // a sealed ballot is not counted yet — would refuse an available action.
+    return undefined;
   }
 
   if (!input.marked) {

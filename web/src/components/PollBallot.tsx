@@ -180,6 +180,10 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
   const myOptionId = voter === undefined ? 0 : Number(voter.currentOptionId);
   const myStake = voter?.stake;
   const marked = voter?.marked === true;
+  // A sealed ballot is NOT a counted one, so `marked` is false while a
+  // commitment is on file. Without this the ballot would tell a committed voter
+  // it had not voted — reporting participation as non-participation.
+  const committed = voter?.committed === true;
   // The whole set, not just `currentOptionId`: under multi-select the ballot's
   // "already chosen" marks have to cover every selected option, and reading only
   // the first element would leave the others looking unselected.
@@ -280,6 +284,7 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
     marked,
     myOptionId,
     myStake,
+    committed,
   };
 
   const readFailed = reads.isError;

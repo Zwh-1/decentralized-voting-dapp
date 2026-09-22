@@ -26,7 +26,10 @@ type EventName =
   | "VoteWithdrawn"
   | "Refunded"
   | "WhitelistUpdated"
-  | "PhaseChanged";
+  | "PhaseChanged"
+  | "Committed"
+  | "Revealed"
+  | "CommitmentExpired";
 
 /** `PollCreated` comes from the factory; everything else from a poll. */
 function abiFor(eventName: EventName): Abi {
@@ -333,6 +336,96 @@ describe("decodeLogs", () => {
       refunds: [],
       whitelist: [],
       phases: [],
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Commit-reveal
+  // -------------------------------------------------------------------
+
+  describe("commit-reveal", () => {
+    it("records a commitment as participation that is not yet a vote", () => {
+      const result = decodeLogs([
+        makeLog("Committed", { voter: VOTER, commitment: `0x${"11".repeat(32)}` }, base),
+      ]);
+
+      assert.equal(result.votes.length, 1);
+      const [row] = result.votes;
+      assert.ok(row !== undefined, "one row was decoded");
+      assert.equal(row.eventType, "committed");
+      assert.equal(row.voter, VOTER.toLowerCase());
+      // option_id 0 is the sentinel: there is no plaintext yet, and the read
+      // side must never treat it as a selection.
+      assert.equal(row.optionId, 0);
+      assert.equal(row.power, "0");
+    });
+
+    it("never persists the commitment hash itself", () => {
+      // The hash is the voter's own secret. Storing it would make the index a
+      // second place a sealed ballot could be attacked from, and nothing here
+      // can open it anyway.
+      const commitment = `0x${"22".repeat(32)}` as const;
+      const result = decodeLogs([makeLog("Committed", { voter: VOTER, commitment }, base)]);
+
+      // Asserted per row rather than by stringifying the whole result: the
+      // decoded LOG still carries its own topics and data, so a substring search
+      // would find the hash in the input it was built from and prove nothing
+      // about what the projection kept.
+      for (const row of result.votes) {
+        for (const value of Object.values(row)) {
+          assert.notEqual(value, commitment, "no row field may hold the commitment");
+        }
+      }
+
+      assert.equal(result.votes.length, 1, "the participation itself is still recorded");
+    });
+
+    it("records an expiry as its own event type, not as an absent vote", () => {
+      // A reader given only counted rows could not tell "expired" from "never
+      // participated". The explicit row is what makes abstention observable.
+      const result = decodeLogs([makeLog("CommitmentExpired", { voter: VOTER }, base)]);
+
+      assert.equal(result.votes.length, 1);
+      const [expired] = result.votes;
+      assert.ok(expired !== undefined, "one row was decoded");
+      assert.equal(expired.eventType, "expired");
+      assert.equal(expired.optionId, 0);
+    });
+
+    it("does not double-record a reveal, which already arrives as VoteRecorded", () => {
+      // The contract emits `Revealed` AND `VoteRecorded` for one ballot. If both
+      // produced rows the tally would count the vote twice.
+      const result = decodeLogs([
+        makeLog("Revealed", { voter: VOTER, optionIds: [2n], power: 1n }, base),
+      ]);
+
+      assert.equal(result.votes.length, 0, "the reveal itself contributes no row");
+    });
+
+    it("keeps a full commit-then-reveal sequence to exactly one counted row", () => {
+      const result = decodeLogs([
+        makeLog("Committed", { voter: VOTER, commitment: `0x${"33".repeat(32)}` }, base),
+        makeLog(
+          "Revealed",
+          { voter: VOTER, optionIds: [2n], power: 1n },
+          {
+            ...base,
+            logIndex: 8,
+          },
+        ),
+        makeLog(
+          "VoteRecorded",
+          { voter: VOTER, optionIds: [2n], power: 1n, newTotal: 1n },
+          {
+            ...base,
+            logIndex: 9,
+          },
+        ),
+      ]);
+
+      const counted = result.votes.filter((row) => row.eventType === "cast");
+      assert.equal(counted.length, 1, "one ballot, one counted row");
+      assert.equal(result.votes.length, 2, "the commitment and the count");
     });
   });
 });

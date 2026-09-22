@@ -28,6 +28,10 @@ import {
   tallyLabels,
 } from "../src/lib/ballot-labels";
 import type { HealthResponse, SyncResponse } from "../src/lib/types";
+// Named members rather than literals: these assertions used to hard-code 1 and 2,
+// and inserting `Reveal` into the contract's enum turned `2` into the wrong
+// phase without any test noticing it had stopped testing what it claimed.
+import { PollPhase } from "../src/lib/contracts";
 
 describe("tallyLabels", () => {
   it("never claims a source, a total or a count while the read is in flight", () => {
@@ -133,8 +137,14 @@ describe("phaseText", () => {
   });
 
   it("names the phase once it has been read", () => {
-    assert.equal(phaseText({ contractKnown: true, status: "ready", phase: 1 }), "投票中");
-    assert.equal(phaseText({ contractKnown: true, status: "ready", phase: 2 }), "已结束");
+    assert.equal(
+      phaseText({ contractKnown: true, status: "ready", phase: PollPhase.Voting }),
+      "投票中",
+    );
+    assert.equal(
+      phaseText({ contractKnown: true, status: "ready", phase: PollPhase.Ended }),
+      "已结束",
+    );
   });
 
   it("still reports an unrecognised phase value rather than guessing", () => {

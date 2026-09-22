@@ -77,12 +77,22 @@ export interface PhaseTone {
  *   * `Voting`, past due — the contract refuses votes, but it has NOT entered
  *                          `Ended`, so stakes cannot be refunded until someone
  *                          calls the permissionless `closeAfterDeadline()`.
+ *   * `Reveal`           — a commit-reveal poll whose voting window has closed
+ *                          but whose reveal window is still open. Votes are
+ *                          refused, the tally is still rising, and refunds are
+ *                          NOT available yet.
  *   * `Ended`            — closed; refunds are available.
  *
  * The third is the one that matters most: it looks open, votes are refused, and
  * the remedy is not obvious. It gets its own tone rather than being folded into
  * "closed", because telling a reader "this ended" when the contract still says
  * `Voting` would send them looking for a refund button that `refund()` rejects.
+ *
+ * `Reveal` is the same trap in a new place. It must not read as "已结束" for
+ * exactly that reason — `refund()` still reverts — and it must not read as
+ * "投票中" either, or a voter that has not revealed yet would think it still had
+ * time to commit. It gets `waiting` rather than `closed` for the same reason
+ * `Voting`-past-due gets `danger`: the poll is mid-flight, not finished.
  *
  * The label for a plain `Voting` poll comes from `phaseLabel` rather than being
  * written again here. Two independent spellings of the same state is how the
@@ -99,6 +109,10 @@ export function phaseTone(phase: number | undefined, deadlinePassed: boolean): P
 
   if (phase === PollPhase.Ended) {
     return { label: "已结束", tone: "closed", votable: false };
+  }
+
+  if (phase === PollPhase.Reveal) {
+    return { label: phaseLabel(phase), tone: "waiting", votable: false };
   }
 
   if (phase === PollPhase.Voting) {

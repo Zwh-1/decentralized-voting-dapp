@@ -170,6 +170,15 @@ export interface OnChainVoter {
    * keeps that branch readable at every call site.
    */
   delegating: boolean;
+
+  /**
+   * True when a SEALED commitment is on file and has not been revealed.
+   *
+   * Not folded into `hasVoted`: a sealed ballot is not counted, so `hasVoted` is
+   * false while this is true. Reporting that state as "did not vote" would tell a
+   * participant it had not participated — the misreport ADR-0011 forbids.
+   */
+  committed: boolean;
 }
 
 /**
@@ -219,6 +228,7 @@ export async function readOnChainVoter(
     delegatorCount: bigint;
     controlledPower: bigint;
     delegating: boolean;
+    committed: boolean;
   };
 
   return {
@@ -233,6 +243,7 @@ export async function readOnChainVoter(
     delegatorCount: Number(state.delegatorCount),
     controlledPower: Number(state.controlledPower),
     delegating: state.delegating,
+    committed: state.committed,
   };
 }
 

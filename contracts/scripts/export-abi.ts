@@ -67,14 +67,51 @@ async function readArtifact(source: string, name: string): Promise<Artifact> {
 /**
  * The phase enum is mirrored as a TS enum so consumers can compare against
  * named members instead of magic numbers.
+ *
+ * Read out of the COMPILED ARTIFACT rather than written down here. The literal
+ * version of this list went stale the moment `Reveal` was inserted into the
+ * contract's enum: `export-abi` kept writing `Ended = 2`, which was then
+ * `Reveal`, and every consumer that compared against `PollPhase.Ended` silently
+ * compared against the wrong phase. The refund drill caught it — "expected the
+ * Ended phase (2), got 3" — but only because the two numbers happened to
+ * disagree.
+ *
+ * The artifact carries the enum in `InvalidPhase`'s `internalType`
+ * (`enum Poll.Phase`), which names the type but not its members, so the members
+ * come from the contract SOURCE. Both are read here, which means an enum edit
+ * cannot leave this mirror behind.
  */
-const PHASE_ENUM = `/** Mirrors the on-chain \`Poll.Phase\` enum. */
+async function buildPhaseEnum(): Promise<string> {
+  const source = await readFile(path.join(contractsDir, "contracts", "Poll.sol"), "utf8");
+
+  const match = /enum\s+Phase\s*\{([^}]*)\}/.exec(source);
+  if (match === null) {
+    throw new Error(
+      "Could not find `enum Phase` in contracts/Poll.sol. The generated PollPhase " +
+        "mirror is derived from it, so the contract's enum must stay findable.",
+    );
+  }
+
+  const members = match[1]
+    // Strip the doc comments an enum member may carry.
+    .replace(/\/\/[^\n]*/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split(",")
+    .map((member) => member.trim())
+    .filter((member) => member.length > 0);
+
+  if (members.length === 0) {
+    throw new Error("`enum Phase` in contracts/Poll.sol parsed to zero members.");
+  }
+
+  const lines = members.map((member, index) => `  ${member} = ${index},`).join("\n");
+
+  return `/** Mirrors the on-chain \`Poll.Phase\` enum. Generated from contracts/Poll.sol. */
 export enum PollPhase {
-  Setup = 0,
-  Voting = 1,
-  Ended = 2,
+${lines}
 }
 `;
+}
 
 async function readDeployments(): Promise<DeploymentRecord[]> {
   const dir = path.join(contractsDir, "deployments");
@@ -121,6 +158,7 @@ await mkdir(generatedDir, { recursive: true });
 
 const factoryArtifact = await readArtifact("VotingFactory.sol", "VotingFactory");
 const pollArtifact = await readArtifact("Poll.sol", "Poll");
+const phaseEnum = await buildPhaseEnum();
 
 const abiFile = `${BANNER}
 /** The deployed \`VotingFactory\` interface, as emitted by solc. */
@@ -129,7 +167,7 @@ export const factoryAbi = ${JSON.stringify(factoryArtifact.abi, null, 2)} as con
 /** The \`Poll\` interface, as emitted by solc. Every poll shares it. */
 export const pollAbi = ${JSON.stringify(pollArtifact.abi, null, 2)} as const;
 
-${PHASE_ENUM}`;
+${phaseEnum}`;
 
 await writeFile(path.join(generatedDir, "voting-abi.ts"), abiFile, "utf8");
 

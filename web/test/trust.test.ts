@@ -12,6 +12,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { rulesCheck, rulesSummary, sweepDeadline } from "../src/lib/trust";
+// Named members rather than literals — see the note in ballot-labels.test.ts.
+import { PollPhase } from "../src/lib/contracts";
 
 const A = `0x${"ab".repeat(32)}`;
 const B = `0x${"cd".repeat(32)}`;
@@ -123,8 +125,14 @@ describe("sweepDeadline", () => {
   it("returns null while the poll is still open", () => {
     // The grace period is measured from closing, so before then it has not
     // started and there is nothing to count down.
-    assert.equal(sweepDeadline({ phase: 1, votingEndedAt: null, gracePeriodSeconds: GRACE }), null);
-    assert.equal(sweepDeadline({ phase: 0, votingEndedAt: null, gracePeriodSeconds: GRACE }), null);
+    assert.equal(
+      sweepDeadline({ phase: PollPhase.Voting, votingEndedAt: null, gracePeriodSeconds: GRACE }),
+      null,
+    );
+    assert.equal(
+      sweepDeadline({ phase: PollPhase.Setup, votingEndedAt: null, gracePeriodSeconds: GRACE }),
+      null,
+    );
     assert.equal(
       sweepDeadline({ phase: undefined, votingEndedAt: null, gracePeriodSeconds: GRACE }),
       null,
@@ -134,7 +142,7 @@ describe("sweepDeadline", () => {
   it("returns the deadline once the poll has ended", () => {
     const closedAt = 1_700_000_000n;
     const deadline = sweepDeadline({
-      phase: 2,
+      phase: PollPhase.Ended,
       votingEndedAt: closedAt,
       gracePeriodSeconds: GRACE,
     });
@@ -149,7 +157,11 @@ describe("sweepDeadline", () => {
     // decades ago, which reads as "your stake is already gone".
     for (const missing of [null, undefined, 0n]) {
       assert.equal(
-        sweepDeadline({ phase: 2, votingEndedAt: missing, gracePeriodSeconds: GRACE }),
+        sweepDeadline({
+          phase: PollPhase.Ended,
+          votingEndedAt: missing,
+          gracePeriodSeconds: GRACE,
+        }),
         null,
         `votingEndedAt=${String(missing)} must not produce a deadline`,
       );

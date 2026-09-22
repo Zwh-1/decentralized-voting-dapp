@@ -136,9 +136,11 @@ CREATE TABLE IF NOT EXISTS options (
 -- projection rather than a second authority over a contract mapping.
 --
 -- event_type:
---   'cast'      VoteRecorded  - a recorded set that added to the tally
---   'changed'   VoteRecorded  - a recorded set that replaced an earlier one
---   'withdrawn' VoteWithdrawn - stepped out; option_id is 0 = "no option"
+--   'cast'      VoteRecorded       - a recorded set that added to the tally
+--   'changed'   VoteRecorded       - a recorded set that replaced an earlier one
+--   'withdrawn' VoteWithdrawn      - stepped out; option_id is 0 = "no option"
+--   'committed' Committed          - a SEALED ballot on a commit-reveal poll
+--   'expired'   CommitmentExpired  - a commitment that was never opened
 --
 -- 'cast' and 'changed' come from the SAME on-chain event. The contract emits one
 -- 'VoteRecorded(voter, optionIds, power, newTotal)' for both a first vote and a
@@ -147,9 +149,18 @@ CREATE TABLE IF NOT EXISTS options (
 -- it — the activity log says "changed" — but it is DERIVED: the writer marks a
 -- row 'changed' when the address already had rows before this event.
 --
+-- 'committed' and 'expired' are a commit-reveal poll's two states that are NOT a
+-- vote, and they live in this stream for one reason: "committed, awaiting
+-- reveal" has to be distinguishable from "did not vote". Both have an empty
+-- tally, so a reader given only counted rows would report a participant as a
+-- non-participant — the misreport ADR-0011 forbids. Neither carries a power or a
+-- real option.
+--
 -- VoteWithdrawn carries an amount rather than an option, so its option_id is
 -- stored as 0. 0 is never a valid option on chain (ids are 1-indexed), so the
--- sentinel cannot collide with a real option.
+-- sentinel cannot collide with a real option. 'committed' and 'expired' use the
+-- same sentinel, and the read side must never treat a 0-option row as a
+-- selection.
 --
 -- power is how much the selection counted for (1 under equal weight). Stored
 -- per row rather than re-derived from the poll's mechanism flags, because the
@@ -269,6 +280,14 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
 -- voter were never indexed". option_tally filters the NULLs out, so every
 -- consumer that wants counts is unaffected.
 --
+-- 'committed' and 'expired' map to NULL for the same reason AND a stricter one.
+-- A committed row stores option_id 0 as a sentinel, and 0 is not NULL: leaving
+-- it alone would let option_tally's LEFT JOIN treat it as a real option and
+-- invent an option 0 row, or — worse — silently drop the whole group. Which of
+-- those happens depends on whether an option 0 row exists, so the bug would be
+-- data-dependent. Mapping the sentinel to NULL here makes both impossible and
+-- keeps "this address currently backs nothing" the single meaning of NULL.
+--
 -- The correlated NOT EXISTS rather than ROW_NUMBER()/window functions: MySQL
 -- 5.7 and MariaDB have no window functions, and this project's MySQL version is
 -- whatever the operator happens to be running. It is a correlated subquery per
@@ -278,8 +297,10 @@ CREATE OR REPLACE VIEW current_votes AS
 SELECT
   v.poll_address AS poll_address,
   v.voter       AS voter,
-  CASE WHEN v.event_type = 'withdrawn' THEN NULL ELSE v.option_id END AS option_id,
-  CASE WHEN v.event_type = 'withdrawn' THEN 0 ELSE v.power END AS power,
+  CASE WHEN v.event_type IN ('withdrawn', 'committed', 'expired')
+       THEN NULL ELSE v.option_id END AS option_id,
+  CASE WHEN v.event_type IN ('withdrawn', 'committed', 'expired')
+       THEN 0 ELSE v.power END AS power,
   v.block_number AS block_number,
   v.log_index    AS log_index,
   v.tx_hash      AS tx_hash,

@@ -25,7 +25,7 @@ import type { RowDataPacket } from "mysql2/promise";
 
 import { asChainReader, readOnChainTally } from "../src/lib/chain";
 import { loadServerConfig } from "../src/lib/config";
-import { factoryAbi, pollAbi } from "../src/lib/contracts";
+import { factoryAbi, pollAbi, PollPhase } from "../src/lib/contracts";
 import { migrate } from "../src/lib/db/migrate";
 import { createPool } from "../src/lib/db/pool";
 import { syncOnce, type SyncDeps, type SyncOutcome } from "../src/lib/indexer/sync";
@@ -45,6 +45,22 @@ interface CountRow extends RowDataPacket {
 interface RefundRow extends RowDataPacket {
   voter: string;
   amount_wei: string;
+}
+
+/**
+ * The numeric value of a `Poll.Phase` member.
+ *
+ * This drill used to compare against the literals 1 and 2, and it is what caught
+ * that going stale: when `Reveal` was inserted between `Voting` and `Ended`,
+ * every hard-coded comparison silently pointed at the wrong phase and the drill
+ * failed with "expected the Ended phase (2), got 3".
+ *
+ * `PollPhase` now comes from the generated ABI module, which derives its members
+ * from `contracts/Poll.sol` — so the mirror cannot lag the contract. Nothing
+ * here needs to know the ordinals at all.
+ */
+function phaseValue(name: keyof typeof PollPhase): number {
+  return PollPhase[name];
 }
 
 const config = loadServerConfig();
@@ -276,8 +292,8 @@ try {
   report.voter = voter.address;
 
   check(
-    before.phase === 1,
-    `expected the ballot to be in its Voting phase (1) with a fresh seed, got ${before.phase}`,
+    before.phase === phaseValue("Voting"),
+    `expected the ballot to be in its Voting phase (${phaseValue("Voting")}) with a fresh seed, got ${before.phase}`,
   );
   check(
     before.refundRows === 0,
@@ -315,7 +331,10 @@ try {
 
   const ended = await observe();
   report.afterEndPoll = describe(ended);
-  check(ended.phase === 2, `expected the chain to report the Ended phase (2), got ${ended.phase}`);
+  check(
+    ended.phase === phaseValue("Ended"),
+    `expected the chain to report the Ended phase (${phaseValue("Ended")}), got ${ended.phase}`,
+  );
   check(
     ended.phaseRows === before.phaseRows + 1,
     `the PhaseChanged event was not indexed (${before.phaseRows} -> ${ended.phaseRows})`,

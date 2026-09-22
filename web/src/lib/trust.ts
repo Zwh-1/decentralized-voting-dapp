@@ -36,6 +36,8 @@
  * rather than implying wrongdoing.
  */
 
+import { PollPhase } from "./contracts";
+
 /** How a poll's current rules compare to its creation-time commitment. */
 export type RulesVerdict = "unchanged" | "changed" | "unknown";
 
@@ -148,9 +150,13 @@ export function sweepDeadline(input: {
   votingEndedAt: bigint | null | undefined;
   gracePeriodSeconds: bigint;
 }): { at: bigint; remaining: bigint } | null {
-  const ended = 2;
-
-  if (input.phase !== ended) {
+  // `PollPhase.Ended` rather than the literal this used to hold. The literal was
+  // 2, and inserting `Reveal` into the contract's enum made 2 mean `Reveal` — so
+  // this function would have reported a sweep deadline for a poll whose grace
+  // period had not started, telling voters their stake was about to be swept
+  // while `refund()` was in fact still open. `PollPhase` is generated from the
+  // contract's source, so it cannot lag the enum.
+  if (input.phase !== PollPhase.Ended) {
     return null;
   }
 
