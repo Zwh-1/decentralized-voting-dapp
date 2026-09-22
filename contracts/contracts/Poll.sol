@@ -4,6 +4,8 @@ pragma solidity 0.8.37;
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+import { PollMechanisms } from "./PollMechanisms.sol";
+
 /// @title Poll
 /// @notice A single ballot: a question, a set of options, a deadline, and one
 ///         stake-backed vote per address that may be changed or withdrawn.
@@ -114,6 +116,13 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      substance of the guarantee: those are the two things a creator can
     ///      still change in Setup, so they are precisely what a reader needs a way
     ///      to detect edits to.
+    ///
+    ///      The MECHANISMS are included too. They are fixed at `initialize` and
+    ///      could not have been changed, so including them does not detect an
+    ///      edit that was possible; it makes the fingerprint commit to *which
+    ///      poll this is*. Two polls differing only in, say, `weighted` are
+    ///      different rules and must not share a commitment, for the same reason
+    ///      two polls with different questions do not.
     function currentRulesHash() external view returns (bytes32) {
         return _rulesHash();
     }
@@ -124,7 +133,21 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      adjacent dynamic values ambiguous — ("ab", "c") and ("a", "bc")
     ///      produce identical bytes — so two genuinely different rule sets could
     ///      share a hash and the guarantee would be worthless.
+    ///
+    ///      Split into two hashes and then combined, rather than one
+    ///      `abi.encode` with every field. Fourteen arguments in a single call
+    ///      (six identity fields, two dynamic ones, the option list and six
+    ///      mechanism fields) does not compile: `abi.encode` needs a stack slot
+    ///      per argument and the EVM allows 16. The split is also the more
+    ///      readable grouping — WHAT the poll asks versus HOW it counts — and
+    ///      nested hashing is as collision-resistant as a flat encoding of the
+    ///      same fields.
     function _rulesHash() private view returns (bytes32) {
+        return keccak256(abi.encode(_subjectHash(), _mechanismHash()));
+    }
+
+    /// @dev What the poll asks: identity, deadline, and the editable lists.
+    function _subjectHash() private view returns (bytes32) {
         bytes32[] memory optionHashes = new bytes32[](optionCount);
         for (uint256 i = 0; i < optionCount; ++i) {
             uint256 id = i + 1;
@@ -142,6 +165,24 @@ contract Poll is Ownable, ReentrancyGuard {
                     address(this),
                     optionHashes,
                     _whitelistHashes()
+                )
+            );
+    }
+
+    /// @dev How the poll counts: the mechanism set, which cannot change after
+    ///      `initialize` but is part of what makes this poll *this* poll.
+    function _mechanismHash() private view returns (bytes32) {
+        PollMechanisms.PollConfig memory c = config;
+
+        return
+            keccak256(
+                abi.encode(
+                    c.multiSelect,
+                    c.maxSelections,
+                    c.weighted,
+                    c.delegable,
+                    c.commitReveal,
+                    c.revealWindowSeconds
                 )
             );
     }
@@ -248,10 +289,35 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      makes cheap.
     bool public openToAll;
 
-    /// @notice Option the address currently backs; 0 means "no vote right now".
-    /// @dev This is the slot that makes `changeVote` and `withdrawVote`
-    ///      expressible at all — the old contract only had a boolean.
-    mapping(address => uint256) public votedFor;
+    /// @notice The mechanisms this poll counts votes under.
+    /// @dev Fixed at `initialize`, exactly like `openToAll` and for the same
+    ///      reason (ADR-0030): a creator who could switch a poll from
+    ///      single-select to weighted after seeing the tally would be changing
+    ///      what a vote *means* in response to the result. Note this is the
+    ///      whole `PollConfig` minus `openToAll`, which is kept as its own
+    ///      variable because it predates this struct and has its own getter.
+    PollMechanisms.PollConfig public config;
+
+    /// @notice Options the address currently backs, sorted ascending.
+    ///
+    /// @dev THIS REPLACES A SCALAR. The old `mapping(address => uint256)`
+    ///      recorded one option per address, which is why multi-select was not
+    ///      expressible: the storage itself had nowhere to put a second choice.
+    ///      An array holds the set, and `votedFor()` below still answers the
+    ///      single-select question so no existing reader breaks.
+    ///
+    ///      Sorted ascending and kept free of duplicates, which is what makes
+    ///      "is this the same set?" a direct comparison rather than a
+    ///      set-operation, and what stops `[1,1]` from being counted as two
+    ///      votes for option 1.
+    mapping(address => uint256[]) private _votedOptions;
+
+    /// @notice How much voting power the address currently has counted.
+    /// @dev Zero when the address holds no vote. Under equal-weight mechanisms
+    ///      this is 1 per held vote; under `weighted` it is the weight the
+    ///      creator assigned. Exposed so a reader never has to infer "did my
+    ///      vote count, and for how much" from the mechanism flags.
+    mapping(address => uint256) public votingPowerOf;
 
     /// @notice Stake currently held for the address; 0 when it holds no vote.
     mapping(address => uint256) public stakeOf;
@@ -259,6 +325,20 @@ contract Poll is Ownable, ReentrancyGuard {
     /// @notice Sum of every outstanding stake. Invariant: it equals
     ///         `address(this).balance` minus anything already swept.
     uint256 public totalStaked;
+
+    /// @notice Per-address voting weight, consulted only when `config.weighted`.
+    /// @dev A stored table rather than a token balance. A live ERC20 balance
+    ///      would make a vote's weight change after it was cast, so the tally
+    ///      would depend on when it is read; a snapshot table fixes the weight
+    ///      at the moment the creator states it. `weightOf` reports 0 for an
+    ///      address the creator never listed, and `vote` refuses such an
+    ///      address rather than silently counting it as 0 — see the note there.
+    mapping(address => uint256) public weightOf;
+
+    /// @notice Sum of every assigned weight, i.e. the poll's voting-power pool.
+    /// @dev The denominator a quorum is measured against. Maintained on the
+    ///      write path so a reader does not have to sum an unbounded mapping.
+    uint256 public totalWeightAssigned;
 
     // ---------------------------------------------------------------------
     // Events
@@ -279,6 +359,23 @@ contract Poll is Ownable, ReentrancyGuard {
     event VoteWithdrawn(address indexed voter, uint256 amount);
     event Refunded(address indexed voter, uint256 amount);
     event UnclaimedSwept(address indexed to, uint256 amount);
+
+    /// @dev The set-based counterpart of `VoteCast`/`VoteChanged`, emitted when
+    ///      multi-select is on. One event carrying the whole set rather than N
+    ///      per-option events, because "the last thing this address did" has to
+    ///      be recoverable as a unit: N separate events with no ordering
+    ///      guarantee across them would let an indexer assemble a set that was
+    ///      never actually cast.
+    event VoteRecorded(address indexed voter, uint256[] optionIds, uint256 power, uint256 newTotal);
+
+    /// @dev Emitted when an address's voting power counted toward the tally.
+    ///      Separate from the vote itself so that "this address's power moved"
+    ///      is observable without decoding the mechanism flags.
+    event PowerCounted(address indexed voter, uint256 power, uint256 newTotalPower);
+
+    /// @dev A weight was assigned or changed for an address. Only meaningful on
+    ///      a weighted poll, and only legal in Setup.
+    event WeightAssigned(address indexed voter, uint256 weight);
 
     // ---------------------------------------------------------------------
     // Errors
@@ -301,6 +398,13 @@ contract Poll is Ownable, ReentrancyGuard {
     error NothingToRefund();
     error GracePeriodNotElapsed(uint256 availableAt);
     error EmptyQuestion();
+    error InvalidConfig(string reason);
+    error TooManySelections(uint256 maximum, uint256 provided);
+    error NoSelections();
+    error DuplicateSelection(uint256 optionId);
+    error UnweightedVoter(address voter);
+    error ZeroWeight(address voter);
+    error NoWeightAssigned(address voter);
 
     // ---------------------------------------------------------------------
     // Construction
@@ -320,14 +424,18 @@ contract Poll is Ownable, ReentrancyGuard {
     /// @param question_ The question being asked.
     /// @param optionCIDs Metadata CIDs, in display order; at least two.
     /// @param endsAt_ Unix timestamp after which voting is closed.
-    /// @param openToAll_ True to let any address vote, false to require the
-    ///        whitelist. Read once per `vote` and never changed.
+    /// @param config_ The counting mechanisms, including admission mode.
+    ///
+    /// @dev `config_` carries `openToAll` rather than taking it as a sixth
+    ///      positional argument. Two booleans in a row at a call site is a
+    ///      transposition the compiler cannot catch, and there are now six such
+    ///      fields; named struct members make a swap visible.
     function initialize(
         address creator_,
         string calldata question_,
         string[] calldata optionCIDs,
         uint256 endsAt_,
-        bool openToAll_
+        PollMechanisms.PollConfig calldata config_
     ) external {
         if (_initialized) revert AlreadyInitialized();
         if (creator_ == address(0)) revert ZeroAddress();
@@ -337,11 +445,26 @@ contract Poll is Ownable, ReentrancyGuard {
         }
         if (endsAt_ <= block.timestamp) revert DeadlineNotInFuture(endsAt_);
 
+        // The mechanism combination is checked once, here, rather than on every
+        // vote. `PollMechanisms` owns the rules (ADR-0030); this call is the
+        // only place the poll consults them, because the configuration cannot
+        // change afterwards.
+        (bool ok, string memory reason) = PollMechanisms.validate(config_);
+        if (!ok) revert InvalidConfig(reason);
+
+        // A multi-select cap can never exceed the number of options, and the
+        // check belongs here rather than in `PollMechanisms.validate` because
+        // that predicate deliberately knows nothing about the option list.
+        if (config_.multiSelect && config_.maxSelections > optionCIDs.length) {
+            revert TooManySelections(optionCIDs.length, config_.maxSelections);
+        }
+
         _initialized = true;
         creator = creator_;
         question = question_;
         endsAt = endsAt_;
-        openToAll = openToAll_;
+        openToAll = config_.openToAll;
+        config = config_;
 
         // The clone's owner is the creator, so option management and whitelist
         // management are theirs and no one else's.
@@ -362,6 +485,43 @@ contract Poll is Ownable, ReentrancyGuard {
         rulesHash = _rulesHash();
 
         emit PhaseChanged(Phase.Setup, Phase.Setup);
+    }
+
+    /// @notice Assign voting weights to a batch of addresses.
+    /// @dev Only meaningful on a weighted poll, and only in Setup: assigning a
+    ///      weight after voting began would let the creator re-value votes that
+    ///      were already cast, which is the same "rule changed after seeing the
+    ///      tally" problem the mechanism freeze exists to prevent.
+    ///
+    ///      A weight of zero is refused rather than treated as "no vote". The two
+    ///      are different states and collapsing them would make "this address's
+    ///      vote counts for nothing" indistinguishable from "this address was
+    ///      never considered" — the confusion ADR-0011 keeps out of the read
+    ///      layer, kept out of the write layer here. To remove an address's
+    ///      voting power, remove it from the whitelist.
+    function setWeights(address[] calldata voters, uint256[] calldata weights) external onlyOwner {
+        if (!config.weighted) revert InvalidConfig("this poll is not weighted");
+        if (phase != Phase.Setup) revert InvalidPhase(Phase.Setup, phase);
+        if (voters.length != weights.length) {
+            revert InvalidConfig("voters and weights must be the same length");
+        }
+
+        for (uint256 i = 0; i < voters.length; ++i) {
+            address voter = voters[i];
+            if (voter == address(0)) revert ZeroAddress();
+            if (weights[i] == 0) revert ZeroWeight(voter);
+
+            // The pool is a sum over assigned weights, so a reassignment has to
+            // subtract the old value first. Forgetting this is the weighting
+            // analogue of forgetting to decrement the old option in
+            // `changeVote` — the tally would drift upward on every edit — and
+            // the property test covers it.
+            totalWeightAssigned -= weightOf[voter];
+            weightOf[voter] = weights[i];
+            totalWeightAssigned += weights[i];
+
+            emit WeightAssigned(voter, weights[i]);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -481,54 +641,70 @@ contract Poll is Ownable, ReentrancyGuard {
     // Voting
     // ---------------------------------------------------------------------
 
-    /// @notice Cast a first vote for `optionId`, staking exactly `STAKE`.
-    /// @dev No external call happens here, so there is no reentrancy surface;
+    /// @notice Cast a first vote for `optionIds`, staking exactly `STAKE`.
+    /// @dev Single-select is `optionIds.length == 1`, so there is ONE write path
+    ///      rather than two. A separate `voteSingle` would have to repeat the
+    ///      admission, phase, stake and duplicate checks, and the two copies
+    ///      would eventually disagree about one of them.
+    ///
+    ///      No external call happens here, so there is no reentrancy surface;
     ///      `nonReentrant` is applied for uniformity with the other two write
     ///      paths rather than necessity.
-    function vote(uint256 optionId) external payable nonReentrant {
+    function vote(uint256[] calldata optionIds) external payable nonReentrant {
         if (phase != Phase.Voting) revert InvalidPhase(Phase.Voting, phase);
         if (block.timestamp >= endsAt && votingEndedAt == 0) revert PollAlreadyEnded(endsAt);
         // The only admission check, and the only place `openToAll` is read on a
         // write path. Short-circuiting on the flag means an open poll costs one
         // fewer SLOAD than a whitelisted one per vote.
         if (!openToAll && !isWhitelisted[msg.sender]) revert NotWhitelisted(msg.sender);
-        if (votedFor[msg.sender] != 0) revert AlreadyVoted(msg.sender);
-        if (optionId == 0 || optionId > optionCount) revert UnknownOption(optionId);
+        if (_votedOptions[msg.sender].length != 0) revert AlreadyVoted(msg.sender);
         if (msg.value != STAKE) revert IncorrectStake(STAKE, msg.value);
 
-        votedFor[msg.sender] = optionId;
+        uint256 power = _powerFor(msg.sender);
+
+        _recordVote(msg.sender, optionIds, power);
+
         stakeOf[msg.sender] = msg.value;
         totalStaked += msg.value;
-
-        uint256 newCount = ++_options[optionId].voteCount;
-
-        emit VoteCast(msg.sender, optionId, newCount);
     }
 
-    /// @notice Move an existing vote to a different option. Costs no extra stake.
+    /// @notice Move an existing vote to a different option set. Costs no extra stake.
     /// @dev This is the operation the old contract could not express. The two
     ///      counter updates are the whole risk: forgetting to decrement the old
-    ///      option makes the tally grow on every change of mind, which is the
+    ///      options makes the tally grow on every change of mind, which is the
     ///      mutation the property test is built to catch.
-    function changeVote(uint256 optionId) external nonReentrant {
+    ///
+    ///      Under multi-select the set is REPLACED, not merged. Merging would
+    ///      make "change my vote" an accumulate operation, and an address that
+    ///      changed twice could hold two votes' worth of power — exactly the
+    ///      double-counting ADR-0034 forbids.
+    function changeVote(uint256[] calldata optionIds) external nonReentrant {
         if (phase != Phase.Voting) revert InvalidPhase(Phase.Voting, phase);
         if (block.timestamp >= endsAt && votingEndedAt == 0) revert PollAlreadyEnded(endsAt);
 
-        uint256 previous = votedFor[msg.sender];
-        if (previous == 0) revert HasNotVoted(msg.sender);
-        if (optionId == 0 || optionId > optionCount) revert UnknownOption(optionId);
-        if (optionId == previous) revert SameOption(optionId);
+        uint256[] storage previous = _votedOptions[msg.sender];
+        if (previous.length == 0) revert HasNotVoted(msg.sender);
 
-        // Effects: move the vote, leaving the stake exactly where it is.
-        votedFor[msg.sender] = optionId;
-        --_options[previous].voteCount;
-        uint256 newCount = ++_options[optionId].voteCount;
+        // Re-submitting the identical set is refused rather than treated as a
+        // no-op. The two are indistinguishable in the tally, but they are not
+        // indistinguishable to the caller: a client that sent the current set
+        // has usually lost track of the vote it already holds, and telling it so
+        // is more useful than charging it gas to change nothing. Under
+        // multi-select this is a comparison of the whole set, which the stored
+        // ascending order makes a direct element-by-element check.
+        if (_sameSet(previous, optionIds)) {
+            revert SameOption(optionIds[0]);
+        }
+
+        uint256 power = votingPowerOf[msg.sender];
+
+        // Effects: clear the old set, then record the new one, leaving the stake
+        // exactly where it is.
+        _clearVote(msg.sender, previous);
+        _recordVote(msg.sender, optionIds, power);
 
         // Interactions: none. No stake is moved, so nothing to guard against
         // here beyond the guard every write path carries.
-
-        emit VoteChanged(msg.sender, previous, optionId);
-        emit VoteCast(msg.sender, optionId, newCount);
     }
 
     /// @notice Withdraw a vote and reclaim the stake immediately.
@@ -539,22 +715,168 @@ contract Poll is Ownable, ReentrancyGuard {
         if (phase != Phase.Voting) revert InvalidPhase(Phase.Voting, phase);
         if (block.timestamp >= endsAt && votingEndedAt == 0) revert PollAlreadyEnded(endsAt);
 
-        uint256 previous = votedFor[msg.sender];
-        if (previous == 0) revert HasNotVoted(msg.sender);
+        uint256[] storage previous = _votedOptions[msg.sender];
+        if (previous.length == 0) revert HasNotVoted(msg.sender);
 
         uint256 amount = stakeOf[msg.sender];
 
         // Checks-Effects-Interactions: every piece of state is cleared BEFORE
         // the transfer, so a reentrant caller finds nothing left to take.
-        delete votedFor[msg.sender];
+        _clearVote(msg.sender, previous);
         stakeOf[msg.sender] = 0;
         totalStaked -= amount;
-        --_options[previous].voteCount;
 
         (bool ok, ) = payable(msg.sender).call{ value: amount }("");
         if (!ok) revert TransferFailed();
 
         emit VoteWithdrawn(msg.sender, amount);
+    }
+
+    // ---------------------------------------------------------------------
+    // Vote recording (internal)
+    // ---------------------------------------------------------------------
+
+    /// @dev The voting power an address brings to its vote.
+    ///
+    ///      Equal-weight mechanisms contribute 1. A weighted poll reads the
+    ///      assigned table and REFUSES an address the creator never listed:
+    ///      treating an unlisted address as weight 0 would silently accept a
+    ///      transaction that the voter reasonably expected to count, and the
+    ///      resulting "I voted but nothing changed" is worse than a revert that
+    ///      names the problem.
+    function _powerFor(address voter) private view returns (uint256) {
+        if (!config.weighted) {
+            return 1;
+        }
+
+        uint256 weight = weightOf[voter];
+        if (weight == 0) revert NoWeightAssigned(voter);
+
+        return weight;
+    }
+
+    /// @dev Validates a submitted option set and adds it to the tally.
+    ///
+    ///      Structured as three passes over the input rather than one
+    ///      interleaved pass: validate, count, then store. The single-pass
+    ///      version needed a sorted in-place insert with a duplicate scan, which
+    ///      pushed the function past the EVM's 16-slot stack ("stack too deep")
+    ///      and was harder to read besides. Three simple loops also mean a
+    ///      rejected vote has provably touched nothing, because counting only
+    ///      starts once validation has finished.
+    function _recordVote(address voter, uint256[] calldata optionIds, uint256 power) private {
+        uint256 length = optionIds.length;
+
+        if (length == 0) revert NoSelections();
+
+        // A single-select poll accepts exactly one option. Rejecting a longer
+        // set here rather than truncating it means a client that sends the wrong
+        // shape is told so, instead of having part of its intent silently
+        // discarded.
+        if (!config.multiSelect && length != 1) {
+            revert TooManySelections(1, length);
+        }
+        if (config.multiSelect && length > config.maxSelections) {
+            revert TooManySelections(config.maxSelections, length);
+        }
+
+        // Pass 1: every id must be a real option.
+        for (uint256 i = 0; i < length; ++i) {
+            uint256 optionId = optionIds[i];
+            if (optionId == 0 || optionId > optionCount) revert UnknownOption(optionId);
+        }
+
+        // Pass 2: no duplicates. `[1,1]` must not count as two votes for option
+        // 1, and the check has to happen before any counting so that a rejected
+        // vote leaves the tally untouched.
+        for (uint256 i = 0; i < length; ++i) {
+            for (uint256 j = i + 1; j < length; ++j) {
+                if (optionIds[i] == optionIds[j]) revert DuplicateSelection(optionIds[i]);
+            }
+        }
+
+        // Pass 3: count, and record the set in ascending order so that "the same
+        // set" is a direct comparison for any later reader. Insertion sort over
+        // the caller's array copy; the caller's own array is not mutated.
+        uint256[] memory sorted = new uint256[](length);
+        for (uint256 i = 0; i < length; ++i) {
+            sorted[i] = optionIds[i];
+        }
+        for (uint256 i = 1; i < length; ++i) {
+            uint256 key = sorted[i];
+            uint256 j = i;
+            while (j > 0 && sorted[j - 1] > key) {
+                sorted[j] = sorted[j - 1];
+                --j;
+            }
+            sorted[j] = key;
+        }
+
+        uint256[] storage held = _votedOptions[voter];
+        uint256 newTotal;
+
+        for (uint256 i = 0; i < length; ++i) {
+            held.push(sorted[i]);
+            newTotal = (_options[sorted[i]].voteCount += power);
+        }
+
+        votingPowerOf[voter] = power;
+
+        emit VoteRecorded(voter, sorted, power, newTotal);
+        emit PowerCounted(voter, power, power);
+    }
+
+    /// @dev Whether `candidate` is the set already held by `voter`.
+    ///
+    ///      A set comparison rather than a first-element comparison: under
+    ///      multi-select, changing 1 to 2 inside a {1,3} vote is a real change
+    ///      even though the first element is untouched, and treating it as
+    ///      "same" would silently refuse a legitimate edit.
+    ///
+    ///      Deliberately order-independent on the caller's side. The stored set
+    ///      is always ascending, but the submitted one is in whatever order the
+    ///      client chose, so {2,1} must be recognised as the same vote as {1,2}.
+    ///      Walking the submitted set and looking for each member in the stored
+    ///      one is O(n*m) with both n and m bounded by `maxSelections`.
+    function _sameSet(
+        uint256[] storage held,
+        uint256[] calldata candidate
+    ) private view returns (bool) {
+        if (held.length != candidate.length) {
+            return false;
+        }
+
+        for (uint256 i = 0; i < candidate.length; ++i) {
+            bool found;
+            for (uint256 j = 0; j < held.length; ++j) {
+                if (held[j] == candidate[i]) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// @dev Removes an address's current set from the tally and clears it.
+    ///
+    ///      Takes the storage pointer rather than re-reading it so the caller
+    ///      can pass the reference it already resolved; `delete` on the same
+    ///      reference is what guarantees the array is actually emptied.
+    function _clearVote(address voter, uint256[] storage held) private {
+        uint256 power = votingPowerOf[voter];
+        uint256 length = held.length;
+
+        for (uint256 i = 0; i < length; ++i) {
+            _options[held[i]].voteCount -= power;
+        }
+
+        delete _votedOptions[voter];
+        votingPowerOf[voter] = 0;
     }
 
     // ---------------------------------------------------------------------
@@ -619,9 +941,38 @@ contract Poll is Ownable, ReentrancyGuard {
     // Views
     // ---------------------------------------------------------------------
 
+    /// @notice The first option the address currently backs; 0 when it backs none.
+    ///
+    /// @dev Kept so that every existing single-select reader — the indexer, the
+    ///      UI, the property test — keeps working without knowing that the
+    ///      storage became a set. It is a VIEW over `_votedOptions`, not a second
+    ///      copy, so it cannot disagree with `votedOptions()`.
+    ///
+    ///      It is deliberately NOT called `votedFor` in storage any more: a
+    ///      reader that needs the whole set must call `votedOptions()`, and
+    ///      having the name of the old scalar answer only the first element
+    ///      would invite the bug this refactor exists to make impossible.
+    function votedFor(address voter) external view returns (uint256) {
+        uint256[] storage held = _votedOptions[voter];
+        return held.length == 0 ? 0 : held[0];
+    }
+
+    /// @notice Every option the address currently backs, ascending; empty when none.
+    /// @dev The authoritative answer under multi-select. `votedFor` is its first
+    ///      element for readers that only understand one option.
+    function votedOptions(address voter) external view returns (uint256[] memory) {
+        return _votedOptions[voter];
+    }
+
     /// @notice Full option list plus the running total of valid votes.
     /// @dev The off-chain indexer compares this against its own aggregate, so
     ///      the two can be asserted equal in a single round trip.
+    ///
+    ///      The total is the sum of the per-option counts. Under multi-select
+    ///      that means one address can contribute to more than one option, so
+    ///      the total counts <em>selections</em>, not voters. This is the
+    ///      definition the indexer must reproduce, and the reason
+    ///      `voteCount` per option — not the total — is what a quorum reads.
     function results() external view returns (Option[] memory list, uint256 total) {
         uint256 count = optionCount;
         list = new Option[](count);
@@ -641,33 +992,56 @@ contract Poll is Ownable, ReentrancyGuard {
     }
 
     /// @notice Everything the UI needs about one address, in one round trip.
-    /// @dev Returned as a struct rather than separate getters so a caller
-    ///      cannot observe a half-updated view across two calls.
     ///
-    ///      `whitelisted` stays the raw mapping answer even when `openToAll` is
+    /// @dev A STRUCT rather than a tuple. The tuple version reached seven
+    ///      return values, which does not compile: the ABI decoder needs a stack
+    ///      slot per value and the EVM's is 16 deep, so `voterState` hit "stack
+    ///      too deep". Rather than shrink the return (each field answers a
+    ///      different question and dropping one just moves the problem to the
+    ///      caller) or turn on `viaIR` for the whole project, the values move
+    ///      into a struct — which is also what the doc comment above has claimed
+    ///      this function does since it was written.
+    struct VoterState {
+        /// @dev The raw mapping answer, even on an open poll. See below.
+        bool whitelisted;
+        /// @dev The first option backed, or 0. Kept for readers that predate
+        ///      multi-select.
+        uint256 currentOptionId;
+        /// @dev Stake currently held; 0 when the address holds no vote.
+        uint256 stake;
+        /// @dev True when the address holds a vote right now.
+        bool marked;
+        /// @dev The derived "may this address vote" decision.
+        bool canVote;
+        /// @dev The whole set, ascending. One element under single-select, so
+        ///      the UI has one shape to render.
+        uint256[] selections;
+        /// @dev How much power this address's vote counted for.
+        uint256 power;
+    }
+
+    /// @dev `whitelisted` stays the raw mapping answer even when `openToAll` is
     ///      true, and `canVote` is the derived decision. Collapsing the two into
     ///      one field would make "this address is on the list" and "this address
     ///      may vote" indistinguishable, and the UI has to explain which one
     ///      applies: an open poll that rejected someone has failed for a reason
     ///      that has nothing to do with the whitelist.
-    function voterState(
-        address voter
-    )
-        external
-        view
-        returns (
-            bool whitelisted,
-            uint256 currentOptionId,
-            uint256 stake,
-            bool marked,
-            bool canVote
-        )
-    {
-        whitelisted = isWhitelisted[voter];
-        currentOptionId = votedFor[voter];
-        stake = stakeOf[voter];
-        marked = currentOptionId != 0;
-        canVote = openToAll || whitelisted;
+    function voterState(address voter) external view returns (VoterState memory state) {
+        uint256[] storage held = _votedOptions[voter];
+
+        state.whitelisted = isWhitelisted[voter];
+        state.currentOptionId = held.length == 0 ? 0 : held[0];
+        state.stake = stakeOf[voter];
+        state.marked = held.length != 0;
+        state.canVote = openToAll || whitelistedFor(voter);
+        state.selections = held;
+        state.power = votingPowerOf[voter];
+    }
+
+    /// @dev Split out because `voterState` reads the mapping twice and the
+    ///      compiler's stack accounting is sensitive to inline re-reads here.
+    function whitelistedFor(address voter) private view returns (bool) {
+        return isWhitelisted[voter];
     }
 
     // ---------------------------------------------------------------------

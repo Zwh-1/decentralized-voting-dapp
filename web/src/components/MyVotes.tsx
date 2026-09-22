@@ -159,7 +159,7 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
   // until then there is nothing to show.
   const markedAddresses = indexedUsable
     ? indexedAddresses
-    : scanned.filter((_, index) => voterStates.data?.[index]?.result?.[3] === true);
+    : scanned.filter((_, index) => voterStates.data?.[index]?.result?.marked === true);
 
   const summaries = useReadContracts({
     contracts: markedAddresses.flatMap((poll) => [

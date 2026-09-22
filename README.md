@@ -44,7 +44,7 @@ flowchart LR
     subgraph app["Next.js 层（单个进程，可随时丢弃重建）"]
         direction TB
         I["只读索引器<br/>跟随工厂 + 所有投票<br/>游标 + 确认数 + 重组修复"]
-        DB[("MySQL（可选）<br/>UNIQUE(tx_hash, log_index)")]
+        DB[("MySQL（可选）<br/>UNIQUE(tx_hash, log_index, option_id)")]
         API["Route Handlers<br/>只有 GET，只有 SELECT"]
         UI["投票界面<br/>列表 / 创建 / 投票 / 我的投票<br/>wagmi + 双侧比对徽章"]
         I -- "一个事务内<br/>写事件 + 推进游标" --> DB
@@ -509,7 +509,28 @@ pnpm indexer:check-consistency                 # 回到 200/200，退出码 0
 | 健康（197 票）                   | 5                 | 3              | `consistent`    | 0      |
 | 同样的落后 + 删掉 1 行（196 票） | 5                 | 3              | **`divergent`** | **1**  |
 
-第二行是关键：故障没有被"还在确认窗口里"这块遮羞布盖过去。差异被定位到具体投票的选项 2，`pending: 1` 说明即使把那 1 票加回来也仍然对不上。
+#### 机制化之后的负向对照：篡改一票的票权
+
+删一行检验的是"行数对不对"。加权投票引入的是另一个聚合——`option_tally` 改为 `SUM(power)` 而非 `COUNT(*)`——所以还需要一个检验"**行数对但数值错**"的对照，否则一个把 `power` 全部当成 1 的实现会顺利通过上面那条检查。
+
+`pnpm indexer:tamper-drill` 把一票的 `power` 加 1，索引仍然有正确**行数**、只是数值偏了 1：
+
+```bash
+pnpm indexer:tamper-drill          # 篡改 1 行，明确打印它动了哪一行
+pnpm indexer:check-consistency
+# 退出码 1，且差异是数值而非行数：
+#   "divergentPolls": 1
+#   "onChainTotal": 200, "indexedTotal": 201
+#   "discrepancies": [{ "optionId": 1, "onChain": 67, "indexed": 68, "pending": 0 }]
+
+# 恢复：直接从链上重放（索引是缓存，这一点正是它的设计承诺）
+pnpm indexer:migrate && pnpm indexer:drain
+pnpm indexer:check-consistency     # 回到 0 处偏差，退出码 0
+```
+
+这一轮实测中：篡改后 `divergentPolls: 1`、`200 vs 201`、定位到 `optionId 1`；重放 416 行事件后恢复 `divergentPolls: 0`。**同一次重放同时验证了两件事**——检查器会报警，且索引确实能从链上完整重建。
+
+回到"索引合法落后"那张表的第二行：故障没有被"还在确认窗口里"这块遮羞布盖过去。差异被定位到具体投票的选项 2，`pending: 1` 说明即使把那 1 票加回来也仍然对不上。
 
 界面上这三种状态长这样（均为无头浏览器实拍）：
 
@@ -526,7 +547,7 @@ mysql -u root -p voting -e "UPDATE sync_cursor SET last_block = 0;"
 pnpm indexer:drain
 # 期望输出：totalEventRowsSeen = 404, inserted = 0, duplicatesIgnored = 404
 pnpm indexer:check-consistency
-# 票数必须仍是 200。如果变成 400，说明 UNIQUE(tx_hash, log_index) 失效了。
+# 票数必须仍是 200。如果变成 400，说明 UNIQUE(tx_hash, log_index, option_id) 失效了。
 ```
 
 > 测量前请先停掉应用（或设 `INDEXER_ENABLED=false`）：否则后台循环会抢先把游标推回链头，`drain` 就只能看到 `rounds: 0`。
@@ -1033,9 +1054,9 @@ CONFIRMATIONS=5
 │   ├── scripts/
 │   │   ├── lib/cdp.ts             # 从 ui-drill 抽出的 CDP 传输层
 │   │   └── …                      # migrate / drain / check-consistency / reorg-drill /
-│   │                              #   refund-drill / ui-drill
-│   └── test/                      # 327 个单测，不需要链或数据库
-├── docs/aegis/                    # 设计规格、基线、29 条 ADR、实测校正记录
+│   │                              #   refund-drill / tamper-drill / ui-drill
+│   └── test/                      # 360 个单测，不需要链或数据库
+├── docs/aegis/                    # 设计规格、基线、34 条 ADR、实测校正记录
 ├── docker-compose.yml             # 可复现的 MySQL（3307，避让本机 3306）
 └── .github/workflows/ci.yml       # 5 条流水线
 ```

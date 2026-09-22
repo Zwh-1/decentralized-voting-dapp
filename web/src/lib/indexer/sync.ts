@@ -7,6 +7,7 @@ import {
   newPollAddresses,
   type DecodedEvents,
   type PollRow,
+  type VoteRow,
 } from "./decode";
 import { planNextRange, planReorgRewind } from "./plan";
 
@@ -110,6 +111,50 @@ export async function readCursor(pool: Pool | PoolConnection): Promise<bigint | 
  * than from `polls` would lose the association between an address and the block
  * it was created in.
  */
+/**
+ * Which (poll, voter) pairs already have a recorded vote in the index.
+ *
+ * Used to label an incoming `VoteRecorded` as `cast` or `changed`. Bounded by
+ * the voters in one batch rather than by the table, so this stays a small `IN`
+ * query even after the index has grown large.
+ *
+ * A voter who previously WITHDREW is deliberately treated as having no prior
+ * record, because on chain they have none: `withdrawVote` clears the selection,
+ * so a later vote is a first vote again and the activity log should say so. That
+ * is why the query filters withdrawals out rather than counting any row.
+ */
+async function _votersAlreadyRecorded(
+  connection: PoolConnection | Pool,
+  votes: readonly VoteRow[],
+): Promise<Set<string>> {
+  const pairs = new Set<string>();
+  for (const row of votes) {
+    if (row.eventType !== "withdrawn") {
+      pairs.add(`${row.pollAddress}|${row.voter}`);
+    }
+  }
+
+  if (pairs.size === 0) {
+    return new Set();
+  }
+
+  const polls = [...new Set([...pairs].map((pair) => pair.split("|")[0]!))];
+  const voters = [...new Set([...pairs].map((pair) => pair.split("|")[1]!))];
+
+  const [rows] = await connection.query<
+    (RowDataPacket & { poll_address: string; voter: string })[]
+  >(
+    `SELECT DISTINCT poll_address, voter
+       FROM votes
+      WHERE event_type <> 'withdrawn'
+        AND poll_address IN (?)
+        AND voter IN (?)`,
+    [polls, voters],
+  );
+
+  return new Set(rows.map((row) => `${row.poll_address.toLowerCase()}|${row.voter.toLowerCase()}`));
+}
+
 export async function readKnownPolls(
   pool: Pool | PoolConnection,
   factoryAddress?: string,
@@ -162,6 +207,22 @@ export async function persistBatch(
 
     let inserted = 0;
 
+    // `cast` versus `changed` is not in the event — the contract emits one
+    // `VoteRecorded` for both — so it is derived here, against what the index
+    // already holds for each (poll, voter). Done BEFORE the inserts so the rows
+    // being written in this batch cannot make a change look like a first vote.
+    //
+    // A voter absent from this map is voting for the first time in this poll and
+    // keeps `cast`. A voter present is changing, and every row of their new set
+    // is relabelled. Withdrawals are untouched: they are their own event and
+    // their own state.
+    const priorVoters = await _votersAlreadyRecorded(connection, events.votes);
+    const votesWithDerivedType = events.votes.map((row) =>
+      row.eventType === "cast" && priorVoters.has(`${row.pollAddress}|${row.voter}`)
+        ? { ...row, eventType: "changed" as const }
+        : row,
+    );
+
     const batches: { sql: string; rows: unknown[][] }[] = [
       {
         sql: `INSERT IGNORE INTO polls
@@ -198,13 +259,14 @@ export async function persistBatch(
       },
       {
         sql: `INSERT IGNORE INTO votes
-                (poll_address, voter, option_id, event_type, block_number, tx_hash, log_index)
+                (poll_address, voter, option_id, event_type, power, block_number, tx_hash, log_index)
               VALUES ?`,
-        rows: events.votes.map((row) => [
+        rows: votesWithDerivedType.map((row) => [
           row.pollAddress,
           row.voter,
           row.optionId,
           row.eventType,
+          row.power,
           row.blockNumber.toString(),
           row.txHash,
           row.logIndex,

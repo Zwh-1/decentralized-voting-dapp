@@ -37,10 +37,10 @@ export const deployments: Record<number, Deployment> = {
   },
   31337: {
     chainId: 31337,
-    factory: "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
-    implementation: "0xcafac3dd18ac6c6e92c921884f9e4176737c052c",
+    factory: "0x773330693cb7d5d233348e25809770a32483a940",
+    implementation: "0xfe0fbbd1a28b25d9a4719902490fac432e910cab",
     deployer: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
-    blockNumber: 2,
+    blockNumber: 824,
   },
 };
 

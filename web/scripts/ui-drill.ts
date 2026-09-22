@@ -582,14 +582,17 @@ async function main(): Promise<number> {
       }),
     ]);
 
-    // `voterState` returns (whitelisted, currentOptionId, stake, marked, canVote).
-    // "Has voted" is no longer a boolean on chain: a voter can withdraw, so the
-    // question is whether an option is currently backed.
-    const hasVoted = voter[1] !== 0n;
+    // `voterState` returns a struct: whitelisted, currentOptionId, stake, marked,
+    // canVote, selections, power. "Has voted" is no longer a boolean on chain: a
+    // voter can withdraw, so the question is whether an option is currently
+    // backed — which is `marked`, the contract's own answer, rather than a
+    // re-derivation from `currentOptionId`.
+    const hasVoted = voter.marked;
     // Which option the chain says this account backs, or null for none. Read from
-    // the same tuple as `hasVoted`, so the two can never disagree about which
+    // the same struct as `hasVoted`, so the two can never disagree about which
     // block they describe.
-    const votedForOption: number | null = voter[1] === 0n ? null : Number(voter[1]);
+    const votedForOption: number | null =
+      voter.currentOptionId === 0n ? null : Number(voter.currentOptionId);
 
     const PHASE_VOTING = 1;
     const PHASE_ENDED = 2;
@@ -605,10 +608,10 @@ async function main(): Promise<number> {
       abi: pollAbi,
       functionName: "openToAll",
     });
-    // `voterState`'s fifth field is the contract's own answer to "may this address
+    // `voterState`'s `canVote` is the contract's own answer to "may this address
     // vote", so the drill asserts against the authority rather than re-deriving
     // the rule. Reading it also keeps the check honest if the rule changes again.
-    const chainSaysCanVote = voter[4];
+    const chainSaysCanVote = voter.canVote;
     const chainSaysVotable = chainSaysCanVote && !hasVoted && Number(phase) === PHASE_VOTING;
     const chainSaysRefundable = Number(phase) === PHASE_ENDED && stake > 0n;
 
@@ -1215,7 +1218,7 @@ async function main(): Promise<number> {
             args: [account],
           }),
         ]);
-        const votedAfter = voterAfter[1] !== 0n;
+        const votedAfter = voterAfter.marked;
         check(
           "链上没有任何变化 was true: voterState and stakeOf are what they were before the click",
           votedAfter === hasVoted && stakeAfter === stake,
@@ -1349,7 +1352,7 @@ async function main(): Promise<number> {
           functionName: "voterState",
           args: [account],
         });
-        const newOption = Number(moved[1]);
+        const newOption = Number(moved.currentOptionId);
         check(
           "the chain moved the vote to the option whose button was clicked",
           newOption === Number(target.optionId),
@@ -1364,8 +1367,8 @@ async function main(): Promise<number> {
         // vote, and the contract must not charge for it beyond gas.
         check(
           "a change did not add a second stake",
-          moved[2] === stake,
-          `stake before=${stake} wei, after=${moved[2]} wei`,
+          moved.stake === stake,
+          `stake before=${stake} wei, after=${moved.stake} wei`,
         );
 
         const after = await browser.evaluate<PageState>(sessionId, READ_PAGE);

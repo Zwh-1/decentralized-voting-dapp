@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 /**
  * The consistency check reads three things that only mean something together: the
  * index's tally, the cursor that tally was committed with, and a single height on
@@ -115,13 +115,14 @@ describe("readIndexSnapshot", () => {
   });
 });
 
-/** A VoteCast for candidate 1 at the given block, encoded against the real ABI. */
-function voteCast(blockNumber: bigint) {
-  const item = getAbiItem({ abi: pollAbi, name: "VoteCast" }) as unknown as AbiEvent;
+/** A VoteRecorded for option 1 at the given block, encoded against the real ABI. */
+function voteRecorded(blockNumber: bigint) {
+  const item = getAbiItem({ abi: pollAbi, name: "VoteRecorded" }) as unknown as AbiEvent;
   const args: Record<string, unknown> = {
     voter: `0x${"11".repeat(20)}`,
-    optionId: 1n,
-    newCount: 68n,
+    optionIds: [1n],
+    power: 1n,
+    newTotal: 68n,
   };
   const indexedArgs = Object.fromEntries(
     item.inputs.filter((i) => i.indexed).map((i) => [i.name, args[i.name as string]]),
@@ -135,7 +136,7 @@ function voteCast(blockNumber: bigint) {
     logIndex: 0,
     topics: encodeEventTopics({
       abi: pollAbi,
-      eventName: "VoteCast",
+      eventName: "VoteRecorded",
       args: indexedArgs as never,
     }),
     data: encodeAbiParameters(
@@ -158,7 +159,7 @@ describe("checkConsistency", () => {
         ],
         201n,
       ],
-      getLogs: async () => [voteCast(407n)],
+      getLogs: async () => [voteRecorded(407n)],
     } as unknown as PublicClient;
 
     const check = await checkConsistency({

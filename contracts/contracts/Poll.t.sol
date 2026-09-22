@@ -6,6 +6,7 @@ import { Test } from "forge-std/Test.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 import { Poll } from "./Poll.sol";
+import { PollMechanisms } from "./PollMechanisms.sol";
 import { CEIOnlyRefund } from "./test/CEIOnlyRefund.sol";
 import { GuardOnlyRefund } from "./test/GuardOnlyRefund.sol";
 import { RefundAttacker } from "./test/RefundAttacker.sol";
@@ -62,7 +63,30 @@ contract PollTest is Test {
         cids[1] = CID_B;
 
         created = new Poll();
-        created.initialize(creator_, "Which one?", cids, endsAt_, openToAll_);
+        created.initialize(creator_, "Which one?", cids, endsAt_, _config(openToAll_));
+    }
+
+    /// @dev The default mechanism set with admission chosen, which is what most
+    ///      of this suite is about. Mechanism-specific tests build their own
+    ///      config so the difference is visible at the call site.
+    function _config(bool openToAll_) internal pure returns (PollMechanisms.PollConfig memory) {
+        PollMechanisms.PollConfig memory config = PollMechanisms.defaultConfig(0);
+        config.openToAll = openToAll_;
+        return config;
+    }
+
+    /// @dev A one-element option array, for the many tests that vote for a
+    ///      single option now that `vote` takes a set.
+    function _one(uint256 optionId) internal pure returns (uint256[] memory ids) {
+        ids = new uint256[](1);
+        ids[0] = optionId;
+    }
+
+    /// @dev A two-element option array.
+    function _two(uint256 first, uint256 second) internal pure returns (uint256[] memory ids) {
+        ids = new uint256[](2);
+        ids[0] = first;
+        ids[1] = second;
     }
 
     /// @dev A poll anyone may vote in, with no whitelist at all.
@@ -88,7 +112,7 @@ contract PollTest is Test {
     function _vote(address voter, uint256 optionId) internal {
         vm.deal(voter, 1 ether);
         vm.prank(voter);
-        poll.vote{ value: STAKE }(optionId);
+        poll.vote{ value: STAKE }(_one(optionId));
     }
 
     function _counts() internal view returns (uint256 first, uint256 second, uint256 total) {
@@ -120,7 +144,7 @@ contract PollTest is Test {
         cids[1] = CID_B;
 
         vm.expectRevert(Poll.AlreadyInitialized.selector);
-        poll.initialize(alice, "Hijacked", cids, FAR_FUTURE, false);
+        poll.initialize(alice, "Hijacked", cids, FAR_FUTURE, _config(false));
     }
 
     function test_Initialize_RevertsWithTooFewOptions() public {
@@ -130,7 +154,7 @@ contract PollTest is Test {
         Poll fresh = new Poll();
 
         vm.expectRevert(abi.encodeWithSelector(Poll.TooFewOptions.selector, 2, 1));
-        fresh.initialize(creator, "Q", cids, FAR_FUTURE, false);
+        fresh.initialize(creator, "Q", cids, FAR_FUTURE, _config(false));
     }
 
     function test_Initialize_RevertsOnPastDeadline() public {
@@ -142,7 +166,7 @@ contract PollTest is Test {
 
         vm.warp(1_800_000_000);
         vm.expectRevert(abi.encodeWithSelector(Poll.DeadlineNotInFuture.selector, 1_700_000_000));
-        fresh.initialize(creator, "Q", cids, 1_700_000_000, false);
+        fresh.initialize(creator, "Q", cids, 1_700_000_000, _config(false));
     }
 
     function test_Initialize_RevertsOnEmptyQuestion() public {
@@ -153,7 +177,7 @@ contract PollTest is Test {
         Poll fresh = new Poll();
 
         vm.expectRevert(Poll.EmptyQuestion.selector);
-        fresh.initialize(creator, "", cids, FAR_FUTURE, false);
+        fresh.initialize(creator, "", cids, FAR_FUTURE, _config(false));
     }
 
     // ---------------------------------------------------------------------
@@ -271,7 +295,7 @@ contract PollTest is Test {
     // ---------------------------------------------------------------------
 
     /// @dev The floor is enforced at removal time, so a poll can never be
-    ///      reduced below two options — the `startPoll` guard is unreachable
+    ///      reduced below two options �?the `startPoll` guard is unreachable
     ///      through `removeOption` and is covered here as defence in depth.
     ///      What matters for the reader is the guarantee, not the branch.
     function test_RemoveOption_CanNeverLeaveFewerThanTwoOptions() public {
@@ -432,8 +456,13 @@ contract PollTest is Test {
         _openPoll();
         _vote(alice, 1);
 
-        vm.expectEmit(true, true, false, true, address(poll));
-        emit Poll.VoteCast(bob, 1, 2);
+        // `VoteRecorded` carries the whole submitted set, the power it counted
+        // for, and the running total for the last option in the set. The total
+        // is per-option rather than poll-wide, and under multi-select that is
+        // the meaningful number: one address can add to two options at once, so
+        // a single "poll total" would not say which option moved.
+        vm.expectEmit(true, false, false, true, address(poll));
+        emit Poll.VoteRecorded(bob, _one(1), 1, 2);
 
         _vote(bob, 1);
     }
@@ -442,8 +471,12 @@ contract PollTest is Test {
         _openPoll();
         _vote(alice, 2);
 
-        (bool whitelisted, uint256 current, uint256 stake, bool marked, bool canVote) = poll
-            .voterState(alice);
+        Poll.VoterState memory state = poll.voterState(alice);
+        bool whitelisted = state.whitelisted;
+        uint256 current = state.currentOptionId;
+        uint256 stake = state.stake;
+        bool marked = state.marked;
+        bool canVote = state.canVote;
 
         assertTrue(whitelisted, "whitelisted");
         assertEq(current, 2, "current option");
@@ -469,9 +502,11 @@ contract PollTest is Test {
         address stranger = makeAddr("stranger");
         vm.deal(stranger, 1 ether);
         vm.prank(stranger);
-        open.vote{ value: STAKE }(1);
+        open.vote{ value: STAKE }(_one(1));
 
-        (, , , bool marked, bool canVote) = open.voterState(stranger);
+        Poll.VoterState memory strangerState = open.voterState(stranger);
+        bool marked = strangerState.marked;
+        bool canVote = strangerState.canVote;
         assertTrue(marked, "the unlisted address holds a vote");
         assertTrue(canVote, "and it may vote");
     }
@@ -486,11 +521,11 @@ contract PollTest is Test {
 
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        open.vote{ value: STAKE }(1);
+        open.vote{ value: STAKE }(_one(1));
 
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(Poll.AlreadyVoted.selector, alice));
-        open.vote{ value: STAKE }(2);
+        open.vote{ value: STAKE }(_one(2));
     }
 
     function test_WhitelistPoll_StillRejectsAnUnlistedAddress() public {
@@ -503,7 +538,7 @@ contract PollTest is Test {
 
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(Poll.NotWhitelisted.selector, stranger));
-        poll.vote{ value: STAKE }(1);
+        poll.vote{ value: STAKE }(_one(1));
     }
 
     function test_OpenToAll_IsRecordedAndNotSettable() public {
@@ -517,11 +552,13 @@ contract PollTest is Test {
     function test_OpenPoll_VoterStateReportsTheUnlistedAddressHonestly() public {
         // The UI has to explain WHY someone cannot vote, and on an open poll the
         // answer is never "you are not whitelisted". `whitelisted` therefore
-        // stays the raw mapping answer (false) while `canVote` is true — the two
+        // stays the raw mapping answer (false) while `canVote` is true �?the two
         // fields must not be collapsed into one.
         Poll open = _newOpenPoll(creator, FAR_FUTURE);
 
-        (bool whitelisted, , , , bool canVote) = open.voterState(alice);
+        Poll.VoterState memory openState = open.voterState(alice);
+        bool whitelisted = openState.whitelisted;
+        bool canVote = openState.canVote;
 
         assertFalse(whitelisted, "alice is genuinely not on the list");
         assertTrue(canVote, "but an open poll admits her anyway");
@@ -541,13 +578,15 @@ contract PollTest is Test {
         vm.prank(creator);
         open.setWhitelist(one, true);
 
-        (bool whitelisted, , , , bool canVote) = open.voterState(alice);
+        Poll.VoterState memory openState = open.voterState(alice);
+        bool whitelisted = openState.whitelisted;
+        bool canVote = openState.canVote;
         assertTrue(whitelisted, "the list was written");
         assertTrue(canVote, "and the vote still works");
     }
 
     // ---------------------------------------------------------------------
-    // Change vote — the operation the old contract could not express
+    // Change vote �?the operation the old contract could not express
     // ---------------------------------------------------------------------
 
     function test_ChangeVote_MovesTheVoteAndKeepsTheStake() public {
@@ -557,7 +596,7 @@ contract PollTest is Test {
         uint256 balanceAfterVoting = alice.balance;
 
         vm.prank(alice);
-        poll.changeVote(2);
+        poll.changeVote(_one(2));
 
         (uint256 first, uint256 second, uint256 total) = _counts();
         assertEq(first, 0, "old option released");
@@ -573,11 +612,16 @@ contract PollTest is Test {
         _openPoll();
         _vote(alice, 1);
 
+        // A change is now expressed as a second `VoteRecorded` carrying the new
+        // set. The indexer takes the LAST recorded set for an address, so it
+        // does not need a distinct event type to tell "changed to 2" from
+        // "voted 1 then 2" — but it DOES need `VoteRecorded` to carry the whole
+        // set, which is why the set is one event rather than N per-option ones.
         vm.expectEmit(true, false, false, true, address(poll));
-        emit Poll.VoteChanged(alice, 1, 2);
+        emit Poll.VoteRecorded(alice, _one(2), 1, 1);
 
         vm.prank(alice);
-        poll.changeVote(2);
+        poll.changeVote(_one(2));
     }
 
     function test_ChangeVote_RevertsForNonVoter() public {
@@ -586,7 +630,7 @@ contract PollTest is Test {
         vm.expectRevert(abi.encodeWithSelector(Poll.HasNotVoted.selector, alice));
 
         vm.prank(alice);
-        poll.changeVote(1);
+        poll.changeVote(_one(1));
     }
 
     function test_ChangeVote_RevertsToTheSameOption() public {
@@ -596,7 +640,7 @@ contract PollTest is Test {
         vm.expectRevert(abi.encodeWithSelector(Poll.SameOption.selector, 1));
 
         vm.prank(alice);
-        poll.changeVote(1);
+        poll.changeVote(_one(1));
     }
 
     function test_ChangeVote_RevertsOnUnknownOption() public {
@@ -606,7 +650,7 @@ contract PollTest is Test {
         vm.expectRevert(abi.encodeWithSelector(Poll.UnknownOption.selector, 3));
 
         vm.prank(alice);
-        poll.changeVote(3);
+        poll.changeVote(_one(3));
     }
 
     function test_ChangeVote_RevertsAfterPollEnded() public {
@@ -620,7 +664,7 @@ contract PollTest is Test {
         );
 
         vm.prank(alice);
-        poll.changeVote(2);
+        poll.changeVote(_one(2));
     }
 
     /// @dev Changing repeatedly must not leak votes into the tally: this is the
@@ -632,7 +676,7 @@ contract PollTest is Test {
         for (uint256 round = 0; round < 10; ++round) {
             uint256 target = round % 2 == 0 ? 2 : 1;
             vm.prank(alice);
-            poll.changeVote(target);
+            poll.changeVote(_one(target));
         }
 
         (, , uint256 total) = _counts();
@@ -683,7 +727,7 @@ contract PollTest is Test {
 
         // Straight back in, this time for the other option.
         vm.prank(alice);
-        poll.vote{ value: STAKE }(2);
+        poll.vote{ value: STAKE }(_one(2));
 
         (uint256 first, uint256 second, uint256 total) = _counts();
         assertEq(first, 0, "old option still empty");
@@ -758,7 +802,7 @@ contract PollTest is Test {
 
         vm.deal(stranger, 1 ether);
         vm.prank(stranger);
-        poll.vote{ value: STAKE }(1);
+        poll.vote{ value: STAKE }(_one(1));
     }
 
     function test_Vote_RevertsOnSecondVote() public {
@@ -768,7 +812,7 @@ contract PollTest is Test {
         vm.expectRevert(abi.encodeWithSelector(Poll.AlreadyVoted.selector, alice));
 
         vm.prank(alice);
-        poll.vote{ value: STAKE }(2);
+        poll.vote{ value: STAKE }(_one(2));
     }
 
     function test_Vote_RevertsInSetupPhase() public {
@@ -810,11 +854,11 @@ contract PollTest is Test {
 
         vm.expectRevert(abi.encodeWithSelector(Poll.IncorrectStake.selector, STAKE, 0));
         vm.prank(alice);
-        poll.vote{ value: 0 }(1);
+        poll.vote{ value: 0 }(_one(1));
 
         vm.expectRevert(abi.encodeWithSelector(Poll.IncorrectStake.selector, STAKE, STAKE * 2));
         vm.prank(alice);
-        poll.vote{ value: STAKE * 2 }(1);
+        poll.vote{ value: STAKE * 2 }(_one(1));
     }
 
     // ---------------------------------------------------------------------
@@ -889,7 +933,7 @@ contract PollTest is Test {
 
         vm.deal(address(rejecting), 1 ether);
         vm.prank(address(rejecting));
-        poll.vote{ value: STAKE }(1);
+        poll.vote{ value: STAKE }(_one(1));
 
         vm.prank(creator);
         poll.endPoll();
@@ -1046,7 +1090,7 @@ contract PollTest is Test {
         );
     }
 
-    /// The negative control. Sweeping the balance — the old behaviour — pays the
+    /// The negative control. Sweeping the balance �?the old behaviour �?pays the
     /// forced ether to the creator. If this test ever stops failing against that
     /// implementation, the forced ether is not actually being injected and the
     /// positive test above proves nothing.
@@ -1119,14 +1163,14 @@ contract PollTest is Test {
     // Adversarial: reentrancy matrix (spec metric M-3)
     //
     // The new attack surface is `withdrawVote`, which returns ether while the
-    // poll is still open — so the attacker re-enters that path rather than
+    // poll is still open �?so the attacker re-enters that path rather than
     // `refund`.
     // ---------------------------------------------------------------------
 
     /// @dev While the poll is open, `refund` is simply out of phase, so an
     ///      attacker re-entering it from `receive()` gets a revert and nothing
     ///      else. The revert propagates out of the attacker's own `attack()`
-    ///      call because the attacker does not swallow the outer failure — so
+    ///      call because the attacker does not swallow the outer failure �?so
     ///      the assertion is the revert itself, plus the balance staying put.
     function test_Reentrancy_WithdrawAttackFailsAgainstPoll() public {
         _openPoll();
@@ -1142,7 +1186,7 @@ contract PollTest is Test {
         _vote(bob, 1);
 
         vm.deal(address(attacker), 1 ether);
-        attacker.castVote{ value: STAKE }(1);
+        attacker.castVote{ value: STAKE }(_one(1));
 
         assertEq(address(poll).balance, STAKE * 3, "three stakes held before the attack");
 
@@ -1169,7 +1213,7 @@ contract PollTest is Test {
         _vote(bob, 1);
 
         vm.deal(address(attacker), 1 ether);
-        attacker.castVote{ value: STAKE }(1);
+        attacker.castVote{ value: STAKE }(_one(1));
 
         vm.prank(creator);
         poll.endPoll();
@@ -1200,7 +1244,7 @@ contract PollTest is Test {
         _vote(bob, 1);
 
         vm.deal(address(attacker), 1 ether);
-        attacker.castVote{ value: STAKE }(1);
+        attacker.castVote{ value: STAKE }(_one(1));
 
         // The attacker's stake is the third one; withdraw it directly. Its
         // `receive()` will try to re-enter `refund()`, which is out of phase
@@ -1219,7 +1263,7 @@ contract PollTest is Test {
     // Four contracts, one attacker, identical stakes. The point is to measure
     // WHICH defence stops the attack instead of assuming either one does.
     // `Poll` is the production case; the other three are fixtures that make the
-    // contribution of each defence observable — in `Poll`, CEI alone would
+    // contribution of each defence observable �?in `Poll`, CEI alone would
     // already stop the attack, so a guard-only fixture is the only place the
     // guard's contribution can be seen at all.
     // ---------------------------------------------------------------------
@@ -1240,7 +1284,7 @@ contract PollTest is Test {
         _primeVote(address(target), bob, 1);
 
         vm.deal(address(attacker), 1 ether);
-        attacker.castVote{ value: STAKE }(1);
+        attacker.castVote{ value: STAKE }(_one(1));
 
         assertEq(address(target).balance, STAKE * 3, "three stakes held before the attack");
 
@@ -1262,7 +1306,7 @@ contract PollTest is Test {
         _primeVote(address(target), bob, 1);
 
         vm.deal(address(attacker), 1 ether);
-        attacker.castVote{ value: STAKE }(1);
+        attacker.castVote{ value: STAKE }(_one(1));
 
         attacker.attack();
 
@@ -1280,7 +1324,7 @@ contract PollTest is Test {
         _primeVote(address(target), bob, 1);
 
         vm.deal(address(attacker), 1 ether);
-        attacker.castVote{ value: STAKE }(1);
+        attacker.castVote{ value: STAKE }(_one(1));
 
         attacker.attack();
 
@@ -1313,7 +1357,14 @@ contract PollTest is Test {
     function _primeVote(address target, address voter, uint256 optionId) internal {
         vm.deal(voter, 1 ether);
         vm.prank(voter);
-        (bool ok, ) = target.call{ value: STAKE }(abi.encodeWithSignature("vote(uint256)", optionId));
+        // Encoded by signature rather than by type because the three comparison
+        // fixtures are distinct contract types sharing one shape, so there is no
+        // common interface to call through. The signature has to track `Poll`'s
+        // current one: a stale selector here would make the vote silently never
+        // happen, and the assertions below would then pass for the wrong reason.
+        (bool ok, ) = target.call{ value: STAKE }(
+            abi.encodeWithSignature("vote(uint256[])", _one(optionId))
+        );
         require(ok, "vote failed");
     }
 
@@ -1366,7 +1417,7 @@ contract PollTest is Test {
 
         for (uint256 i = 0; i < voterCount; ++i) {
             vm.prank(voters[i]);
-            poll.changeVote(2);
+            poll.changeVote(_one(2));
         }
 
         (uint256 first, uint256 second, uint256 total) = _counts();
@@ -1380,8 +1431,7 @@ contract PollTest is Test {
     // The rules commitment
     //
     // These tests are the contract half of the "anyone can check this" claim the
-    // interface makes. The property under test is NOT "the rules cannot change" —
-    // a creator is meant to be able to add options and build a whitelist during
+    // interface makes. The property under test is NOT "the rules cannot change" �?    // a creator is meant to be able to add options and build a whitelist during
     // Setup. It is that an edit is DETECTABLE: a third party must be able to tell
     // a poll opened as created from one that was reshaped first.
     //
@@ -1474,7 +1524,7 @@ contract PollTest is Test {
     /// @dev The order entries were added must not affect the hash.
     ///
     /// Without the sort in `_whitelistHashes`, adding the same three addresses in
-    /// a different order would produce a different hash — so a reader comparing a
+    /// a different order would produce a different hash �?so a reader comparing a
     /// poll against its creation state would see "the rules changed" for a set
     /// that is identical. Noise like that is what trains people to ignore the
     /// very signal this exists to provide.
@@ -1534,7 +1584,7 @@ contract PollTest is Test {
     /// identical rules do not share a fingerprint.
     ///
     /// Without `address(this)` in the preimage, a reviewer could copy one poll's
-    /// commitment into another and the comparison would still pass — which would
+    /// commitment into another and the comparison would still pass �?which would
     /// make the guarantee forgeable by the party it is meant to check.
     function test_RulesHash_DiffersBetweenPollsWithIdenticalRules() public {
         Poll other = _newPoll(creator, FAR_FUTURE);
@@ -1566,7 +1616,7 @@ contract PollTest is Test {
         cids[1] = CID_B;
 
         Poll other = new Poll();
-        other.initialize(creator, "a different question", cids, FAR_FUTURE, false);
+        other.initialize(creator, "a different question", cids, FAR_FUTURE, _config(false));
 
         assertTrue(poll.rulesHash() != other.rulesHash(), "the question must be covered");
     }
@@ -1582,7 +1632,7 @@ contract PollTest is Test {
 
     /// @dev The commitment must survive the poll being opened and voted in.
     ///
-    /// `startPoll` freezes the options, and voting changes the tally — but the
+    /// `startPoll` freezes the options, and voting changes the tally �?but the
     /// tally is deliberately NOT part of the hash. A reader checking the rules
     /// after the ballot must get a match; if votes were hashed in, every check on
     /// a live poll would report a mismatch and the signal would be useless.

@@ -22,8 +22,7 @@ type EventName =
   | "OptionAdded"
   | "OptionUpdated"
   | "OptionRemoved"
-  | "VoteCast"
-  | "VoteChanged"
+  | "VoteRecorded"
   | "VoteWithdrawn"
   | "Refunded"
   | "WhitelistUpdated"
@@ -148,9 +147,9 @@ describe("decodeLogs", () => {
     );
   });
 
-  it("decodes VoteCast as a 'cast' event", () => {
+  it("decodes a single-option VoteRecorded as one 'cast' row", () => {
     const result = decodeLogs([
-      makeLog("VoteCast", { voter: VOTER, optionId: 2n, newCount: 1n }, base),
+      makeLog("VoteRecorded", { voter: VOTER, optionIds: [2n], power: 1n, newTotal: 1n }, base),
     ]);
 
     assert.equal(result.votes.length, 1);
@@ -158,19 +157,59 @@ describe("decodeLogs", () => {
     assert.equal(result.votes[0]?.optionId, 2);
     assert.equal(result.votes[0]?.voter, VOTER.toLowerCase());
     assert.equal(result.votes[0]?.pollAddress, POLL_A.toLowerCase());
+    assert.equal(result.votes[0]?.power, "1", "equal weight contributes 1");
   });
 
-  it("decodes VoteChanged as a 'changed' event carrying the NEW option", () => {
+  it("expands a multi-option VoteRecorded into one row per option", () => {
+    // One log, one vote, several options. The rows must share the log's
+    // coordinates, because that shared position is the only thing that lets a
+    // reader reassemble the set: `optionId` alone cannot distinguish a
+    // multi-select vote for {1,3} from two separate single-option votes.
     const result = decodeLogs([
-      makeLog("VoteChanged", { voter: VOTER, fromOptionId: 1n, toOptionId: 3n }, base),
+      makeLog("VoteRecorded", { voter: VOTER, optionIds: [1n, 3n], power: 1n, newTotal: 1n }, base),
     ]);
 
-    assert.equal(result.votes.length, 1);
-    assert.equal(result.votes[0]?.eventType, "changed");
+    assert.equal(result.votes.length, 2, "one row per selected option");
+    assert.deepEqual(
+      result.votes.map((row) => row.optionId),
+      [1, 3],
+      "in the order the contract emitted them",
+    );
+    assert.equal(result.votes[0]?.logIndex, result.votes[1]?.logIndex, "same log, so same index");
+    assert.equal(result.votes[0]?.txHash, result.votes[1]?.txHash, "and same transaction");
+  });
+
+  it("records the power a weighted vote carried", () => {
+    const result = decodeLogs([
+      makeLog("VoteRecorded", { voter: VOTER, optionIds: [2n], power: 5n, newTotal: 5n }, base),
+    ]);
+
+    assert.equal(result.votes[0]?.power, "5", "the weight, not a headcount of one");
+    assert.equal(typeof result.votes[0]?.power, "string", "a 38-digit decimal, never a number");
+  });
+
+  it("labels every VoteRecorded a 'cast' and leaves the change to the writer", () => {
+    // The contract emits one shape for a first vote and for a change, so the
+    // decoder cannot tell them apart and must not pretend to. Labeling here
+    // would need index state the decoder does not have; `persistBatch` derives
+    // it against what is already stored. Pinning this prevents someone from
+    // "fixing" the decoder into a guess.
+    const first = decodeLogs([
+      makeLog("VoteRecorded", { voter: VOTER, optionIds: [1n], power: 1n, newTotal: 1n }, base),
+    ]);
+    const second = decodeLogs([
+      makeLog(
+        "VoteRecorded",
+        { voter: VOTER, optionIds: [3n], power: 1n, newTotal: 1n },
+        { ...base, logIndex: 9 },
+      ),
+    ]);
+
+    assert.equal(first.votes[0]?.eventType, "cast");
     assert.equal(
-      result.votes[0]?.optionId,
-      3,
-      "the current vote after a change is where it moved TO",
+      second.votes[0]?.eventType,
+      "cast",
+      "identical on the wire; the writer is what turns the second into 'changed'",
     );
   });
 
@@ -185,6 +224,11 @@ describe("decodeLogs", () => {
       result.votes[0]?.optionId,
       0,
       "a withdrawal carries an amount, not an option; 0 is the sentinel",
+    );
+    assert.equal(
+      result.votes[0]?.power,
+      "0",
+      "a withdrawal releases power rather than carrying it",
     );
   });
 
@@ -235,7 +279,11 @@ describe("decodeLogs", () => {
         { ...base, logIndex: 0 },
       ),
       makeLog("OptionAdded", { id: 1n, labelCID: "cid-a" }, { ...base, logIndex: 1 }),
-      makeLog("VoteCast", { voter: VOTER, optionId: 1n, newCount: 1n }, { ...base, logIndex: 2 }),
+      makeLog(
+        "VoteRecorded",
+        { voter: VOTER, optionIds: [1n], power: 1n, newTotal: 1n },
+        { ...base, logIndex: 2 },
+      ),
       makeLog("Refunded", { voter: VOTER, amount: 5n }, { ...base, logIndex: 3 }),
       makeLog("PhaseChanged", { from: 0, to: 1 }, { ...base, logIndex: 4 }),
       makeLog("WhitelistUpdated", { voter: VOTER, allowed: true }, { ...base, logIndex: 5 }),
@@ -268,7 +316,7 @@ describe("decodeLogs", () => {
 
   it("refuses a pending log rather than indexing a block number of null", () => {
     const pending = {
-      ...makeLog("VoteCast", { voter: VOTER, optionId: 1n, newCount: 1n }, base),
+      ...makeLog("VoteRecorded", { voter: VOTER, optionIds: [1n], power: 1n, newTotal: 1n }, base),
       blockNumber: null,
     };
 

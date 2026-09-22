@@ -172,14 +172,18 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
   const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
   const deadlinePassed = endsAt === undefined ? false : isPastDeadline({ endsAt, nowSeconds });
 
-  // `voterState` returns five values. The gate is `canVote`, NOT `whitelisted`:
+  // `voterState` returns a struct. The gate is `canVote`, NOT `whitelisted`:
   // on an `openToAll` poll every address may vote and none of them needs to be
   // on the list, so testing the raw mapping would refuse everyone.
-  const canVote = voter?.[4] === true;
-  const whitelisted = voter?.[0] === true;
-  const myOptionId = voter === undefined ? 0 : Number(voter[1]);
-  const myStake = voter?.[2];
-  const marked = voter?.[3] === true;
+  const canVote = voter?.canVote === true;
+  const whitelisted = voter?.whitelisted === true;
+  const myOptionId = voter === undefined ? 0 : Number(voter.currentOptionId);
+  const myStake = voter?.stake;
+  const marked = voter?.marked === true;
+  // The whole set, not just `currentOptionId`: under multi-select the ballot's
+  // "already chosen" marks have to cover every selected option, and reading only
+  // the first element would leave the others looking unselected.
+  const mySelections = voter?.selections ?? [];
 
   // ---- writes ----
   const { writeContract, data: hash, isPending, error: writeError } = useWriteContract();
@@ -224,7 +228,10 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
         address,
         abi: pollAbi,
         functionName: "vote",
-        args: [BigInt(target_.optionId)],
+        // A set, even for a single choice. `vote` takes the whole selection so
+        // that one transaction is one vote under every mechanism; a multi-select
+        // poll just puts more than one id in this array.
+        args: [[BigInt(target_.optionId)]],
         value: STAKE,
       });
       return;
@@ -235,7 +242,7 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
         address,
         abi: pollAbi,
         functionName: "changeVote",
-        args: [BigInt(target_.optionId)],
+        args: [[BigInt(target_.optionId)]],
       });
       return;
     }

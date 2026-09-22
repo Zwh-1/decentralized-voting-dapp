@@ -52,7 +52,8 @@ contract GuardOnlyRefund is ReentrancyGuard {
         phase = Phase.Ended;
     }
 
-    function vote(uint256 candidateId) external payable {
+    function vote(uint256[] calldata optionIds) external payable {
+        uint256 candidateId = optionIds[0];
         require(phase == Phase.Voting, "phase");
         require(isWhitelisted[msg.sender], "whitelist");
         require(!hasVoted[msg.sender], "already voted");

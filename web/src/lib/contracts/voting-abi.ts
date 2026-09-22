@@ -49,6 +49,17 @@ export const factoryAbi = [
   {
     "inputs": [
       {
+        "internalType": "string",
+        "name": "reason",
+        "type": "string"
+      }
+    ],
+    "name": "InvalidConfig",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "minimum",
         "type": "uint256"
@@ -136,9 +147,46 @@ export const factoryAbi = [
         "type": "uint256"
       },
       {
-        "internalType": "bool",
-        "name": "openToAll",
-        "type": "bool"
+        "components": [
+          {
+            "internalType": "bool",
+            "name": "openToAll",
+            "type": "bool"
+          },
+          {
+            "internalType": "bool",
+            "name": "multiSelect",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint256",
+            "name": "maxSelections",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bool",
+            "name": "weighted",
+            "type": "bool"
+          },
+          {
+            "internalType": "bool",
+            "name": "delegable",
+            "type": "bool"
+          },
+          {
+            "internalType": "bool",
+            "name": "commitReveal",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint256",
+            "name": "revealWindowSeconds",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct PollMechanisms.PollConfig",
+        "name": "config",
+        "type": "tuple"
       }
     ],
     "name": "createPoll",
@@ -253,6 +301,17 @@ export const pollAbi = [
     "type": "error"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "optionId",
+        "type": "uint256"
+      }
+    ],
+    "name": "DuplicateSelection",
+    "type": "error"
+  },
+  {
     "inputs": [],
     "name": "EmptyQuestion",
     "type": "error"
@@ -298,6 +357,17 @@ export const pollAbi = [
   {
     "inputs": [
       {
+        "internalType": "string",
+        "name": "reason",
+        "type": "string"
+      }
+    ],
+    "name": "InvalidConfig",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "enum Poll.Phase",
         "name": "expected",
         "type": "uint8"
@@ -309,6 +379,22 @@ export const pollAbi = [
       }
     ],
     "name": "InvalidPhase",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NoSelections",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      }
+    ],
+    "name": "NoWeightAssigned",
     "type": "error"
   },
   {
@@ -404,6 +490,22 @@ export const pollAbi = [
     "type": "error"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "maximum",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "provided",
+        "type": "uint256"
+      }
+    ],
+    "name": "TooManySelections",
+    "type": "error"
+  },
+  {
     "inputs": [],
     "name": "TransferFailed",
     "type": "error"
@@ -420,8 +522,30 @@ export const pollAbi = [
     "type": "error"
   },
   {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      }
+    ],
+    "name": "UnweightedVoter",
+    "type": "error"
+  },
+  {
     "inputs": [],
     "name": "ZeroAddress",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      }
+    ],
+    "name": "ZeroWeight",
     "type": "error"
   },
   {
@@ -525,6 +649,31 @@ export const pollAbi = [
       {
         "indexed": false,
         "internalType": "uint256",
+        "name": "power",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "newTotalPower",
+        "type": "uint256"
+      }
+    ],
+    "name": "PowerCounted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
       }
@@ -612,12 +761,62 @@ export const pollAbi = [
       },
       {
         "indexed": false,
+        "internalType": "uint256[]",
+        "name": "optionIds",
+        "type": "uint256[]"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "power",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "newTotal",
+        "type": "uint256"
+      }
+    ],
+    "name": "VoteRecorded",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      },
+      {
+        "indexed": false,
         "internalType": "uint256",
         "name": "amount",
         "type": "uint256"
       }
     ],
     "name": "VoteWithdrawn",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "weight",
+        "type": "uint256"
+      }
+    ],
+    "name": "WeightAssigned",
     "type": "event"
   },
   {
@@ -694,9 +893,9 @@ export const pollAbi = [
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "optionId",
-        "type": "uint256"
+        "internalType": "uint256[]",
+        "name": "optionIds",
+        "type": "uint256[]"
       }
     ],
     "name": "changeVote",
@@ -709,6 +908,49 @@ export const pollAbi = [
     "name": "closeAfterDeadline",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "config",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "openToAll",
+        "type": "bool"
+      },
+      {
+        "internalType": "bool",
+        "name": "multiSelect",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint256",
+        "name": "maxSelections",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "weighted",
+        "type": "bool"
+      },
+      {
+        "internalType": "bool",
+        "name": "delegable",
+        "type": "bool"
+      },
+      {
+        "internalType": "bool",
+        "name": "commitReveal",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint256",
+        "name": "revealWindowSeconds",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -780,9 +1022,46 @@ export const pollAbi = [
         "type": "uint256"
       },
       {
-        "internalType": "bool",
-        "name": "openToAll_",
-        "type": "bool"
+        "components": [
+          {
+            "internalType": "bool",
+            "name": "openToAll",
+            "type": "bool"
+          },
+          {
+            "internalType": "bool",
+            "name": "multiSelect",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint256",
+            "name": "maxSelections",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bool",
+            "name": "weighted",
+            "type": "bool"
+          },
+          {
+            "internalType": "bool",
+            "name": "delegable",
+            "type": "bool"
+          },
+          {
+            "internalType": "bool",
+            "name": "commitReveal",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint256",
+            "name": "revealWindowSeconds",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct PollMechanisms.PollConfig",
+        "name": "config_",
+        "type": "tuple"
       }
     ],
     "name": "initialize",
@@ -976,6 +1255,24 @@ export const pollAbi = [
         "type": "address[]"
       },
       {
+        "internalType": "uint256[]",
+        "name": "weights",
+        "type": "uint256[]"
+      }
+    ],
+    "name": "setWeights",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address[]",
+        "name": "voters",
+        "type": "address[]"
+      },
+      {
         "internalType": "bool",
         "name": "allowed",
         "type": "bool"
@@ -1039,6 +1336,19 @@ export const pollAbi = [
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "totalWeightAssigned",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",
@@ -1072,9 +1382,9 @@ export const pollAbi = [
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "optionId",
-        "type": "uint256"
+        "internalType": "uint256[]",
+        "name": "optionIds",
+        "type": "uint256[]"
       }
     ],
     "name": "vote",
@@ -1086,7 +1396,7 @@ export const pollAbi = [
     "inputs": [
       {
         "internalType": "address",
-        "name": "",
+        "name": "voter",
         "type": "address"
       }
     ],
@@ -1109,32 +1419,68 @@ export const pollAbi = [
         "type": "address"
       }
     ],
+    "name": "votedOptions",
+    "outputs": [
+      {
+        "internalType": "uint256[]",
+        "name": "",
+        "type": "uint256[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      }
+    ],
     "name": "voterState",
     "outputs": [
       {
-        "internalType": "bool",
-        "name": "whitelisted",
-        "type": "bool"
-      },
-      {
-        "internalType": "uint256",
-        "name": "currentOptionId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "stake",
-        "type": "uint256"
-      },
-      {
-        "internalType": "bool",
-        "name": "marked",
-        "type": "bool"
-      },
-      {
-        "internalType": "bool",
-        "name": "canVote",
-        "type": "bool"
+        "components": [
+          {
+            "internalType": "bool",
+            "name": "whitelisted",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint256",
+            "name": "currentOptionId",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "stake",
+            "type": "uint256"
+          },
+          {
+            "internalType": "bool",
+            "name": "marked",
+            "type": "bool"
+          },
+          {
+            "internalType": "bool",
+            "name": "canVote",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "selections",
+            "type": "uint256[]"
+          },
+          {
+            "internalType": "uint256",
+            "name": "power",
+            "type": "uint256"
+          }
+        ],
+        "internalType": "struct Poll.VoterState",
+        "name": "state",
+        "type": "tuple"
       }
     ],
     "stateMutability": "view",
@@ -1143,6 +1489,44 @@ export const pollAbi = [
   {
     "inputs": [],
     "name": "votingEndedAt",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "votingPowerOf",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "weightOf",
     "outputs": [
       {
         "internalType": "uint256",

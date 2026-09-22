@@ -40,9 +40,9 @@ Entries are workspace records, not authoritative runtime decisions.
 | 2026-09-21 | baseline | docs/aegis/baseline/2026-09-21-frontend-trust-rework.md                                  | 基线记录：三批改造（视觉重设计 / 现实投票机制 / 规则承诺）及其验证证据                   |
 | 2026-09-21 | plan     | docs/aegis/plans/2026-09-21-multi-tenant-voting-platform.md                              | 实施计划：从"一次性公投"改造为"用户自建投票平台"                                         |
 | 2026-09-21 | baseline | docs/aegis/baseline/2026-09-21-optimization-pass.md                                      | 基线记录：功能补齐与代码改进审计；7 个写函数零调用点的 Implementation Drift              |
-| 2026-09-22 | adr      | docs/aegis/adr/ADR-0030-voting-mechanisms-are-configurable-at-creation.md                | ADR-0030 - 投票机制在 initialize 时固定，组合合法性由纯函数 owner 判定               |
-| 2026-09-22 | adr      | docs/aegis/adr/ADR-0031-commit-reveal-replaces-public-ballots.md                        | ADR-0031 - 以 commit-reveal 取代"明票上链"（取代 ADR-0003）                          |
-| 2026-09-22 | adr      | docs/aegis/adr/ADR-0034-one-vote-one-person-is-redefined-per-mechanism.md               | ADR-0034 - "一人一票"重述为"每个合格主体的票权至多计一次"                            |
+| 2026-09-22 | adr      | docs/aegis/adr/ADR-0030-voting-mechanisms-are-configurable-at-creation.md                | ADR-0030 - 投票机制在 initialize 时固定，组合合法性由纯函数 owner 判定                   |
+| 2026-09-22 | adr      | docs/aegis/adr/ADR-0031-commit-reveal-replaces-public-ballots.md                         | ADR-0031 - 以 commit-reveal 取代"明票上链"（取代 ADR-0003）                              |
+| 2026-09-22 | adr      | docs/aegis/adr/ADR-0034-one-vote-one-person-is-redefined-per-mechanism.md                | ADR-0034 - "一人一票"重述为"每个合格主体的票权至多计一次"                                |
 | 2026-09-22 | plan     | docs/aegis/plans/2026-09-22-voting-mechanisms-and-platform-depth.md                      | 实施计划：投票机制深化与平台能力补齐（多选/加权/委托/隐私 + 治理 + 数据接口 + 前端体验） |
 | 2026-09-22 | work     | docs/aegis/work/2026-09-22-close-known-gaps/10-intent.md                                 | 关闭已登记的未完成项（P0/P1/P2） intent                                                  |
 | 2026-09-22 | work     | docs/aegis/work/2026-09-22-close-known-gaps/20-checkpoint.md                             | 关闭已登记的未完成项（P0/P1/P2） checkpoint                                              |

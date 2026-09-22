@@ -15,6 +15,24 @@ const CID_B = "bafkreieq5jui4j25lacwomsqgvn7mq3z4g4hq7xw774wevxfrfrura3jqq";
 
 const DAY = 24n * 60n * 60n;
 
+/// @notice The default mechanism set with admission chosen.
+///
+/// @dev `createPoll` takes a `PollConfig` struct now, so every fixture needs one.
+///      Written as a helper rather than inlined at each call site because the
+///      struct has six fields and a reader scanning a test should see *which
+///      mechanism differs from the default*, not re-read six values to find out.
+function config(openToAll: boolean) {
+  return {
+    openToAll,
+    multiSelect: false,
+    maxSelections: 0n,
+    weighted: false,
+    delegable: false,
+    commitReveal: false,
+    revealWindowSeconds: 0n,
+  };
+}
+
 /// @notice Consumer-perspective tests: the same calls the frontend and the
 ///         indexer will make, in a full blockchain simulation rather than in
 ///         the EVM in isolation.
@@ -32,7 +50,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const latest = await (await viem.getPublicClient()).getBlock();
     const endsAt = latest.timestamp + 30n * DAY;
 
-    await factory.write.createPoll(["Which one?", [CID_A, CID_B], endsAt, false], {
+    await factory.write.createPoll(["Which one?", [CID_A, CID_B], endsAt, config(false)], {
       account: creator.account,
     });
 
@@ -58,9 +76,12 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const latest = await (await viem.getPublicClient()).getBlock();
     const endsAt = latest.timestamp + 30n * DAY;
 
-    const hash = await factory.write.createPoll(["Which one?", [CID_A, CID_B], endsAt, false], {
-      account: creator.account,
-    });
+    const hash = await factory.write.createPoll(
+      ["Which one?", [CID_A, CID_B], endsAt, config(false)],
+      {
+        account: creator.account,
+      },
+    );
     await (await viem.getPublicClient()).waitForTransactionReceipt({ hash });
 
     assert.equal(await factory.read.pollCount(), 1n, "one poll registered");
@@ -90,7 +111,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const latest = await (await viem.getPublicClient()).getBlock();
     const endsAt = latest.timestamp + 30n * DAY;
 
-    await factory.write.createPoll(["Second?", [CID_A, CID_B], endsAt, false], {
+    await factory.write.createPoll(["Second?", [CID_A, CID_B], endsAt, config(false)], {
       account: creator.account,
     });
 
@@ -101,7 +122,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     await second.write.startPoll({ account: creator.account });
 
     // Alice votes in the first poll only.
-    await poll.write.vote([1n], { account: alice.account, value: STAKE });
+    await poll.write.vote([[1n]], { account: alice.account, value: STAKE });
 
     const [, firstTotal] = await poll.read.results();
     const [, secondTotal] = await second.read.results();
@@ -127,7 +148,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
 
     await assert.rejects(
       poll.write.initialize(
-        [bob.account.address, "Hijacked", [CID_A, CID_B], latest.timestamp + DAY],
+        [bob.account.address, "Hijacked", [CID_A, CID_B], latest.timestamp + DAY, config(false)],
         {
           account: bob.account,
         },
@@ -146,7 +167,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const { poll, alice } = await deployFixture();
 
     const publicClient = await viem.getPublicClient();
-    const hash = await poll.write.vote([1n], {
+    const hash = await poll.write.vote([[1n]], {
       account: alice.account,
       value: STAKE,
     });
@@ -162,11 +183,11 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     assert.equal(options[1].voteCount, 0n);
   });
 
-  it("emits VoteCast with the running count", async function () {
+  it("emits VoteRecorded with the set and its power", async function () {
     const { poll, alice } = await deployFixture();
     const publicClient = await viem.getPublicClient();
 
-    const hash = await poll.write.vote([2n], {
+    const hash = await poll.write.vote([[2n]], {
       account: alice.account,
       value: STAKE,
     });
@@ -175,14 +196,15 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const logs = await publicClient.getContractEvents({
       address: poll.address,
       abi: poll.abi,
-      eventName: "VoteCast",
+      eventName: "VoteRecorded",
       fromBlock: 0n,
     });
 
-    assert.equal(logs.length, 1);
+    assert.equal(logs.length, 1, "one event per vote, carrying the whole set");
     assert.equal(logs[0].args.voter?.toLowerCase(), alice.account.address.toLowerCase());
-    assert.equal(logs[0].args.optionId, 2n);
-    assert.equal(logs[0].args.newCount, 1n);
+    assert.deepEqual(logs[0].args.optionIds, [2n], "the set as submitted");
+    assert.equal(logs[0].args.power, 1n, "equal weight contributes 1");
+    assert.equal(logs[0].args.newTotal, 1n, "and the option's running count is 1");
   });
 
   it("rejects a vote from an address that is not whitelisted", async function () {
@@ -190,7 +212,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const [, , , stranger] = await viem.getWalletClients();
 
     await assert.rejects(
-      poll.write.vote([1n], { account: stranger.account, value: STAKE }),
+      poll.write.vote([[1n]], { account: stranger.account, value: STAKE }),
       "a non-whitelisted address must not be able to vote",
     );
   });
@@ -198,10 +220,10 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
   it("rejects a second vote from the same address", async function () {
     const { poll, alice } = await deployFixture();
 
-    await poll.write.vote([1n], { account: alice.account, value: STAKE });
+    await poll.write.vote([[1n]], { account: alice.account, value: STAKE });
 
     await assert.rejects(
-      poll.write.vote([2n], { account: alice.account, value: STAKE }),
+      poll.write.vote([[2n]], { account: alice.account, value: STAKE }),
       "voting twice must be refused; changing a vote is a different call",
     );
   });
@@ -210,7 +232,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const { poll, alice } = await deployFixture();
 
     await assert.rejects(
-      poll.write.vote([1n], { account: alice.account, value: STAKE * 2n }),
+      poll.write.vote([[1n]], { account: alice.account, value: STAKE * 2n }),
       "an incorrect stake must be rejected",
     );
   });
@@ -223,11 +245,11 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const { poll, alice } = await deployFixture();
     const publicClient = await viem.getPublicClient();
 
-    await poll.write.vote([1n], { account: alice.account, value: STAKE });
+    await poll.write.vote([[1n]], { account: alice.account, value: STAKE });
 
     const before = await publicClient.getBalance({ address: alice.account.address });
 
-    const hash = await poll.write.changeVote([2n], { account: alice.account });
+    const hash = await poll.write.changeVote([[2n]], { account: alice.account });
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
     const gasCost = receipt.gasUsed * receipt.effectiveGasPrice;
 
@@ -243,35 +265,51 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     assert.equal(options[1].voteCount, 1n, "the new option was credited");
   });
 
-  it("emits VoteChanged rather than a second VoteCast", async function () {
+  it("expresses a change as a second VoteRecorded, not a VoteCast", async function () {
     const { poll, alice } = await deployFixture();
     const publicClient = await viem.getPublicClient();
 
-    await poll.write.vote([1n], { account: alice.account, value: STAKE });
+    await poll.write.vote([[1n]], { account: alice.account, value: STAKE });
 
-    const hash = await poll.write.changeVote([2n], { account: alice.account });
+    const hash = await poll.write.changeVote([[2n]], { account: alice.account });
     await publicClient.waitForTransactionReceipt({ hash });
 
-    const logs = await publicClient.getContractEvents({
+    // A change is a second record of the current set. The indexer takes the
+    // LAST record per address, so it can tell "changed to 2" from "voted 1 then
+    // 2" without a distinct event type — which is why `VoteChanged` no longer
+    // exists. What it must NOT do is treat the two records as additive: the
+    // tally has to end at one, and the assertion below is what would catch a
+    // derivation that sums instead of taking the latest.
+    const records = await publicClient.getContractEvents({
       address: poll.address,
       abi: poll.abi,
-      eventName: "VoteChanged",
+      eventName: "VoteRecorded",
       fromBlock: 0n,
     });
+    assert.equal(records.length, 2, "one record per action, so two in total");
+    assert.deepEqual(records[1]!.args.optionIds, [2n], "the second record is the new set");
 
-    assert.equal(logs.length, 1, "the change has its own event");
-    assert.equal(logs[0].args.voter?.toLowerCase(), alice.account.address.toLowerCase());
-    assert.equal(logs[0].args.fromOptionId, 1n);
-    assert.equal(logs[0].args.toOptionId, 2n);
+    const [options, total] = await poll.read.results();
+    assert.equal(total, 1n, "the change moved the vote rather than adding one");
+    assert.equal(options[0]!.voteCount, 0n, "the first option was released");
+    assert.equal(options[1]!.voteCount, 1n, "the second was credited");
+
+    const casts = await publicClient.getContractEvents({
+      address: poll.address,
+      abi: poll.abi,
+      eventName: "VoteCast",
+      fromBlock: 0n,
+    });
+    assert.equal(casts.length, 0, "the old event must no longer be emitted at all");
   });
 
   it("refuses a change to the option already chosen", async function () {
     const { poll, alice } = await deployFixture();
 
-    await poll.write.vote([1n], { account: alice.account, value: STAKE });
+    await poll.write.vote([[1n]], { account: alice.account, value: STAKE });
 
     await assert.rejects(
-      poll.write.changeVote([1n], { account: alice.account }),
+      poll.write.changeVote([[1n]], { account: alice.account }),
       "changing to the same option is a no-op that should be refused, not silently accepted",
     );
   });
@@ -280,7 +318,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const { poll, alice } = await deployFixture();
     const publicClient = await viem.getPublicClient();
 
-    await poll.write.vote([1n], { account: alice.account, value: STAKE });
+    await poll.write.vote([[1n]], { account: alice.account, value: STAKE });
 
     const before = await publicClient.getBalance({ address: alice.account.address });
 
@@ -299,7 +337,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     assert.equal(total, 0n, "the vote was released");
 
     // And the address may vote again, which the old contract could not allow.
-    await poll.write.vote([2n], { account: alice.account, value: STAKE });
+    await poll.write.vote([[2n]], { account: alice.account, value: STAKE });
     assert.equal(await poll.read.votedFor([alice.account.address]), 2n);
   });
 
@@ -318,7 +356,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const latest = await (await viem.getPublicClient()).getBlock();
     const endsAt = latest.timestamp + 30n * DAY;
 
-    await factory.write.createPoll(["Anyone?", [CID_A, CID_B], endsAt, true], {
+    await factory.write.createPoll(["Anyone?", [CID_A, CID_B], endsAt, config(true)], {
       account: creator.account,
     });
 
@@ -340,7 +378,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
       "alice is genuinely not on any list",
     );
 
-    await poll.write.vote([1n], { account: alice.account, value: STAKE });
+    await poll.write.vote([[1n]], { account: alice.account, value: STAKE });
 
     assert.equal(await poll.read.votedFor([alice.account.address]), 1n);
     assert.equal(await poll.read.totalStaked(), STAKE);
@@ -354,17 +392,17 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
 
     const state = await poll.read.voterState([alice.account.address]);
 
-    assert.equal(state[0], false, "whitelisted is the raw mapping answer");
-    assert.equal(state[4], true, "canVote is the derived decision");
+    assert.equal(state.whitelisted, false, "whitelisted is the raw mapping answer");
+    assert.equal(state.canVote, true, "canVote is the derived decision");
   });
 
   it("still enforces one address one vote in an open poll", async function () {
     const { poll, alice } = await deployOpenFixture();
 
-    await poll.write.vote([1n], { account: alice.account, value: STAKE });
+    await poll.write.vote([[1n]], { account: alice.account, value: STAKE });
 
     await assert.rejects(
-      poll.write.vote([2n], { account: alice.account, value: STAKE }),
+      poll.write.vote([[2n]], { account: alice.account, value: STAKE }),
       /AlreadyVoted/,
       "opening admission is orthogonal to one-address-one-vote",
     );
@@ -383,7 +421,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const { poll, creator, alice } = await deployFixture();
     const publicClient = await viem.getPublicClient();
 
-    await poll.write.vote([1n], { account: alice.account, value: STAKE });
+    await poll.write.vote([[1n]], { account: alice.account, value: STAKE });
     await poll.write.endPoll({ account: creator.account });
 
     const before = await publicClient.getBalance({ address: alice.account.address });
@@ -402,7 +440,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
   it("rejects a refund before the poll closes", async function () {
     const { poll, alice } = await deployFixture();
 
-    await poll.write.vote([1n], { account: alice.account, value: STAKE });
+    await poll.write.vote([[1n]], { account: alice.account, value: STAKE });
 
     await assert.rejects(
       poll.write.refund({ account: alice.account }),
@@ -427,7 +465,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const latest = await (await viem.getPublicClient()).getBlock();
 
     const hash = await factory.write.createPoll(
-      ["Pinned options?", cids, latest.timestamp + 30n * DAY, false],
+      ["Pinned options?", cids, latest.timestamp + 30n * DAY, config(false)],
       { account: creator.account },
     );
     await (await viem.getPublicClient()).waitForTransactionReceipt({ hash });

@@ -12,6 +12,7 @@ import {
 import { useMounted } from "@/hooks/useMounted";
 import { describeWriteFailure } from "@/lib/ballot-labels";
 import { isPlausibleCid } from "@/lib/ipfs";
+import { DEFAULT_CONFIG } from "@/lib/mechanisms";
 import { chainName, factoryAbi, resolveChainTarget, type ChainTarget } from "@/lib/voting";
 
 /** The fewest options `Poll.MIN_OPTIONS` accepts. A poll with fewer reverts. */
@@ -174,11 +175,24 @@ export function CreatePollForm({ configuredTarget }: CreatePollFormProps) {
       return;
     }
 
+    // The ABI types the two count fields as `bigint`, and the mirror in
+    // `mechanisms.ts` deliberately uses plain `number` — a UI control deals in
+    // counts a human typed, and carrying `bigint` through the form state would
+    // make every comparison against the input's value awkward. The conversion
+    // therefore belongs here, at the boundary where the numbers become calldata,
+    // rather than in the shared mirror where it would infect every consumer.
+    const config = {
+      ...DEFAULT_CONFIG,
+      openToAll,
+      maxSelections: BigInt(DEFAULT_CONFIG.maxSelections),
+      revealWindowSeconds: BigInt(DEFAULT_CONFIG.revealWindowSeconds),
+    };
+
     writeContract({
       address: target.factoryAddress,
       abi: factoryAbi,
       functionName: "createPoll",
-      args: [question.trim(), filled, endsAt, openToAll],
+      args: [question.trim(), filled, endsAt, config],
     });
   }
 

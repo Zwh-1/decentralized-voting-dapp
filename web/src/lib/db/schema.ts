@@ -43,10 +43,47 @@ export const SCHEMA_SQL = `
 -- and the whole database can be dropped and rebuilt by replaying from the
 -- factory's deployment block.
 --
--- The correctness of the whole indexer rests on one thing: UNIQUE(tx_hash,
--- log_index) on every event table. A chain log is uniquely identified by that
--- pair, so a repeated delivery (restart, overlapping getLogs range, RPC retry)
--- collides with the existing row instead of double counting a vote.
+-- The correctness of the whole indexer rests on one thing: a unique key on every
+-- event table that identifies the chain log a row came from. A chain log is
+-- uniquely identified by (tx_hash, log_index) — EXCEPT on votes, where one log
+-- legitimately produces one row per selected option, so its key additionally
+-- includes option_id. A repeated delivery (restart, overlapping getLogs range,
+-- RPC retry) then collides with the existing row instead of double counting a
+-- vote.
+--
+-- SCHEMA CHANGES. Everything below is idempotent — IF NOT EXISTS, CREATE OR
+-- REPLACE — which is what lets this run on every boot with no migration table.
+-- That property holds for CREATE, DROP and for views, but NOT for adding a
+-- column to an existing table: MySQL has no ADD COLUMN IF NOT EXISTS, so a new
+-- column simply never appears on a database that already has the table, and
+-- every later statement referencing it fails.
+--
+-- votes therefore carries an explicit rebuild, guarded so it fires ONLY when
+-- the table is actually the old shape. The guard matters: an unconditional DROP
+-- would empty votes on every boot while the cursor stays put, and the next
+-- drain would then have nothing to refill from — silently losing the whole vote
+-- history. Dropping on a shape mismatch instead is safe for the reason the whole
+-- database is disposable: votes is nothing but a projection of chain events,
+-- so the rows are reproducible by replaying from the cursor. The cursor is
+-- deliberately NOT reset, so the next drain refills exactly the discarded range.
+--
+-- A table that does not exist yet makes the SELECT below fail; that is handled
+-- by running the guard as a separate, error-tolerant step rather than inline.
+SET @votes_needs_rebuild := (
+  SELECT COUNT(*) = 0
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'votes'
+    AND COLUMN_NAME = 'power'
+);
+SET @rebuild_sql := IF(
+  @votes_needs_rebuild = 1,
+  'DROP TABLE IF EXISTS votes',
+  'DO 0'
+);
+PREPARE rebuild_stmt FROM @rebuild_sql;
+EXECUTE rebuild_stmt;
+DEALLOCATE PREPARE rebuild_stmt;
 --
 -- One poll per contract address (EIP-1167 clone of Poll, created by
 -- VotingFactory), so every event table carries poll_address: the fact that two
@@ -99,23 +136,44 @@ CREATE TABLE IF NOT EXISTS options (
 -- projection rather than a second authority over a contract mapping.
 --
 -- event_type:
---   'cast'      VoteCast      - a first vote for option_id
---   'changed'   VoteChanged   - a move to option_id (stake unchanged)
+--   'cast'      VoteRecorded  - a recorded set that added to the tally
+--   'changed'   VoteRecorded  - a recorded set that replaced an earlier one
 --   'withdrawn' VoteWithdrawn - stepped out; option_id is 0 = "no option"
+--
+-- 'cast' and 'changed' come from the SAME on-chain event. The contract emits one
+-- 'VoteRecorded(voter, optionIds, power, newTotal)' for both a first vote and a
+-- change, because the index only ever needs "the set this address last
+-- submitted". The distinction is preserved as a column because readers do want
+-- it — the activity log says "changed" — but it is DERIVED: the writer marks a
+-- row 'changed' when the address already had rows before this event.
 --
 -- VoteWithdrawn carries an amount rather than an option, so its option_id is
 -- stored as 0. 0 is never a valid option on chain (ids are 1-indexed), so the
 -- sentinel cannot collide with a real option.
+--
+-- power is how much the selection counted for (1 under equal weight). Stored
+-- per row rather than re-derived from the poll's mechanism flags, because the
+-- flags describe the poll NOW and the row describes a vote cast at its own
+-- block.
+--
+-- uk_votes_log INCLUDES option_id, and that is load-bearing. A multi-select vote
+-- is ONE log that produces one row per selected option, so a uniqueness key of
+-- (tx_hash, log_index) alone would reject every row after the first — and
+-- because the insert is INSERT IGNORE, it would do so SILENTLY, losing
+-- selections from the tally with no error anywhere. Including option_id keeps
+-- the key a true per-log uniqueness constraint while allowing a log to own one
+-- row per option it selected.
 CREATE TABLE IF NOT EXISTS votes (
   id            BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT PRIMARY KEY,
   poll_address  CHAR(42)         NOT NULL,
   voter         CHAR(42)         NOT NULL,
   option_id     INT UNSIGNED     NOT NULL,
   event_type    VARCHAR(16)      NOT NULL,
+  power         DECIMAL(38,0)    NOT NULL DEFAULT 1,
   block_number  BIGINT UNSIGNED  NOT NULL,
   tx_hash       CHAR(66)         NOT NULL,
   log_index     INT UNSIGNED     NOT NULL,
-  UNIQUE KEY uk_votes_log (tx_hash, log_index),
+  UNIQUE KEY uk_votes_log (tx_hash, log_index, option_id),
   KEY idx_votes_poll_voter (poll_address, voter),
   KEY idx_votes_poll_option (poll_address, option_id),
   KEY idx_votes_block (block_number)
@@ -177,7 +235,7 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
 
 -- Which option each (poll, voter) currently backs.
 --
--- DERIVED, never stored. ON CHAIN THIS IS \`Poll.votedFor\`, a mapping the
+-- DERIVED, never stored. ON CHAIN THIS IS \Poll.votedFor\, a mapping the
 -- contract maintains itself; this view exists so the index can be compared
 -- against that mapping instead of competing with it (ADR-0001). If the two
 -- ever disagree it is a bug in one of them, and a bug that a stored tally
@@ -186,14 +244,29 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
 -- The rule is "the last thing the address did", ordered by the chain's own
 -- total order (block_number, log_index):
 --
---   * 'cast' or 'changed' -> option_id is the current vote;
+--   * 'cast' or 'changed' -> option_id is part of the current selection;
 --   * 'withdrawn'         -> the voter currently backs NOTHING.
+--
+-- MULTI-SELECT: a selection is a SET, and it is one log that produced several
+-- rows sharing a (block_number, log_index). The correlated NOT EXISTS handles
+-- that without a special case, and it is worth saying why, because the obvious
+-- worry is that rows of the SAME event would exclude each other. They do not:
+-- exclusion requires a strictly greater position, and the sibling rows of one
+-- event are equal in both coordinates. So every row of the latest event
+-- survives and every row of an earlier one is dropped — which is exactly "the
+-- latest set this address submitted".
+--
+-- That is also why option_tally's SUM(power) is the right aggregate under
+-- multi-select. One vote selecting {1,2} contributes one row to option 1 and one
+-- to option 2, and each option's count is the number of voters currently backing
+-- it — the same number Poll.results() reports, which is what the consistency
+-- check compares.
 --
 -- A withdrawn voter IS returned, with option_id NULL, rather than filtered
 -- out. That is the deliberate choice: "no longer voting" is a real state that
 -- a reader asks about ("does this address still back something?"), and
 -- dropping the row would make "withdrew" indistinguishable from "this poll and
--- voter were never indexed". \`option_tally\` filters the NULLs out, so every
+-- voter were never indexed". option_tally filters the NULLs out, so every
 -- consumer that wants counts is unaffected.
 --
 -- The correlated NOT EXISTS rather than ROW_NUMBER()/window functions: MySQL
@@ -206,6 +279,7 @@ SELECT
   v.poll_address AS poll_address,
   v.voter       AS voter,
   CASE WHEN v.event_type = 'withdrawn' THEN NULL ELSE v.option_id END AS option_id,
+  CASE WHEN v.event_type = 'withdrawn' THEN 0 ELSE v.power END AS power,
   v.block_number AS block_number,
   v.log_index    AS log_index,
   v.tx_hash      AS tx_hash,
@@ -224,11 +298,21 @@ WHERE NOT EXISTS (
 
 -- Votes per (poll, option), counting only voters who currently back something.
 --
--- Replaces the old \`candidate_tally\`. It is the indexer's answer to
--- \`Poll.results()\`, and the M-6 consistency check compares the two.
+-- Replaces the old candidate_tally. It is the indexer's answer to
+-- Poll.results(), and the M-6 consistency check compares the two.
 --
--- LEFT JOIN from \`options\` so an option nobody currently backs is reported as
--- 0 rather than omitted: the chain's \`results()\` returns every option, and a
+-- WEIGHTED voting is why this SUMs power instead of COUNTing rows. On chain
+-- Option.voteCount is incremented by the voter's power, so a weighted poll's
+-- results() reports 5 where one voter of weight 5 stands. Counting rows would
+-- report 1 and the consistency check would fail — correctly, because the index
+-- would be describing a different tally than the chain holds.
+--
+-- COALESCE on the sum as well as the join: SUM over an empty group is NULL, and
+-- a NULL vote_count would read as "unknown" rather than "nobody", which is the
+-- same reason the LEFT JOIN exists.
+--
+-- LEFT JOIN from options so an option nobody currently backs is reported as
+-- 0 rather than omitted: the chain's results() returns every option, and a
 -- missing row would read as a discrepancy.
 CREATE OR REPLACE VIEW option_tally AS
 SELECT
@@ -238,7 +322,7 @@ SELECT
   COALESCE(c.vote_count, 0) AS vote_count
 FROM options o
 LEFT JOIN (
-  SELECT poll_address, option_id, COUNT(*) AS vote_count
+  SELECT poll_address, option_id, SUM(power) AS vote_count
   FROM current_votes
   WHERE option_id IS NOT NULL
   GROUP BY poll_address, option_id

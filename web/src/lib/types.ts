@@ -165,8 +165,23 @@ export interface VoterResponse {
 /** One entry in a voter's history: a cast, a change, or a withdrawal. */
 export interface VoteEventResponse {
   kind: "cast" | "changed" | "withdrawn";
-  /** The option involved. For "changed" this is the option moved TO. */
+  /**
+   * The first option involved, or null.
+   *
+   * For "changed" this is the first option of the new set; for "withdrawn" it is
+   * null, because a withdrawal names no option. Kept alongside `optionIds` so a
+   * reader that only understands a single choice still gets a truthful answer.
+   */
   optionId: number | null;
+  /**
+   * Every option this one action selected, ascending; empty for a withdrawal.
+   *
+   * Usually one element. It is an array because a multi-select vote is a single
+   * on-chain log that carries the whole set, and the history must report it as
+   * one action rather than one entry per option — otherwise a reader sees their
+   * address voting twice in a block when it voted once for two things.
+   */
+  optionIds: number[];
   blockNumber: string;
   txHash: string;
 }

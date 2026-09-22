@@ -4,6 +4,7 @@ pragma solidity 0.8.37;
 import { Test } from "forge-std/Test.sol";
 
 import { Poll } from "./Poll.sol";
+import { PollMechanisms } from "./PollMechanisms.sol";
 
 /// @notice Long-running property test for `Poll` �?spec metric M-4.
 ///
@@ -43,6 +44,15 @@ contract PollPropertiesTest is Test {
     uint256 internal constant STAKE = 0.001 ether;
     uint256 internal constant FAR_FUTURE = 4_000_000_000;
 
+    function _config() internal pure returns (PollMechanisms.PollConfig memory) {
+        return PollMechanisms.defaultConfig(0);
+    }
+
+    function _one(uint256 optionId) internal pure returns (uint256[] memory ids) {
+        ids = new uint256[](1);
+        ids[0] = optionId;
+    }
+
     address[] internal voters;
 
     function setUp() public {
@@ -52,7 +62,7 @@ contract PollPropertiesTest is Test {
         }
 
         poll = new Poll();
-        poll.initialize(creator, "Property poll", cids, FAR_FUTURE, false);
+        poll.initialize(creator, "Property poll", cids, FAR_FUTURE, _config());
 
         for (uint256 i = 0; i < VOTER_COUNT; ++i) {
             voters.push(makeAddr(string.concat("propertyVoter", vm.toString(i))));
@@ -112,14 +122,14 @@ contract PollPropertiesTest is Test {
 
             if (action == 0) {
                 vm.prank(voter);
-                try poll.vote{ value: STAKE }(optionId) {
+                try poll.vote{ value: STAKE }(_one(optionId)) {
                     ++accepted;
                 } catch {
                     ++refused;
                 }
             } else if (action == 1) {
                 vm.prank(voter);
-                try poll.changeVote(optionId) {
+                try poll.changeVote(_one(optionId)) {
                     ++changed;
                 } catch {
                     ++refused;
@@ -176,7 +186,7 @@ contract PollPropertiesTest is Test {
         cids[1] = "cid-b";
 
         Poll fresh = new Poll();
-        fresh.initialize(creator, "Fuzz poll", cids, FAR_FUTURE, false);
+        fresh.initialize(creator, "Fuzz poll", cids, FAR_FUTURE, _config());
 
         address[] memory freshVoters = new address[](voterCount);
         for (uint256 i = 0; i < voterCount; ++i) {
@@ -192,12 +202,12 @@ contract PollPropertiesTest is Test {
         for (uint256 i = 0; i < voterCount; ++i) {
             vm.deal(freshVoters[i], 1 ether);
             vm.prank(freshVoters[i]);
-            fresh.vote{ value: STAKE }(1);
+            fresh.vote{ value: STAKE }(_one(1));
         }
 
         for (uint256 i = 0; i < voterCount; ++i) {
             vm.prank(freshVoters[i]);
-            fresh.changeVote(2);
+            fresh.changeVote(_one(2));
         }
 
         (, uint256 total) = fresh.results();
@@ -211,7 +221,7 @@ contract PollPropertiesTest is Test {
         for (uint256 i = 0; i < VOTER_COUNT; ++i) {
             vm.deal(voters[i], 1 ether);
             vm.prank(voters[i]);
-            poll.vote{ value: STAKE }(1);
+            poll.vote{ value: STAKE }(_one(1));
         }
 
         assertEq(poll.totalStaked(), VOTER_COUNT * STAKE, "everyone staked");

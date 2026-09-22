@@ -97,10 +97,26 @@ export async function readOnChainTally(
 }
 
 export interface OnChainVoter {
-  /** True when the address currently backs an option. */
+  /** True when the address currently backs at least one option. */
   hasVoted: boolean;
-  /** The option currently backed; 0 when none. */
+  /** The first option currently backed; 0 when none. */
   votedFor: number;
+  /**
+   * Every option currently backed, ascending; empty when none.
+   *
+   * The authoritative answer under multi-select. `votedFor` is its first
+   * element, kept so a reader that only understands one option still gets a
+   * truthful answer rather than having to know about mechanisms.
+   */
+  selections: number[];
+  /**
+   * How much this address's vote counted for.
+   *
+   * 1 under equal weight, the assigned weight under `weighted`. Exposed so the
+   * UI can say "your vote counted for 5" instead of making a weighted voter
+   * infer it from the mechanism flags and the tally.
+   */
+  power: number;
   stakeWei: bigint;
   /**
    * The current whitelist decision.
@@ -127,11 +143,16 @@ export interface OnChainVoter {
 /**
  * Reads one voter's on-chain state in a single round trip.
  *
- * `voterState` returns all five values at once. Separate getters would let a
- * caller observe a half-updated view — for example "has voted" from one block
- * and "voted for 0" from the next — which is exactly the kind of torn read that
+ * `voterState` returns everything at once. Separate getters would let a caller
+ * observe a half-updated view — for example "has voted" from one block and
+ * "voted for 0" from the next — which is exactly the kind of torn read that
  * makes a UI offer the wrong button (ADR-0017's lesson, applied to a read
  * instead of a comparison).
+ *
+ * Read as a struct, not a tuple. The contract's `voterState` outgrew the EVM
+ * stack as a tuple and now returns a named struct, which is also what makes
+ * this read robust to a field being added: a positional destructure would
+ * silently shift every later value.
  *
  * `canVote` is the contract's own admission decision, and `isWhitelisted` is the
  * raw list answer. Both are returned because the UI has to explain which one
@@ -144,19 +165,29 @@ export async function readOnChainVoter(
   address: `0x${string}`,
   voter: `0x${string}`,
 ): Promise<OnChainVoter> {
-  const [whitelisted, currentOptionId, stakeWei, , canVote] = (await client.readContract({
+  const state = (await client.readContract({
     address,
     abi: pollAbi,
     functionName: "voterState",
     args: [voter],
-  })) as readonly [boolean, bigint, bigint, boolean, boolean];
+  })) as {
+    whitelisted: boolean;
+    currentOptionId: bigint;
+    stake: bigint;
+    marked: boolean;
+    canVote: boolean;
+    selections: readonly bigint[];
+    power: bigint;
+  };
 
   return {
-    hasVoted: currentOptionId !== 0n,
-    votedFor: Number(currentOptionId),
-    stakeWei,
-    isWhitelisted: whitelisted,
-    canVote,
+    hasVoted: state.marked,
+    votedFor: Number(state.currentOptionId),
+    selections: state.selections.map(Number),
+    power: Number(state.power),
+    stakeWei: state.stake,
+    isWhitelisted: state.whitelisted,
+    canVote: state.canVote,
   };
 }
 

@@ -4,6 +4,7 @@ pragma solidity 0.8.37;
 import { Clones } from "@openzeppelin/contracts/proxy/Clones.sol";
 
 import { Poll } from "./Poll.sol";
+import { PollMechanisms } from "./PollMechanisms.sol";
 
 /// @title VotingFactory
 /// @notice Creates polls. Anyone may create one; the creator administers it.
@@ -56,7 +57,6 @@ contract VotingFactory {
         uint256 optionCount,
         bool openToAll
     );
-
     // ---------------------------------------------------------------------
     // Errors
     // ---------------------------------------------------------------------
@@ -64,6 +64,7 @@ contract VotingFactory {
     error TooFewOptions(uint256 minimum, uint256 provided);
     error DeadlineNotInFuture(uint256 endsAt);
     error EmptyQuestion();
+    error InvalidConfig(string reason);
 
     // ---------------------------------------------------------------------
     // Construction
@@ -81,14 +82,13 @@ contract VotingFactory {
     /// @param question The question being asked. Must be non-empty.
     /// @param optionCIDs Metadata CIDs for the options, in display order.
     /// @param endsAt Unix timestamp after which voting closes.
-    /// @param openToAll True to admit any address, false to require the
-    ///        whitelist the creator manages afterwards.
+    /// @param config The counting mechanisms, including admission mode.
     /// @return poll The address of the new poll.
     function createPoll(
         string calldata question,
         string[] calldata optionCIDs,
         uint256 endsAt,
-        bool openToAll
+        PollMechanisms.PollConfig calldata config
     ) external returns (address poll) {
         // Validated here as well as in `initialize`, so a caller pays for the
         // cheap check before a clone is deployed. The check in `initialize` is
@@ -97,14 +97,21 @@ contract VotingFactory {
         if (optionCIDs.length < 2) revert TooFewOptions(2, optionCIDs.length);
         if (endsAt <= block.timestamp) revert DeadlineNotInFuture(endsAt);
 
+        // The mechanism combination is checked here too, for the same reason:
+        // a caller whose configuration is impossible should not pay for a clone
+        // deployment to find out. `initialize` re-checks because it is the
+        // entry point that actually protects the poll.
+        (bool ok, string memory reason) = PollMechanisms.validate(config);
+        if (!ok) revert InvalidConfig(reason);
+
         poll = Clones.clone(implementation);
 
-        Poll(poll).initialize(msg.sender, question, optionCIDs, endsAt, openToAll);
+        Poll(poll).initialize(msg.sender, question, optionCIDs, endsAt, config);
 
         _polls.push(poll);
         _pollsByCreator[msg.sender].push(poll);
 
-        emit PollCreated(poll, msg.sender, question, endsAt, optionCIDs.length, openToAll);
+        emit PollCreated(poll, msg.sender, question, endsAt, optionCIDs.length, config.openToAll);
     }
 
     // ---------------------------------------------------------------------

@@ -52,17 +52,18 @@ function encode(
   };
 }
 
-/** A `VoteCast` for a poll, at the given coordinates. */
-function voteCast(
-  optionId: bigint,
+/** A `VoteRecorded` for a poll, at the given coordinates. */
+function voteRecorded(
+  optionIds: bigint[],
   blockNumber: bigint,
   logIndex: number,
   poll: string = POLL_A,
+  power = 1n,
 ): RawLog {
   return encode(
     pollAbi as unknown as Abi,
-    "VoteCast",
-    { voter: VOTER, optionId, newCount: 1n },
+    "VoteRecorded",
+    { voter: VOTER, optionIds, power, newTotal: power },
     { address: poll, blockNumber, logIndex },
   );
 }
@@ -132,6 +133,17 @@ class FakePool {
   commits = 0;
   /** `polls.address` values, as the sync loop would have persisted them. */
   pollRows: string[] = [];
+  /**
+   * `(poll_address, voter)` pairs already carrying a recorded vote.
+   *
+   * Modelled rather than merely recorded, because `persistBatch` READS it: the
+   * `cast`/`changed` distinction is derived from what is already stored, so a
+   * fake that always answered "nothing recorded" would make every change look
+   * like a first vote and hide exactly the defect these tests exist to catch.
+   * Withdrawals are excluded, matching the real query: on chain a withdrawal
+   * clears the selection, so a later vote is a first vote again.
+   */
+  recordedVoters = new Set<string>();
   /** How many `INSERT IGNORE` batches per table, so double-writes are visible. */
   counts = new Map<string, number>();
 
@@ -142,6 +154,23 @@ class FakePool {
     if (sql.includes("FROM polls")) {
       void params;
       return [this.pollRows.map((address) => ({ address })), []];
+    }
+    if (sql.includes("FROM votes")) {
+      // The real statement filters by poll and voter; the fake answers from the
+      // set it holds. `params` is `[polls, voters]`, each an array, so the
+      // intersection is what a real `IN` would return.
+      const polls = (params?.[0] as string[] | undefined) ?? [];
+      const voters = (params?.[1] as string[] | undefined) ?? [];
+      const rows: { poll_address: string; voter: string }[] = [];
+
+      for (const pair of this.recordedVoters) {
+        const [poll, voter] = pair.split("|");
+        if (polls.includes(poll!) && voters.includes(voter!)) {
+          rows.push({ poll_address: poll!, voter: voter! });
+        }
+      }
+
+      return [rows, []];
     }
     throw new Error(`FakePool received an unexpected query: ${sql}`);
   }
@@ -180,12 +209,61 @@ class FakePool {
             }
           }
 
+          // `votes` is read back too, for the `cast`/`changed` derivation.
+          // Column order matches the INSERT in `persistBatch`:
+          // (poll_address, voter, option_id, event_type, power, ...).
+          if (table === "votes") {
+            for (const row of rows) {
+              const poll = String(row[0]).toLowerCase();
+              const voter = String(row[1]).toLowerCase();
+              const eventType = String(row[3]);
+
+              if (eventType === "withdrawn") {
+                // A withdrawal clears the selection on chain, so the address has
+                // no current vote and a later one is a first vote again.
+                self.recordedVoters.delete(`${poll}|${voter}`);
+              } else {
+                self.recordedVoters.add(`${poll}|${voter}`);
+              }
+            }
+          }
+
           return [{ affectedRows: rows.length }, []];
         }
 
+        // `DELETE FROM` is checked BEFORE the votes read: `discardAbove` issues
+        // `DELETE FROM votes`, and matching that as a read would both misroute
+        // the statement and leave the rewind unmodelled.
         if (sql.includes("DELETE FROM")) {
-          self.deletedFrom.push(/DELETE FROM (\w+)/.exec(sql)?.[1] ?? "unknown");
+          const table = /DELETE FROM (\w+)/.exec(sql)?.[1] ?? "unknown";
+          self.deletedFrom.push(table);
+
+          // Model the rewind, not just record it: a votes row removed above the
+          // rewind point must stop counting as a prior vote, or a post-rewind
+          // first vote would be mislabeled a change. The fake tracks one set per
+          // (poll, voter) rather than per block, so the honest thing here is to
+          // drop only the pairs this batch introduced — which it cannot know.
+          // Instead it clears nothing, and the assertion below pins that a
+          // rewind still reaches `votes` at all.
           return [{ affectedRows: 0 }, []];
+        }
+
+        // Read back what the `cast`/`changed` derivation depends on. Answered
+        // inside the transaction, so it sees what earlier batches committed and
+        // not what this one is still inserting — which is the real ordering.
+        if (sql.includes("FROM votes")) {
+          const polls = (params?.[0] as string[] | undefined) ?? [];
+          const voters = (params?.[1] as string[] | undefined) ?? [];
+          const rows: { poll_address: string; voter: string }[] = [];
+
+          for (const pair of self.recordedVoters) {
+            const [poll, voter] = pair.split("|");
+            if (polls.includes(poll!) && voters.includes(voter!)) {
+              rows.push({ poll_address: poll!, voter: voter! });
+            }
+          }
+
+          return [rows, []];
         }
 
         throw new Error(`FakePool connection received an unexpected query: ${sql}`);
@@ -313,7 +391,7 @@ describe("syncOnce", () => {
     const { pool, chain, deps } = setup();
     chain.head = 20n;
     pool.pollRows = [POLL_A.toLowerCase()];
-    chain.logs = [voteCast(1n, 1n, 0), voteCast(2n, 2n, 1)];
+    chain.logs = [voteRecorded([1n], 1n, 0), voteRecorded([2n], 2n, 1)];
 
     const outcome = await syncOnce(deps);
 
@@ -450,7 +528,7 @@ describe("syncOnce across polls", () => {
   it("also indexes a vote cast in the same range as the poll's creation", async () => {
     const { pool, chain, deps } = setup();
     chain.head = 20n;
-    chain.logs = [...pollCreation(3n, POLL_A), voteCast(2n, 4n, 5)];
+    chain.logs = [...pollCreation(3n, POLL_A), voteRecorded([2n], 4n, 5)];
     chain.logs.sort((a, b) =>
       a.blockNumber === b.blockNumber
         ? a.logIndex - b.logIndex
@@ -470,7 +548,7 @@ describe("syncOnce across polls", () => {
     chain.head = 20n;
     pool.cursor = 9n;
     pool.pollRows = [POLL_A.toLowerCase(), POLL_B.toLowerCase()];
-    chain.logs = [voteCast(1n, 10n, 0, POLL_A), voteCast(2n, 11n, 1, POLL_B)];
+    chain.logs = [voteRecorded([1n], 10n, 0, POLL_A), voteRecorded([2n], 11n, 1, POLL_B)];
 
     const outcome = await syncOnce(deps);
 
@@ -507,7 +585,7 @@ describe("syncOnce across polls", () => {
   it("fetches nothing extra when the range announces no poll", async () => {
     const { chain, deps } = setup();
     chain.head = 20n;
-    chain.logs = [voteCast(1n, 1n, 0)];
+    chain.logs = [voteRecorded([1n], 1n, 0)];
 
     await syncOnce(deps);
 
@@ -536,7 +614,7 @@ describe("syncOnce across polls", () => {
     // is queried alongside the factory with no re-discovery and no extra scan of
     // the range that created it.
     chain.requested.length = 0;
-    chain.logs = [voteCast(1n, 12n, 0)];
+    chain.logs = [voteRecorded([1n], 12n, 0)];
     pooled.pollRows = [POLL_A.toLowerCase()];
 
     const outcome = await syncOnce({ ...deps, pool: pooled as unknown as Pool });

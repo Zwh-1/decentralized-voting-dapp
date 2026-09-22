@@ -2,8 +2,13 @@
 pragma solidity 0.8.37;
 
 /// @dev The minimal surface the attacker needs from any refund target.
+///
+///      `vote` takes a set rather than a single id, matching the real `Poll`.
+///      The signature has to track the contract under test: an attacker that
+///      called the old single-id selector would no longer reach the function at
+///      all, so the reentrancy tests would pass by failing to call anything.
 interface IRefundTarget {
-    function vote(uint256 candidateId) external payable;
+    function vote(uint256[] calldata optionIds) external payable;
     function refund() external;
 }
 
@@ -34,8 +39,8 @@ contract RefundAttacker {
     }
 
     /// @notice Stake and vote through the target, so this contract owns a stake.
-    function castVote(uint256 candidateId) external payable {
-        target.vote{ value: msg.value }(candidateId);
+    function castVote(uint256[] calldata optionIds) external payable {
+        target.vote{ value: msg.value }(optionIds);
     }
 
     /// @notice Trigger the refund that starts the reentrancy cascade.

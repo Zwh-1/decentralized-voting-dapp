@@ -29,6 +29,26 @@ import { cidProblem } from "./cid";
 import { seedableCids } from "./metadata";
 import { preflight } from "./preflight";
 
+/**
+ * The default mechanism set: single-select, equal weight, no delegation, public
+ * ballot, whitelist admission.
+ *
+ * `createPoll` takes a `PollConfig` struct, so a caller has to state the
+ * mechanisms rather than omit them. This constant is that statement for the
+ * common case — and it is deliberately named for what it is, so a script that
+ * wants a different mechanism is forced to write a different value instead of
+ * quietly inheriting this one.
+ */
+const DEFAULT_CONFIG = {
+  openToAll: false,
+  multiSelect: false,
+  maxSelections: 0n,
+  weighted: false,
+  delegable: false,
+  commitReveal: false,
+  revealWindowSeconds: 0n,
+} as const;
+
 /** Split a comma-separated variable, treating blank exactly as absent. */
 function listFrom(name: string): string[] {
   const raw = process.env[name];
@@ -149,7 +169,7 @@ async function confirm(what: string, hash: `0x${string}`): Promise<void> {
 
 const before = Number(await factory.read.pollCount());
 
-const hash = await factory.write.createPoll([QUESTION, CIDS, endsAt]);
+const hash = await factory.write.createPoll([QUESTION, CIDS, endsAt, DEFAULT_CONFIG]);
 await confirm(`createPoll(${CIDS.length} option(s))`, hash);
 
 const after = Number(await factory.read.pollCount());

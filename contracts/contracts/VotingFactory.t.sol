@@ -4,6 +4,7 @@ pragma solidity 0.8.37;
 import { Test } from "forge-std/Test.sol";
 
 import { Poll } from "./Poll.sol";
+import { PollMechanisms } from "./PollMechanisms.sol";
 import { VotingFactory } from "./VotingFactory.sol";
 
 /// @notice Tests for `VotingFactory`: creation, isolation between polls, and the
@@ -28,15 +29,30 @@ contract VotingFactoryTest is Test {
         cids[1] = "bafkreieq5jui4j25lacwomsqgvn7mq3z4g4hq7xw774wevxfrfrura3jqq";
     }
 
+    /// @dev The default mechanism set with admission chosen, which is what this
+    ///      suite is about. Mechanism-specific factory tests build their own.
+    function _config(bool openToAll_) internal pure returns (PollMechanisms.PollConfig memory) {
+        PollMechanisms.PollConfig memory config = PollMechanisms.defaultConfig(0);
+        config.openToAll = openToAll_;
+        return config;
+    }
+
+    /// @dev A one-element option array, for the many tests that vote for a
+    ///      single option now that `vote` takes a set.
+    function _one(uint256 optionId) internal pure returns (uint256[] memory ids) {
+        ids = new uint256[](1);
+        ids[0] = optionId;
+    }
+
     function _create(address creator, string memory question) internal returns (Poll poll) {
         vm.prank(creator);
-        poll = Poll(factory.createPoll(question, _cids(), FAR_FUTURE, false));
+        poll = Poll(factory.createPoll(question, _cids(), FAR_FUTURE, _config(false)));
     }
 
     /// @dev An open poll: no whitelist needed to vote.
     function _createOpen(address creator, string memory question) internal returns (Poll poll) {
         vm.prank(creator);
-        poll = Poll(factory.createPoll(question, _cids(), FAR_FUTURE, true));
+        poll = Poll(factory.createPoll(question, _cids(), FAR_FUTURE, _config(true)));
     }
 
     // ---------------------------------------------------------------------
@@ -63,7 +79,7 @@ contract VotingFactoryTest is Test {
         emit VotingFactory.PollCreated(address(0), alice, "Lunch?", FAR_FUTURE, 2, false);
 
         vm.prank(alice);
-        factory.createPoll("Lunch?", _cids(), FAR_FUTURE, false);
+        factory.createPoll("Lunch?", _cids(), FAR_FUTURE, _config(false));
     }
 
     function test_CreatePoll_CarriesTheAdmissionModeToThePoll() public {
@@ -82,7 +98,7 @@ contract VotingFactoryTest is Test {
         emit VotingFactory.PollCreated(address(0), alice, "Anyone?", FAR_FUTURE, 2, true);
 
         vm.prank(alice);
-        factory.createPoll("Anyone?", _cids(), FAR_FUTURE, true);
+        factory.createPoll("Anyone?", _cids(), FAR_FUTURE, _config(true));
     }
 
     function test_CreatePoll_AnyoneMayCreate() public {
@@ -101,21 +117,21 @@ contract VotingFactoryTest is Test {
         vm.expectRevert(abi.encodeWithSelector(VotingFactory.TooFewOptions.selector, 2, 1));
 
         vm.prank(alice);
-        factory.createPoll("Q", one, FAR_FUTURE, false);
+        factory.createPoll("Q", one, FAR_FUTURE, _config(false));
     }
 
     function test_CreatePoll_RevertsOnPastDeadline() public {
         vm.expectRevert(abi.encodeWithSelector(VotingFactory.DeadlineNotInFuture.selector, 1));
 
         vm.prank(alice);
-        factory.createPoll("Q", _cids(), 1, false);
+        factory.createPoll("Q", _cids(), 1, _config(false));
     }
 
     function test_CreatePoll_RevertsOnEmptyQuestion() public {
         vm.expectRevert(VotingFactory.EmptyQuestion.selector);
 
         vm.prank(alice);
-        factory.createPoll("", _cids(), FAR_FUTURE, false);
+        factory.createPoll("", _cids(), FAR_FUTURE, _config(false));
     }
 
     // ---------------------------------------------------------------------
@@ -145,7 +161,7 @@ contract VotingFactoryTest is Test {
         // Alice votes in the first poll only.
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        first.vote{ value: STAKE }(1);
+        first.vote{ value: STAKE }(_one(1));
 
         (, uint256 firstTotal) = first.results();
         (, uint256 secondTotal) = second.results();
@@ -189,7 +205,7 @@ contract VotingFactoryTest is Test {
 
         vm.expectRevert(Poll.AlreadyInitialized.selector);
         vm.prank(bob);
-        poll.initialize(bob, "Hijacked", _cids(), FAR_FUTURE, false);
+        poll.initialize(bob, "Hijacked", _cids(), FAR_FUTURE, _config(false));
 
         assertEq(poll.creator(), alice, "still alice's poll");
         assertEq(poll.owner(), alice, "and bob did not become the owner");
@@ -208,7 +224,7 @@ contract VotingFactoryTest is Test {
         // which is exactly why the factory never exposes it as a poll and the
         // indexer only follows `PollCreated`. Record the behaviour so a future
         // change to that assumption fails here rather than silently.
-        impl.initialize(alice, "Direct", _cids(), FAR_FUTURE, false);
+        impl.initialize(alice, "Direct", _cids(), FAR_FUTURE, _config(false));
         assertEq(impl.creator(), alice, "only an explicit call on the raw address does this");
 
         assertEq(factory.pollCount(), 0, "but the factory never recorded it as a poll");
@@ -244,10 +260,10 @@ contract VotingFactoryTest is Test {
 
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        poll.vote{ value: STAKE }(1);
+        poll.vote{ value: STAKE }(_one(1));
 
         vm.prank(alice);
-        poll.changeVote(2);
+        poll.changeVote(_one(2));
 
         (Poll.Option[] memory options, uint256 total) = poll.results();
         assertEq(total, 1, "one vote after a change");

@@ -45,19 +45,39 @@ export interface OptionRow extends LogRowBase {
  * `optionId` is 0 for a withdrawal, which carries an amount rather than an
  * option. On chain option ids are 1-indexed (0 means "no vote"), so 0 is a
  * sentinel that cannot collide with a real option.
+ *
+ * A RECORDED VOTE PRODUCES ONE ROW PER SELECTED OPTION, all sharing the same
+ * `logIndex`. That is a deliberate expansion rather than one row holding an
+ * array: every existing consumer joins votes to options on `option_id`, and
+ * keeping the column a scalar keeps that join a plain equality under
+ * multi-select. The rows of one event are still identifiable as a unit —
+ * (txHash, logIndex) is unchanged across them — so a reader that needs "what
+ * did this address vote for" can take the latest group rather than the latest
+ * row.
+ *
+ * `power` is how much the selection counted for: 1 under equal weight, the
+ * assigned weight under `weighted`. It is recorded per row rather than being
+ * looked up from the poll's current configuration, because a projection that
+ * re-derived it would report the mechanism as it is NOW for a vote cast under
+ * an earlier one.
  */
 export interface VoteRow extends LogRowBase {
   pollAddress: string;
   voter: string;
   optionId: number;
   eventType: VoteEventType;
+  power: string;
 }
 
 /**
- * The three things an address can do to a vote. Deliberately an event type and
- * not a state: `VoteChanged` exists as its own event precisely so the index can
- * take "the last thing this address did" and get the right answer, and it is
- * stored as its own row so that derivation stays a view over the stream.
+ * The three things an address can do to a vote.
+ *
+ * `cast` and `changed` are both produced by the contract's single
+ * `VoteRecorded` event; which one a row is depends on whether the address had
+ * already voted, which only the stream's order reveals. That is why this stays
+ * an event type and not a state: the index takes "the last recorded set this
+ * address submitted" and gets the right answer either way, and storing the
+ * distinction as its own row keeps that derivation a view over the stream.
  */
 export type VoteEventType = "cast" | "changed" | "withdrawn";
 
@@ -229,24 +249,29 @@ export function decodeLogs(logs: readonly MinimalLog[]): DecodedEvents {
         });
         break;
       }
-      case "VoteCast": {
-        const args = event.args as { voter: string; optionId: bigint };
-        result.votes.push({
-          ...base,
-          voter: args.voter.toLowerCase(),
-          optionId: Number(args.optionId),
-          eventType: "cast",
-        });
-        break;
-      }
-      case "VoteChanged": {
-        const args = event.args as { voter: string; toOptionId: bigint };
-        result.votes.push({
-          ...base,
-          voter: args.voter.toLowerCase(),
-          optionId: Number(args.toOptionId),
-          eventType: "changed",
-        });
+      case "VoteRecorded": {
+        // One event carries the whole selected set, so it expands to one row
+        // per option. All rows share the log's coordinates, which is what lets
+        // a reader reassemble the set: `optionId` alone cannot say whether
+        // {1,2} was one multi-select vote or two separate single ones.
+        const args = event.args as { voter: string; optionIds: readonly bigint[]; power: bigint };
+        const voter = args.voter.toLowerCase();
+        const power = args.power.toString();
+
+        for (const optionId of args.optionIds) {
+          result.votes.push({
+            ...base,
+            voter,
+            optionId: Number(optionId),
+            // Whether this is a first vote or a change is not in the event —
+            // the contract emits one shape for both. The projection resolves it
+            // at read time by looking at whether the address already had rows;
+            // labelling every row `cast` here would make a change look like an
+            // extra vote to any reader that trusted the label.
+            eventType: "cast",
+            power,
+          });
+        }
         break;
       }
       case "VoteWithdrawn": {
@@ -256,6 +281,10 @@ export function decodeLogs(logs: readonly MinimalLog[]): DecodedEvents {
           voter: args.voter.toLowerCase(),
           optionId: 0,
           eventType: "withdrawn",
+          // A withdrawal carries no power: the amount released is whatever the
+          // vote had been worth, which the reader gets from the rows it is
+          // releasing rather than from this one.
+          power: "0",
         });
         break;
       }

@@ -96,7 +96,18 @@ function fakeClient(options: { chainFails?: boolean; pollFails?: boolean } = {})
         case "phase":
           return 1;
         case "voterState":
-          return [true, 3n, 0n, true];
+          // A struct, matching the contract's named return. `marked` is the
+          // authority on "has voted" — not a non-zero `currentOptionId`, which
+          // is what the previous tuple shape forced every caller to infer.
+          return {
+            whitelisted: true,
+            currentOptionId: 3n,
+            stake: 0n,
+            marked: true,
+            canVote: true,
+            selections: [3n],
+            power: 1n,
+          };
         default:
           throw new Error(`unexpected call: ${call.functionName}`);
       }
@@ -133,9 +144,7 @@ function deadPool() {
  * The flags change only the `votes` rows, because that is the one read whose
  * projection the module does real work on: the other tables are returned as-is.
  */
-function livePool(
-  options: { changedAndCastShareTx?: boolean; castAfterChangeInOwnTx?: boolean } = {},
-) {
+function livePool(options: { multiSelectShareTx?: boolean; revoteAfterWithdrawal?: boolean } = {}) {
   return {
     async query(sql: string, params?: unknown[]): Promise<unknown[]> {
       if (sql.includes("FROM option_tally")) {
@@ -161,34 +170,85 @@ function livePool(
       if (sql.includes("FROM votes")) {
         assert.deepEqual(params, [POLL, VOTER], "the history must be scoped to poll and voter");
 
-        // The realistic shape of `changeVote`: one transaction, two rows, the
-        // `changed` followed by the `cast` that echoes the new count.
-        if (options.changedAndCastShareTx === true) {
+        // A multi-select change of mind: ONE log, TWO rows, because the
+        // selection was {2,3}. They share a transaction and a log index, which
+        // is what tells the projection these are one action rather than two.
+        // Listing them separately would tell a reader their address voted twice
+        // in the same block.
+        if (options.multiSelectShareTx === true) {
           return [
             [
-              { event_type: "cast", option_id: 2, tx_hash: "0xfirst", block_number: "100" },
-              { event_type: "changed", option_id: 3, tx_hash: "0xsecond", block_number: "120" },
-              { event_type: "cast", option_id: 3, tx_hash: "0xsecond", block_number: "120" },
+              {
+                event_type: "cast",
+                option_id: 1,
+                tx_hash: "0xfirst",
+                block_number: "100",
+                log_index: 0,
+              },
+              {
+                event_type: "changed",
+                option_id: 2,
+                tx_hash: "0xsecond",
+                block_number: "120",
+                log_index: 3,
+              },
+              {
+                event_type: "changed",
+                option_id: 3,
+                tx_hash: "0xsecond",
+                block_number: "120",
+                log_index: 3,
+              },
             ],
           ];
         }
 
         // A genuine re-vote after a withdrawal: its own transaction, so it is a
         // real action and must be kept.
-        if (options.castAfterChangeInOwnTx === true) {
+        if (options.revoteAfterWithdrawal === true) {
           return [
             [
-              { event_type: "cast", option_id: 2, tx_hash: "0xfirst", block_number: "100" },
-              { event_type: "changed", option_id: 3, tx_hash: "0xsecond", block_number: "120" },
-              { event_type: "cast", option_id: 1, tx_hash: "0xthird", block_number: "140" },
+              {
+                event_type: "cast",
+                option_id: 2,
+                tx_hash: "0xfirst",
+                block_number: "100",
+                log_index: 0,
+              },
+              {
+                event_type: "withdrawn",
+                option_id: 0,
+                tx_hash: "0xsecond",
+                block_number: "120",
+                log_index: 1,
+              },
+              {
+                event_type: "cast",
+                option_id: 1,
+                tx_hash: "0xthird",
+                block_number: "140",
+                log_index: 0,
+              },
             ],
           ];
         }
 
         return [
           [
-            { event_type: "cast", option_id: 2, tx_hash: "0xfirst", block_number: "100" },
-            { event_type: "changed", option_id: 3, tx_hash: "0xsecond", block_number: "120" },
+            {
+              event_type: "cast",
+              option_id: 2,
+              tx_hash: "0xfirst",
+              block_number: "100",
+              log_index: 0,
+            },
+            {
+              event_type: "changed",
+              option_id: 3,
+              tx_hash: "0xsecond",
+              block_number: "120",
+              log_index: 1,
+            },
           ],
         ];
       }
@@ -432,43 +492,39 @@ describe("getVoter with a configured but unreachable index", () => {
     assert.equal(voter.stakeWei, "0");
   });
 
-  it("does not list a change twice when the same transaction also emits a cast", async () => {
-    // `changeVote` emits VoteChanged AND VoteCast in one transaction: the change
-    // is the action, and the cast re-states the new count for tally-only readers.
-    // Both rows really are in the index, so this pins the projection rather than
-    // the decoder. Listing both would tell a reader their address voted twice in
-    // the same block, and the second line would read "cast for option 3" right
-    // after "changed to option 3" — two entries for one click.
-    install({ pool: livePool({ changedAndCastShareTx: true }) });
+  it("lists a multi-select change as ONE history entry, not one per option", async () => {
+    // A multi-select vote is one log that produced one row per selected option,
+    // and the rows share a transaction AND a log index. The projection has to
+    // recognise them as a single action: listing {2,3} as two entries would tell
+    // a reader their address voted twice in the same block, when it voted once
+    // for two things.
+    install({ pool: livePool({ multiSelectShareTx: true }) });
 
     const voter = await getVoter(POLL, VOTER);
 
+    assert.equal(voter.history.length, 2, "two actions: the first vote, then the change");
+    assert.equal(voter.history[1]?.kind, "changed");
     assert.deepEqual(
-      voter.history.map((event) => [event.kind, event.optionId]),
-      [
-        ["cast", 2],
-        ["changed", 3],
-      ],
-      "the cast that shares the change's transaction is the change's echo, not an action",
+      voter.history[1]?.optionIds,
+      [2, 3],
+      "and the one entry carries the whole new set",
     );
   });
 
-  it("still lists a standalone cast that happens to follow a change", async () => {
-    // The negative control for the rule above: a cast in its OWN transaction is a
-    // real action (a re-vote after a withdrawal) and must survive. Without this,
-    // collapsing "any cast after a change" would look correct.
-    install({ pool: livePool({ castAfterChangeInOwnTx: true }) });
+  it("still lists a re-vote after a withdrawal as its own action", async () => {
+    // The negative control for the rule above. Collapsing rows by transaction is
+    // only correct when they are the same action; a vote cast in its own
+    // transaction, after an intervening withdrawal, is a genuinely separate
+    // event and must survive. Without this, "merge everything that shares a tx"
+    // would look correct.
+    install({ pool: livePool({ revoteAfterWithdrawal: true }) });
 
     const voter = await getVoter(POLL, VOTER);
 
     assert.deepEqual(
-      voter.history.map((event) => [event.kind, event.optionId]),
-      [
-        ["cast", 2],
-        ["changed", 3],
-        ["cast", 1],
-      ],
-      "a cast in its own transaction is a separate action and must be kept",
+      voter.history.map((event) => event.kind),
+      ["cast", "withdrawn", "cast"],
+      "withdrawing is an action, and voting again afterwards is another",
     );
   });
 

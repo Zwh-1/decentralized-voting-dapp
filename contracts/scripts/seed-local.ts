@@ -39,6 +39,26 @@ const STAKE = 1_000_000_000_000_000n; // 0.001 ether, must equal Poll.STAKE
 
 const DAY = 24n * 60n * 60n;
 
+/**
+ * The default mechanism set with admission chosen.
+ *
+ * `createPoll` takes a `PollConfig` struct, so each poll below states its
+ * mechanisms rather than omitting them. Written as a function so that the seed
+ * script's two polls differ in exactly one visible place — the admission mode —
+ * instead of in two blocks of six literals a reader has to diff by eye.
+ */
+function DEFAULT_CONFIG(openToAll: boolean) {
+  return {
+    openToAll,
+    multiSelect: false,
+    maxSelections: 0n,
+    weighted: false,
+    delegable: false,
+    commitReveal: false,
+    revealWindowSeconds: 0n,
+  };
+}
+
 /** The pinned documents, in option order. Ids are 1-based, as in the contract. */
 const CIDS = await seedableCids();
 
@@ -102,7 +122,9 @@ const createHash = await factory.write.createPoll([
   CIDS,
   endsAt,
   // Whitelisted, so the local chain has a poll that exercises the list path.
-  false,
+  // Every mechanism is off: this is the default configuration, which is what
+  // the consistency check's baseline numbers are measured against.
+  DEFAULT_CONFIG(false),
 ]);
 const createReceipt = await publicClient.waitForTransactionReceipt({ hash: createHash });
 
@@ -151,7 +173,9 @@ for (const voter of voters) {
     address: pollAddress,
     abi: poll.abi,
     functionName: "vote",
-    args: [optionId],
+    // A set of one: `vote` takes the whole selection under every mechanism, so
+    // the single-choice case is a one-element array rather than a bare id.
+    args: [[optionId]],
     value: STAKE,
   });
   await publicClient.waitForTransactionReceipt({ hash });
@@ -173,7 +197,7 @@ const secondHash = await factory.write.createPoll([
   // reader can vote in it without the creator having added them first. Seeding
   // one of each mode keeps both admission paths present on a fresh local chain,
   // so a UI regression in either one is reachable without hand-built state.
-  true,
+  DEFAULT_CONFIG(true),
 ]);
 await publicClient.waitForTransactionReceipt({ hash: secondHash });
 
@@ -191,7 +215,7 @@ for (const [index, voter] of secondVoters.entries()) {
     address: secondAddress,
     abi: secondPoll.abi,
     functionName: "vote",
-    args: [optionId],
+    args: [[optionId]],
     value: STAKE,
   });
   await publicClient.waitForTransactionReceipt({ hash });
