@@ -24,11 +24,11 @@
 | 一   | Task 1.7 一键拉起验收（含负向对照）               | **阻塞**             | 需引擎                                                                                                                                                                                       |
 | 二   | Task 2.1 `/api/metrics`                           | **完成**             | 24 个新测试通过（全量 711 通过）；typecheck 0；构建含 `ƒ /api/metrics`；端到端 HTTP 200；lag 不可读时序列缺席已用真实数据验证；null→0 负向对照红了 2 个测试。详见 §14.5                      |
 | 二   | Task 2.2 metrics 不暴露公网                       | 未开始               | —                                                                                                                                                                                            |
-| 二   | Task 2.3 Prometheus 采集与告警规则                | 未开始               | —                                                                                                                                                                                            |
-| 二   | Task 2.4 exporters                                | 未开始               | —                                                                                                                                                                                            |
-| 二   | Task 2.5 Alertmanager 与邮件                      | 未开始               | —                                                                                                                                                                                            |
-| 二   | Task 2.6 Grafana provisioning 与看板              | 未开始               | —                                                                                                                                                                                            |
-| 二   | Task 2.7 部署版本可见性                           | 未开始               | —                                                                                                                                                                                            |
+| 二   | Task 2.3 Prometheus 采集与告警规则                | **已写，加载未验**   | 9 条规则 + 抓取配置；YAML 可解析；**来源校验通过**（23 条序列全部有出处，负向对照会失败）。`promtool check` 需引擎                                                                           |
+| 二   | Task 2.4 exporters                                | **已写，运行未验**   | 四服务进 compose；黑盒模块已写；**刻意不建 `.my.cnf`**（密码只走环境变量）。指标端点能否取到需引擎                                                                                           |
+| 二   | Task 2.5 Alertmanager 与邮件                      | **已写，投递未验**   | 模板 + entrypoint；`bash -n` 通过；缺变量时启动即失败已实测。**邮件是否真的送达需 SMTP 凭据与引擎**                                                                                          |
+| 二   | Task 2.6 Grafana provisioning 与看板              | **已写，渲染未验**   | 数据源与三块看板入库并 provisioned；JSON 可解析；**来源校验通过**（14 个面板的每条序列都有出处）。图能否渲染出数据需引擎                                                                     |
+| 二   | Task 2.7 部署版本可见性                           | **已写，采集未验**   | `publish-version.sh` 拆成「预期/在跑」两种模式；自测新增用例覆盖。node-exporter 读到 textfile 需引擎                                                                                         |
 | 二   | Task 2.8 三类故障演练                             | 未开始               | —                                                                                                                                                                                            |
 | 三   | Task 3.1 `ci.yml` 增加 `workflow_call`            | 未开始               | —                                                                                                                                                                                            |
 | 三   | Task 3.2 `release.yml`（门 → 构建 → 扫描 → 推送） | 未开始               | —                                                                                                                                                                                            |
@@ -2096,3 +2096,54 @@ Docker 仍未解除，但 compose 与脚本可以静态验证——`docker compo
 **我自己写出的一个 bug，值得单独记**：`ops/indexer/entrypoint.sh` 初版用 `node ...; code=$?` 配 `set -eu`——`set -e` 会让脚本在 node 失败的瞬间就退出，于是 `code=$?` 与整个「连续失败 N 次才放弃」的处理**全是死代码**。而这个包装脚本存在的唯一理由，就是防止一次 RPC 抖动变成重启风暴；死代码意味着它恰好退化成它要防的那个东西。改为 `if node ...; then code=0; else code=$?; fi` 后失败处理才是活的。
 
 **本批新增的未决问题**：`.env.example` 是计划外的文件。加它是因为 compose 需要一份容器侧的变量清单（`DATABASE_URL` 在容器内是 `mysql:3306`，与 `web/.env` 的 `127.0.0.1:3307` 不同），且 `docker compose config` 在无 `.env` 时仍需可校验——故 `env_file` 用 `required: false` 写法。这与 Task 1.6 的本地 override 是两件事。
+
+### 14.9 批二执行记录：来源校验器、一处会让告警永久静默的设计，以及一次自伤（2026-09-22）
+
+Docker 仍未解除，但批二几乎全部是 YAML 与 POSIX sh，可以静态验证。因此本批的重点不是「把配置写出来」，而是**造一把能自动检验纪律的尺子**。
+
+**新增文件**：`ops/prometheus/prometheus.yml`、`ops/prometheus/rules/voting.yml`（9 条规则）、`ops/prometheus/targets/external.json`、`ops/blackbox/blackbox.yml`、`ops/alertmanager/alertmanager.yml.tmpl`、`ops/alertmanager/entrypoint.sh`、`ops/grafana/provisioning/datasources/prometheus.yml`、`ops/grafana/provisioning/dashboards/dashboards.yml`、三块看板 JSON；`docker-compose.yml` 增加 7 个 observability 服务。
+
+**已实测**
+
+| 验证项                                                  | 结果                                                                           |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `docker compose config --quiet`（基础）                 | 退出码 **0**                                                                   |
+| `docker compose --profile observability config --quiet` | 退出码 **0**                                                                   |
+| 服务清单                                                | 11 个（4 应用 + 7 观测）                                                       |
+| 7 个 YAML + 4 个 JSON 解析                              | 全部通过                                                                       |
+| `bash -n` 全部 shell 脚本（逐文件）                     | 8 个全过                                                                       |
+| `ops/deploy/selftest.sh`                                | **41 项全过**（原 32 项 + 本批新增 9 项）                                      |
+| 来源校验                                                | 23 条序列、9 条规则、3 看板 14 面板，全部有出处                                |
+| 来源校验**负向对照**                                    | 把 `probe_success` 故意改成 `probe_success_total` → 退出码 1，并指名规则与序列 |
+| `pnpm format:check`                                     | 通过                                                                           |
+
+**未验证**（需引擎或外部资源）：`promtool check config/rules` 未跑（本机无 `promtool`，来源校验器**不能**替代它——它不解析 PromQL）；四个 exporter 的 `/metrics` 未取过；Grafana 未渲染过；告警邮件未投递过；`--profile observability up -d --wait` 未跑过。
+
+**新增的尺子：`ops/prometheus/check-rules.py`**
+
+计划里反复强调「每条规则/图表的序列都必须有出处」，但在本批之前这只是一句注释——**没有人能测它**。本批把它变成可执行的检查：脚本持有权威的序列清单（序列 → 生产者），扫描规则与看板的表达式，任何没有出处的序列都报错并退出 1。同时检查每条规则是否都有 `for`、`severity`、`summary`、`description`。
+
+它明确**不**做的事也写在文件头：不解析 PromQL，所以判不了表达式是否合法——那是 `promtool` 的职责。两者互补，谁也不能替谁。它顺带还能查一件事：每个静态抓取目标是否真的在 compose 里存在。
+
+**又一处「照计划写会静默失效」的设计：`DeployVersionDrift`**
+
+计划要求这条规则比较「在跑的 tag」与「期望的 tag」。但 `voting_deploy_info` 由 `publish-version.sh` 在**部署成功后**写——于是失败时它根本不存在，而失败恰恰是这条规则要抓的情况。更糟的是期望值那一侧：计划说「通过 Prometheus 的 `--set` 或一个静态记录规则提供」，而**Prometheus 没有 `--set` 这种机制**，静态记录规则也无法凭空知道 CI 想部署什么。
+
+处置：把 `publish-version.sh` 拆成两种模式——`--expected` 在健康门**之前**写 `voting_expected_info`，默认模式在门通过后写 `voting_deploy_info`，两者写不同文件（node-exporter 读目录下所有 `.prom`，所以不需要读改写）。规则随之写成 `voting_expected_info unless on(tag) voting_deploy_info`：只有「尝试过但没跑起来」才开火。这条规则的诚实之处在于它检测**不一致**而不是**落后**——单纯慢一个版本、没有正在进行的发布，不算漂移。
+
+自测为此新增 9 项，其中最关键的一项断言是：**健康门失败时，`voting_deploy.prom` 不存在，但 `voting_expected.prom` 存在**。没有这一条，「部署失败」和「从未部署」对 Prometheus 就是同一件事。
+
+**另外三处偏离计划的判断**
+
+1. **不建 `ops/mysqld-exporter/.my.cnf`。** 计划要一个 600 权限的模板文件，但 exporter 支持的是 `--mysqld.username` + `MYSQLD_EXPORTER_PASSWORD` 环境变量。多一个文件就多一处凭据可以泄漏，所以**不放任何凭据文件**，建账号的 SQL 写进 `ops/server/README.md`。
+2. **不给 exporter 加容器健康检查。** Prometheus 自己的 `up` 序列已经在报「它答没答」，`ContainerDown` 规则也在告警。再加一层容器 healthcheck 就是**第二个「它还活着吗」的所有者**，两者第一次分叉时就会打架。只有「就绪状态会卡住别的东西」的服务（prometheus / alertmanager / grafana）才有 healthcheck。
+3. **`web` 的抓取目标先写 `web:3000` 而不是 `web-blue:3000`。** 计划建议先写 blue 槽、批四再补。但给一个还没启动的服务写静态目标**不是占位符，是一个立刻会开火的假警报**（`up == 0`）。而人对长期误报的告警的正常反应是不再相信告警。所以等批四真的有了双槽再改。
+
+**外部探针为什么读文件而不是写字面量**：公网 URL 在写这份配置时还不存在（取决于最终给的域名），而 Prometheus 基本不支持在配置里做环境变量插值。写一个字面占位符就是一个永远失败的目标；写一个空文件则是一个目标都没有——后者是诚实的。服务器准备阶段把真实 URL 写进去即可。
+
+**我自己造成的两次自伤，都记下来**
+
+1. **来源校验器第一版有 5 个误报**（`: m`、`: h`）。原因是我用正则抽标识符时没有先剥离区间选择器，`increase(...[10m])` 里的 `m`、`predict_linear(...[6h])` 里的 `h` 被当成序列名。修法是加一条 `RANGE` 规则把它们替换掉。**值得一提的是它误报的位置全对**——这反而说明扫描逻辑本身是准的。
+2. **我用 PowerShell 的 `-replace` 批量改 `deploy.sh`，把文件改坏了。** 替换串里含 `$0`，而 .NET 正则里 `$0` 表示「整个匹配」，于是原行被拼进了自己的替换结果，`deploy.sh` 第 51 行变成了 `usage "[ -n "$tag" ] || die "usage: $0 <tag>" <tag>"`。这正好撞在仓库已有的纪律上——**源文件只用文件工具改，不用 shell 重写**（这个仓库之前就因为 shell 重定向吃过 GBK 二次编码的亏）。已用 `edit` 修回，并补跑了 `bash -n` 与自测。
+
+**本批顺带修掉的一处不一致**：`publish-version.sh` 参数缺失时退出 1，而 `health-gate.sh` 早就把「用法错误」定义为退出 2。这两者该区分：用法错误看 usage 就行，运行失败才需要排查。已在 `lib.sh` 加 `usage()`，`publish-version.sh` 与 `deploy.sh` 统一成 2。这是新增自测用例发现的——**新写的测试立刻抓出了一个我自己刚写下的不一致**。
