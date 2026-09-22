@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 
 import { runSyncOnce } from "@/lib/data";
+import { describeFailure } from "@/lib/failure";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,12 @@ export const dynamic = "force-dynamic";
  * be driven externally (cron, a deploy hook, or the UI's sync button) without
  * relying on the in-process loop, which is the part most likely to be absent in
  * a serverless deployment.
+ *
+ * A failure gets a sentence naming the dependency that failed, not the raw
+ * throwable. The raw one is a viem error carrying the endpoint **with its
+ * `apiKey`** and the request body, and this route's `message` is rendered on the
+ * page — so echoing it published the operator's RPC key to every visitor who
+ * clicked the sync button. See `lib/failure.ts`.
  */
 export async function POST() {
   try {
@@ -22,12 +29,10 @@ export async function POST() {
     // configured, and the caller should treat the index as absent.
     return NextResponse.json(outcome, { status: 200 });
   } catch (error) {
+    console.error("[api/index/sync] sync failed", error);
+
     return NextResponse.json(
-      {
-        enabled: true,
-        error: "sync_failed",
-        message: error instanceof Error ? error.message : String(error),
-      },
+      { enabled: true, error: "sync_failed", message: describeFailure(error) },
       { status: 503 },
     );
   }

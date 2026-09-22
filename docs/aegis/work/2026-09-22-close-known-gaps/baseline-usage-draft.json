@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-09-22-close-known-gaps",
+  "requiredBaselineRefs": [],
+  "deliveredContextRefs": [],
+  "acknowledgedBeforePlanRefs": [],
+  "citedInPlanRefs": [],
+  "missingRefs": [],
+  "decision": "continue"
+}

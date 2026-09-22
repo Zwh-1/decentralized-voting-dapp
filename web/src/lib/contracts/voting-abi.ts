@@ -2,18 +2,233 @@
 // GENERATED FILE — DO NOT EDIT BY HAND.
 // Regenerate with: pnpm export-abi
 
-/** The deployed `Voting` contract interface, as emitted by solc. */
-export const votingAbi = [
+/** The deployed `VotingFactory` interface, as emitted by solc. */
+export const factoryAbi = [
+  {
+    "inputs": [],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
   {
     "inputs": [
       {
+        "internalType": "uint256",
+        "name": "endsAt",
+        "type": "uint256"
+      }
+    ],
+    "name": "DeadlineNotInFuture",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "EmptyQuestion",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "FailedDeployment",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "balance",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "needed",
+        "type": "uint256"
+      }
+    ],
+    "name": "InsufficientBalance",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "minimum",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "provided",
+        "type": "uint256"
+      }
+    ],
+    "name": "TooFewOptions",
+    "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
         "internalType": "address",
-        "name": "initialOwner",
+        "name": "poll",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "creator",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "question",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "endsAt",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "optionCount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "openToAll",
+        "type": "bool"
+      }
+    ],
+    "name": "PollCreated",
+    "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "allPolls",
+    "outputs": [
+      {
+        "internalType": "address[]",
+        "name": "",
+        "type": "address[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "question",
+        "type": "string"
+      },
+      {
+        "internalType": "string[]",
+        "name": "optionCIDs",
+        "type": "string[]"
+      },
+      {
+        "internalType": "uint256",
+        "name": "endsAt",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "openToAll",
+        "type": "bool"
+      }
+    ],
+    "name": "createPoll",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "poll",
         "type": "address"
       }
     ],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "implementation",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+      }
+    ],
+    "name": "pollAt",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "pollCount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "creator_",
+        "type": "address"
+      }
+    ],
+    "name": "pollsByCreator",
+    "outputs": [
+      {
+        "internalType": "address[]",
+        "name": "",
+        "type": "address[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+] as const;
+
+/** The `Poll` interface, as emitted by solc. Every poll shares it. */
+export const pollAbi = [
+  {
+    "inputs": [],
+    "stateMutability": "nonpayable",
     "type": "constructor"
+  },
+  {
+    "inputs": [],
+    "name": "AlreadyInitialized",
+    "type": "error"
   },
   {
     "inputs": [
@@ -30,11 +245,38 @@ export const votingAbi = [
     "inputs": [
       {
         "internalType": "uint256",
+        "name": "endsAt",
+        "type": "uint256"
+      }
+    ],
+    "name": "DeadlineNotInFuture",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "EmptyQuestion",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
         "name": "availableAt",
         "type": "uint256"
       }
     ],
     "name": "GracePeriodNotElapsed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      }
+    ],
+    "name": "HasNotVoted",
     "type": "error"
   },
   {
@@ -56,22 +298,17 @@ export const votingAbi = [
   {
     "inputs": [
       {
-        "internalType": "enum Voting.Phase",
+        "internalType": "enum Poll.Phase",
         "name": "expected",
         "type": "uint8"
       },
       {
-        "internalType": "enum Voting.Phase",
+        "internalType": "enum Poll.Phase",
         "name": "actual",
         "type": "uint8"
       }
     ],
     "name": "InvalidPhase",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "NoCandidates",
     "type": "error"
   },
   {
@@ -88,6 +325,17 @@ export const votingAbi = [
   {
     "inputs": [],
     "name": "NothingToRefund",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "optionId",
+        "type": "uint256"
+      }
+    ],
+    "name": "OptionInUse",
     "type": "error"
   },
   {
@@ -113,8 +361,46 @@ export const votingAbi = [
     "type": "error"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "endsAt",
+        "type": "uint256"
+      }
+    ],
+    "name": "PollAlreadyEnded",
+    "type": "error"
+  },
+  {
     "inputs": [],
     "name": "ReentrancyGuardReentrantCall",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "optionId",
+        "type": "uint256"
+      }
+    ],
+    "name": "SameOption",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "minimum",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "provided",
+        "type": "uint256"
+      }
+    ],
+    "name": "TooFewOptions",
     "type": "error"
   },
   {
@@ -126,11 +412,11 @@ export const votingAbi = [
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "candidateId",
+        "name": "optionId",
         "type": "uint256"
       }
     ],
-    "name": "UnknownCandidate",
+    "name": "UnknownOption",
     "type": "error"
   },
   {
@@ -150,11 +436,43 @@ export const votingAbi = [
       {
         "indexed": false,
         "internalType": "string",
-        "name": "metadataCID",
+        "name": "labelCID",
         "type": "string"
       }
     ],
-    "name": "CandidateAdded",
+    "name": "OptionAdded",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      }
+    ],
+    "name": "OptionRemoved",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "id",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "labelCID",
+        "type": "string"
+      }
+    ],
+    "name": "OptionUpdated",
     "type": "event"
   },
   {
@@ -181,13 +499,13 @@ export const votingAbi = [
     "inputs": [
       {
         "indexed": true,
-        "internalType": "enum Voting.Phase",
+        "internalType": "enum Poll.Phase",
         "name": "from",
         "type": "uint8"
       },
       {
         "indexed": true,
-        "internalType": "enum Voting.Phase",
+        "internalType": "enum Poll.Phase",
         "name": "to",
         "type": "uint8"
       }
@@ -245,7 +563,7 @@ export const votingAbi = [
       {
         "indexed": true,
         "internalType": "uint256",
-        "name": "candidateId",
+        "name": "optionId",
         "type": "uint256"
       },
       {
@@ -269,6 +587,50 @@ export const votingAbi = [
       },
       {
         "indexed": false,
+        "internalType": "uint256",
+        "name": "fromOptionId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "toOptionId",
+        "type": "uint256"
+      }
+    ],
+    "name": "VoteChanged",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "VoteWithdrawn",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      },
+      {
+        "indexed": false,
         "internalType": "bool",
         "name": "allowed",
         "type": "bool"
@@ -276,6 +638,19 @@ export const votingAbi = [
     ],
     "name": "WhitelistUpdated",
     "type": "event"
+  },
+  {
+    "inputs": [],
+    "name": "MIN_OPTIONS",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
   },
   {
     "inputs": [],
@@ -307,11 +682,11 @@ export const votingAbi = [
     "inputs": [
       {
         "internalType": "string",
-        "name": "metadataCID",
+        "name": "labelCID",
         "type": "string"
       }
     ],
-    "name": "addCandidate",
+    "name": "addOption",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -320,11 +695,129 @@ export const votingAbi = [
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "candidateId",
+        "name": "optionId",
         "type": "uint256"
       }
     ],
-    "name": "candidateCID",
+    "name": "changeVote",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "closeAfterDeadline",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "creator",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "endPoll",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "endsAt",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "creator_",
+        "type": "address"
+      },
+      {
+        "internalType": "string",
+        "name": "question_",
+        "type": "string"
+      },
+      {
+        "internalType": "string[]",
+        "name": "optionCIDs",
+        "type": "string[]"
+      },
+      {
+        "internalType": "uint256",
+        "name": "endsAt_",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "openToAll_",
+        "type": "bool"
+      }
+    ],
+    "name": "initialize",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "isWhitelisted",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "openToAll",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "optionId",
+        "type": "uint256"
+      }
+    ],
+    "name": "optionCID",
     "outputs": [
       {
         "internalType": "string",
@@ -337,57 +830,12 @@ export const votingAbi = [
   },
   {
     "inputs": [],
-    "name": "candidateCount",
+    "name": "optionCount",
     "outputs": [
       {
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "endVoting",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "voter",
-        "type": "address"
-      }
-    ],
-    "name": "hasVoted",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "voter",
-        "type": "address"
-      }
-    ],
-    "name": "isWhitelisted",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
       }
     ],
     "stateMutability": "view",
@@ -411,7 +859,7 @@ export const votingAbi = [
     "name": "phase",
     "outputs": [
       {
-        "internalType": "enum Voting.Phase",
+        "internalType": "enum Poll.Phase",
         "name": "",
         "type": "uint8"
       }
@@ -421,7 +869,33 @@ export const votingAbi = [
   },
   {
     "inputs": [],
+    "name": "question",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "refund",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "optionId",
+        "type": "uint256"
+      }
+    ],
+    "name": "removeOption",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -446,7 +920,7 @@ export const votingAbi = [
           },
           {
             "internalType": "string",
-            "name": "metadataCID",
+            "name": "labelCID",
             "type": "string"
           },
           {
@@ -455,7 +929,7 @@ export const votingAbi = [
             "type": "uint256"
           }
         ],
-        "internalType": "struct Voting.Candidate[]",
+        "internalType": "struct Poll.Option[]",
         "name": "list",
         "type": "tuple[]"
       },
@@ -490,7 +964,7 @@ export const votingAbi = [
     "inputs": [
       {
         "internalType": "address",
-        "name": "voter",
+        "name": "",
         "type": "address"
       }
     ],
@@ -507,7 +981,7 @@ export const votingAbi = [
   },
   {
     "inputs": [],
-    "name": "startVoting",
+    "name": "startPoll",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -555,7 +1029,25 @@ export const votingAbi = [
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "candidateId",
+        "name": "optionId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "labelCID",
+        "type": "string"
+      }
+    ],
+    "name": "updateOption",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "optionId",
         "type": "uint256"
       }
     ],
@@ -568,7 +1060,7 @@ export const votingAbi = [
     "inputs": [
       {
         "internalType": "address",
-        "name": "voter",
+        "name": "",
         "type": "address"
       }
     ],
@@ -578,6 +1070,45 @@ export const votingAbi = [
         "internalType": "uint256",
         "name": "",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      }
+    ],
+    "name": "voterState",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "whitelisted",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint256",
+        "name": "currentOptionId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "stake",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "marked",
+        "type": "bool"
+      },
+      {
+        "internalType": "bool",
+        "name": "canVote",
+        "type": "bool"
       }
     ],
     "stateMutability": "view",
@@ -595,11 +1126,18 @@ export const votingAbi = [
     ],
     "stateMutability": "view",
     "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "withdrawVote",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
   }
 ] as const;
 
-/** Mirrors the on-chain `Voting.Phase` enum. */
-export enum VotingPhase {
+/** Mirrors the on-chain `Poll.Phase` enum. */
+export enum PollPhase {
   Setup = 0,
   Voting = 1,
   Ended = 2,

@@ -27,7 +27,7 @@ import type { RowDataPacket } from "mysql2/promise";
 
 import { asChainReader, readOnChainTally } from "../src/lib/chain";
 import { loadServerConfig } from "../src/lib/config";
-import { votingAbi } from "../src/lib/contracts";
+import { factoryAbi, pollAbi } from "../src/lib/contracts";
 import { migrate } from "../src/lib/db/migrate";
 import { createPool } from "../src/lib/db/pool";
 import { syncOnce, type SyncDeps, type SyncOutcome } from "../src/lib/indexer/sync";
@@ -98,7 +98,7 @@ const pool = createPool(databaseUrl);
 const deps: SyncDeps = {
   pool,
   chain: asChainReader(publicClient),
-  address: config.votingAddress,
+  factoryAddress: config.factoryAddress,
   confirmations: config.confirmations,
   chunkBlocks: config.chunkBlocks,
   ...(config.startBlock !== undefined ? { startBlock: config.startBlock } : {}),
@@ -156,7 +156,11 @@ async function observe(): Promise<Snapshot> {
     head: await publicClient.getBlockNumber(),
     cursor: rows[0] === undefined ? null : BigInt(rows[0].last_block),
     whitelistRows: await countOf("SELECT COUNT(*) AS n FROM whitelist_events"),
-    tallyTotal: await countOf("SELECT COALESCE(SUM(vote_count), 0) AS n FROM candidate_tally"),
+    tallyTotal: await countOf(
+      "SELECT COALESCE(SUM(vote_count), 0) AS n FROM option_tally WHERE poll_address = '" +
+        pollAddress.toLowerCase() +
+        "'",
+    ),
   };
 }
 
@@ -216,6 +220,47 @@ async function waitForHeadBelow(target: bigint): Promise<bigint> {
   return publicClient.getBlockNumber();
 }
 
+/**
+ * The poll this drill operates on.
+ *
+ * Discovered from the factory rather than configured, for the same reason the
+ * app does it: a hardcoded poll address would silently keep working against a
+ * poll that no longer exists after any redeploy, and the drill would report a
+ * chain-versus-index mismatch that is really just a stale constant.
+ *
+ * `POLL_ADDRESS` overrides it, which is what the CI job uses to pin the drill to
+ * the poll the seed script created.
+ */
+const pollAddress: `0x${string}` = await (async (): Promise<`0x${string}`> => {
+  const explicit = process.env.POLL_ADDRESS;
+
+  if (explicit !== undefined && explicit.length > 0) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(explicit)) {
+      console.error("POLL_ADDRESS must be a 20 byte hex address.");
+      process.exit(1);
+    }
+
+    return explicit as `0x${string}`;
+  }
+
+  const all = await publicClient.readContract({
+    address: config.factoryAddress,
+    abi: factoryAbi,
+    functionName: "allPolls",
+  });
+
+  const first = all[0];
+
+  if (first === undefined) {
+    console.error(
+      "The factory has created no polls, so there is nothing to drill. Run `pnpm seed:local`.",
+    );
+    process.exit(1);
+  }
+
+  return first;
+})();
+
 const report: Record<string, unknown> = {};
 let snapshotId: string | null = null;
 let snapshotConsumed = false;
@@ -224,15 +269,15 @@ let failure: string | null = null;
 try {
   const phase = Number(
     await publicClient.readContract({
-      address: config.votingAddress,
-      abi: votingAbi,
+      address: pollAddress,
+      abi: pollAbi,
       functionName: "phase",
     }),
   );
 
   check(
     phase !== PHASE_ENDED,
-    "the ballot is in the Ended phase, where setWhitelist reverts; re-seed and retry",
+    "the poll is in the Ended phase, where setWhitelist reverts; re-seed and retry",
   );
 
   // Settle first so the "before" numbers are a real baseline.
@@ -245,8 +290,8 @@ try {
   report.snapshot = { id: snapshotId, headAtSnapshot: before.head.toString() };
 
   const txHash = await wallet.writeContract({
-    address: config.votingAddress,
-    abi: votingAbi,
+    address: pollAddress,
+    abi: pollAbi,
     functionName: "setWhitelist",
     args: [[PROBE], true],
   });
@@ -371,8 +416,8 @@ try {
   const settled = await observe();
 
   // Reuse the app's own reader rather than re-deriving the tuple shape here;
-  // `results()` returns (Candidate[], uint256) and it is easy to bind the wrong half.
-  const onChain = await readOnChainTally(publicClient, config.votingAddress);
+  // `results()` returns (Option[], uint256) and it is easy to bind the wrong half.
+  const onChain = await readOnChainTally(publicClient, pollAddress);
 
   report.final = {
     ...describe(settled),

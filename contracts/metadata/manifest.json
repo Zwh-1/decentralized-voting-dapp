@@ -1,0 +1,16 @@
+{
+  "candidates": [
+    {
+      "file": "candidate-1.json",
+      "cid": "bafkreihnl2gt3dygiplwxv5kwbx53l4u24cmsnu3tniz2wmew3n7phfq5a"
+    },
+    {
+      "file": "candidate-2.json",
+      "cid": "bafkreiezmqiiomytpzj5bhprhqepa5ijenxdwtapomhubszecnc2jlx57y"
+    },
+    {
+      "file": "candidate-3.json",
+      "cid": "bafkreicnafrpxomcyqhmba7n22yd662kik5bon4nldeusvep72i2luomnu"
+    }
+  ]
+}

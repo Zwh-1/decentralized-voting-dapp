@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "requestedOutcome": "关闭覆盖率/gas 证据失效、Sepolia 源码验证、sweepUnclaimed 资金假设、演练缺口、清理与提交",
+  "goal": "关闭覆盖率/gas 证据失效、Sepolia 源码验证、sweepUnclaimed 资金假设、演练缺口、清理与提交",
+  "successEvidence": [],
+  "stopCondition": "Stop when success evidence is satisfied or a blocker/risk requires pause.",
+  "nonGoals": [],
+  "scope": "contracts + web + docs + git 工作区",
+  "changeKinds": ["code-change"],
+  "riskHints": []
+}

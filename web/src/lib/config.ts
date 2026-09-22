@@ -15,7 +15,7 @@ import { getDeployment } from "./contracts";
 export interface ServerConfig {
   rpcUrl: string;
   chainId: number;
-  votingAddress: `0x${string}`;
+  factoryAddress: `0x${string}`;
   /** null when no database is configured; the index is then disabled. */
   databaseUrl: string | null;
   confirmations: number;
@@ -56,18 +56,24 @@ function integer(env: NodeJS.ProcessEnv, name: string, fallback: number): number
 }
 
 /**
- * Resolves the contract address.
+ * Resolves the factory address.
  *
- * `VOTING_ADDRESS` wins when set; otherwise the address comes from the generated
- * registry, which `pnpm export-abi` fills from `contracts/deployments/*.json`.
- * That means the local development flow needs no manual address copying.
+ * `FACTORY_ADDRESS` wins when set; otherwise the address comes from the
+ * generated registry, which `pnpm export-abi` fills from
+ * `contracts/deployments/*.json`. That means the local development flow needs no
+ * manual address copying.
+ *
+ * The poll addresses are *not* configured anywhere: they are discovered from the
+ * factory's `PollCreated` events at runtime, by both the browser and the
+ * indexer. A list of polls in a config file would be a second source of truth
+ * for "which polls exist", and it would go stale the moment anyone created one.
  */
 function resolveAddress(env: NodeJS.ProcessEnv, chainId: number): `0x${string}` {
-  const explicit = env.VOTING_ADDRESS;
+  const explicit = env.FACTORY_ADDRESS;
 
   if (explicit !== undefined && explicit.length > 0) {
     if (!/^0x[0-9a-fA-F]{40}$/.test(explicit)) {
-      throw new Error(`VOTING_ADDRESS must be a 20 byte hex address, received "${explicit}"`);
+      throw new Error(`FACTORY_ADDRESS must be a 20 byte hex address, received "${explicit}"`);
     }
 
     return explicit as `0x${string}`;
@@ -77,12 +83,12 @@ function resolveAddress(env: NodeJS.ProcessEnv, chainId: number): `0x${string}` 
 
   if (deployment === undefined) {
     throw new Error(
-      `No Voting deployment recorded for chain ${chainId}. ` +
-        "Deploy first, then run `pnpm export-abi`, or set VOTING_ADDRESS explicitly.",
+      `No VotingFactory deployment recorded for chain ${chainId}. ` +
+        "Deploy first, then run `pnpm export-abi`, or set FACTORY_ADDRESS explicitly.",
     );
   }
 
-  return deployment.voting;
+  return deployment.factory;
 }
 
 /**
@@ -123,7 +129,7 @@ export function loadServerConfig(env: NodeJS.ProcessEnv = process.env): ServerCo
   return {
     rpcUrl: required(env, "RPC_URL", "http://127.0.0.1:8545"),
     chainId,
-    votingAddress: resolveAddress(env, chainId),
+    factoryAddress: resolveAddress(env, chainId),
     databaseUrl,
     confirmations: integer(env, "CONFIRMATIONS", 5),
     chunkBlocks: integer(env, "CHUNK_BLOCKS", 2000),

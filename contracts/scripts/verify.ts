@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: MIT
 /**
- * Verifies the deployed `Voting` contract on Etherscan.
+ * Verifies the deployed contracts on Etherscan.
  *
  *   pnpm --filter @voting/contracts verify:sepolia
  *
- * The constructor argument is read from the deployment record that `deploy.ts`
- * wrote, rather than being retyped. `Voting`'s constructor takes the initial
- * owner, so a mismatched argument produces a verification failure that looks
- * like a compiler problem but is really a typo — reading it back from the record
- * removes that whole failure mode.
+ * Two contracts are verified: the `VotingFactory`, and the `Poll`
+ * implementation it deployed. The implementation is verified too because it is
+ * real deployed bytecode that a reader may want to inspect — and because
+ * Etherscan shows a clone as an empty proxy, so the implementation is the only
+ * place the actual logic is visible on the explorer.
+ *
+ * Neither constructor takes an argument any more. The factory's constructor
+ * deploys the implementation, and a poll is created by `initialize` rather than
+ * by a constructor, so there is nothing to re-read from the deployment record
+ * and nothing to mistype.
  */
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -17,8 +22,8 @@ import { network, tasks } from "hardhat";
 
 interface DeploymentRecord {
   chainId: number;
-  voting: `0x${string}`;
-  owner: `0x${string}`;
+  factory: `0x${string}`;
+  implementation: `0x${string}`;
   deployer: `0x${string}`;
   deployedAt: string;
 }
@@ -55,14 +60,16 @@ try {
   );
 }
 
-console.log(`Verifying Voting at ${record.voting} (chain ${chainId})`);
-console.log(`Constructor argument read from the deployment record: owner=${record.owner}`);
-
 // The verify task resolves its connection from the same CLI flags this script
 // was invoked with, so `--network sepoliaReadOnly` applies here as well. That
 // entry has no `accounts`, which is why verification does not need the
 // deployer's private key.
-await tasks.getTask("verify").run({
-  address: record.voting,
-  constructorArgs: [record.owner],
-});
+console.log(`Verifying VotingFactory at ${record.factory} (chain ${chainId})`);
+await tasks.getTask("verify").run({ address: record.factory });
+
+console.log(`Verifying Poll (implementation) at ${record.implementation}`);
+await tasks.getTask("verify").run({ address: record.implementation });
+
+console.log("");
+console.log("Both contracts verified. A poll clone will show as a proxy on the");
+console.log("explorer; its logic is the verified Poll implementation above.");

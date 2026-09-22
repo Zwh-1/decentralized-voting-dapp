@@ -1,15 +1,15 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 /**
  * The consistency check reads three things that only mean something together: the
  * index's tally, the cursor that tally was committed with, and a single height on
  * the chain. Each pair was previously read at a different moment, and each
- * mismatch has the same symptom — a healthy index accused of diverging, which is
+ * mismatch has the same symptom 鈥?a healthy index accused of diverging, which is
  * the one verdict the whole M-6 check exists to make trustworthy.
  *
  * Measured before the fix, driving a real vote while polling `/api/results`:
  *
  *     {"status":500,"verdict":"divergent",
- *      "discrepancies":[{"candidateId":1,"onChain":68,"indexed":67,"pending":0}],
+ *      "discrepancies":[{"optionId":1,"onChain":68,"indexed":67,"pending":0}],
  *      "onChainTotal":201,"indexedTotal":200,"unindexedBlocks":0,"pendingVotes":0,
  *      "lastIndexedBlock":"407"}
  *
@@ -23,7 +23,7 @@ import { describe, it } from "node:test";
 import { encodeAbiParameters, encodeEventTopics, getAbiItem, type AbiEvent } from "viem";
 import type { PublicClient } from "viem";
 
-import { votingAbi } from "../src/lib/contracts";
+import { pollAbi } from "../src/lib/contracts";
 import { checkConsistency, readIndexSnapshot, readIndexedTally } from "../src/lib/report";
 import { readCursor } from "../src/lib/indexer/sync";
 
@@ -41,8 +41,8 @@ const AFTER_VOTE: Committed = { counts: [68, 67, 66], cursor: 407 };
 
 function tallyRow(state: Committed) {
   return state.counts.map((voteCount, offset) => ({
-    candidate_id: offset + 1,
-    metadata_cid: `bafy${offset}`,
+    option_id: offset + 1,
+    label_cid: `bafy${offset}`,
     vote_count: String(voteCount),
   }));
 }
@@ -60,7 +60,7 @@ function racingPool() {
 
   // mysql2 resolves to `[rows, fields]`, so both branches wrap their rows once.
   const answer = (state: Committed, sql: string) =>
-    sql.includes("candidate_tally") ? [tallyRow(state)] : [[{ last_block: String(state.cursor) }]];
+    sql.includes("option_tally") ? [tallyRow(state)] : [[{ last_block: String(state.cursor) }]];
 
   return {
     /** Set once the batch has landed, so a test can assert the race happened. */
@@ -94,7 +94,7 @@ function racingPool() {
 describe("readIndexSnapshot", () => {
   it("returns a tally and a cursor that belong to the same committed state", async () => {
     const pool = racingPool();
-    const { indexed, cursor } = await readIndexSnapshot(pool as never);
+    const { indexed, cursor } = await readIndexSnapshot(pool as never, CONTRACT);
 
     assert.equal(indexed.total, 200);
     assert.equal(cursor, 406n, "the cursor must be the one the tally was written with");
@@ -106,7 +106,7 @@ describe("readIndexSnapshot", () => {
     // production. The pool commits the batch after the first read, exactly as a
     // two-second indexer loop can.
     const pool = racingPool();
-    const indexed = await readIndexedTally(pool as never);
+    const indexed = await readIndexedTally(pool as never, CONTRACT);
     const cursor = await readCursor(pool as never);
 
     assert.equal(pool.landed, true);
@@ -117,10 +117,10 @@ describe("readIndexSnapshot", () => {
 
 /** A VoteCast for candidate 1 at the given block, encoded against the real ABI. */
 function voteCast(blockNumber: bigint) {
-  const item = getAbiItem({ abi: votingAbi, name: "VoteCast" }) as unknown as AbiEvent;
+  const item = getAbiItem({ abi: pollAbi, name: "VoteCast" }) as unknown as AbiEvent;
   const args: Record<string, unknown> = {
     voter: `0x${"11".repeat(20)}`,
-    candidateId: 1n,
+    optionId: 1n,
     newCount: 68n,
   };
   const indexedArgs = Object.fromEntries(
@@ -134,7 +134,7 @@ function voteCast(blockNumber: bigint) {
     transactionHash: `0x${"cd".repeat(32)}`,
     logIndex: 0,
     topics: encodeEventTopics({
-      abi: votingAbi,
+      abi: pollAbi,
       eventName: "VoteCast",
       args: indexedArgs as never,
     }),
@@ -152,9 +152,9 @@ describe("checkConsistency", () => {
       getBlockNumber: async () => 407n,
       readContract: async () => [
         [
-          { id: 1n, metadataCID: "bafy0", voteCount: 68n },
-          { id: 2n, metadataCID: "bafy1", voteCount: 67n },
-          { id: 3n, metadataCID: "bafy2", voteCount: 66n },
+          { id: 1n, labelCID: "bafy0", voteCount: 68n },
+          { id: 2n, labelCID: "bafy1", voteCount: 67n },
+          { id: 3n, labelCID: "bafy2", voteCount: 66n },
         ],
         201n,
       ],
@@ -185,7 +185,7 @@ describe("checkConsistency", () => {
           async rollback() {},
           release() {},
           async query(sql: string) {
-            return sql.includes("candidate_tally")
+            return sql.includes("option_tally")
               ? [tallyRow({ counts: [66, 67, 66], cursor: 410 })]
               : [{ last_block: "410" }];
           },
@@ -196,9 +196,9 @@ describe("checkConsistency", () => {
       getBlockNumber: async () => 410n,
       readContract: async () => [
         [
-          { id: 1n, metadataCID: "bafy0", voteCount: 68n },
-          { id: 2n, metadataCID: "bafy1", voteCount: 67n },
-          { id: 3n, metadataCID: "bafy2", voteCount: 66n },
+          { id: 1n, labelCID: "bafy0", voteCount: 68n },
+          { id: 2n, labelCID: "bafy1", voteCount: 67n },
+          { id: 3n, labelCID: "bafy2", voteCount: 66n },
         ],
         201n,
       ],
@@ -208,9 +208,7 @@ describe("checkConsistency", () => {
     const check = await checkConsistency({ client, pool: pool as never, address: CONTRACT });
 
     assert.equal(check.status, "divergent");
-    assert.deepEqual(check.discrepancies, [
-      { candidateId: 1, onChain: 68, indexed: 66, pending: 0 },
-    ]);
+    assert.deepEqual(check.discrepancies, [{ optionId: 1, onChain: 68, indexed: 66, pending: 0 }]);
   });
 
   it("pins the chain tally to the same height as the logs it enumerates", async () => {
@@ -225,7 +223,7 @@ describe("checkConsistency", () => {
           async rollback() {},
           release() {},
           async query(sql: string) {
-            return sql.includes("candidate_tally") ? [tallyRow(SYNCED)] : [{ last_block: "406" }];
+            return sql.includes("option_tally") ? [tallyRow(SYNCED)] : [{ last_block: "406" }];
           },
         };
       },
@@ -237,9 +235,9 @@ describe("checkConsistency", () => {
 
         return [
           [
-            { id: 1n, metadataCID: "bafy0", voteCount: 67n },
-            { id: 2n, metadataCID: "bafy1", voteCount: 67n },
-            { id: 3n, metadataCID: "bafy2", voteCount: 66n },
+            { id: 1n, labelCID: "bafy0", voteCount: 67n },
+            { id: 2n, labelCID: "bafy1", voteCount: 67n },
+            { id: 3n, labelCID: "bafy2", voteCount: 66n },
           ],
           200n,
         ];

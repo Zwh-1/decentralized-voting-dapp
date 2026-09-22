@@ -4,8 +4,8 @@
  *
  * Two reasons this is its own module rather than a few lines inside `deploy.ts`:
  *
- * 1. **It must name the variable a human has to edit.** `VOTING_OWNER` reached
- *    viem as a bare `as \`0x${string}\`` cast, so a mistyped owner surfaced as an
+ * 1. **It must name the variable a human has to edit.** A mistyped credential
+ *    reached viem as a bare `as \`0x${string}\`` cast, so it surfaced as an
  *    `InvalidAddressError` that never mentioned the variable — measured on a real
  *    value of the wrong shape. The same class of message as ADR-0012 asks for:
  *    a failure has to say which party is at fault.
@@ -16,6 +16,11 @@
  *
  * Presence alone is not enough: both failures above come from a variable that was
  * set and unusable, which is the state a hand-edited `.env` actually reaches.
+ *
+ * There is no longer an owner to validate. A factory has no owner — every poll
+ * belongs to whoever created it — so `VOTING_OWNER` and its checks were removed
+ * with the contract that had the concept, rather than left behind as a variable
+ * that is read but cannot affect anything.
  */
 
 /** One thing a human must fix, named so they can find it. */
@@ -31,7 +36,6 @@ export type Env = Record<string, string | undefined>;
 /** Networks that take their credentials from the local node, not from a human. */
 const LOCAL_NETWORKS = new Set(["hardhat", "localhost"]);
 
-const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const PRIVATE_KEY = /^0x[0-9a-fA-F]{64}$/;
 
 /** Required to sign a deployment, with what to tell someone who has not set one. */
@@ -54,12 +58,8 @@ function describedLength(value: string): string {
  * Every problem with a deployment's configuration, in the order a reader should
  * fix them. Empty means "nothing to report", not "the deployment will succeed".
  *
- * The two concerns are gated differently on purpose. Credentials are only needed
- * where the node does not supply its own accounts, so they are skipped for local
- * networks. `VOTING_OWNER` is a deployment *input* that applies to every network:
- * gating it on the network name too let a mistyped owner through on
- * `deploy:local`, where it reached viem — and viem echoes the value, so a
- * measured `contracts/.env` printed a 32-byte secret into the terminal.
+ * Credentials are only needed where the node does not supply its own accounts,
+ * so they are skipped for local networks.
  */
 export function configurationProblems(networkName: string, env: Env): Problem[] {
   const problems: Problem[] = [];
@@ -103,21 +103,6 @@ export function configurationProblems(networkName: string, env: Env): Problem[] 
           `this value is ${describedLength(key)}`,
       });
     }
-  }
-
-  // Optional everywhere, but present-and-wrong is the case that produced an
-  // unattributed viem error: a 32-byte secret pasted into the address field.
-  const owner = env.VOTING_OWNER;
-  if (owner !== undefined && owner.length > 0 && !ADDRESS.test(owner)) {
-    problems.push({
-      name: "VOTING_OWNER",
-      detail:
-        `is not an Ethereum address (expected "0x" followed by 40 hex characters); ` +
-        `this value is ${describedLength(owner)}. Leave it unset to make the deployer ` +
-        `the owner. If this looks like a private key, do not keep it here — a private ` +
-        `key belongs in SEPOLIA_PRIVATE_KEY at most, and should be rotated if it was ` +
-        `pasted somewhere it does not belong.`,
-    });
   }
 
   return problems;

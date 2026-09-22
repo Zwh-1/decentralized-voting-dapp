@@ -6,9 +6,10 @@
  * the components that consume it failing to compile.
  */
 
-export interface ApiCandidate {
+export interface ApiOption {
   id: number;
-  metadataCid: string;
+  /** The metadata CID stored on chain for this option. */
+  labelCid: string;
   voteCount: number;
 }
 
@@ -16,15 +17,36 @@ export interface TallyResponse {
   /** Where these numbers came from. */
   source: "chain" | "index";
   total: number;
-  candidates: ApiCandidate[];
+  options: ApiOption[];
+}
+
+/** One poll's headline facts, as the list page needs them. */
+export interface PollSummary {
+  address: string;
+  creator: string;
+  question: string;
+  /**
+   * The deadline as a string.
+   *
+   * Carried as a string, not a number: it is a `uint256` on chain, and every
+   * other large integer on this wire format (block numbers, wei) is a string for
+   * the same reason — JSON numbers lose precision past 2^53, and a silently
+   * rounded deadline would be a wrong answer rather than a crashed one.
+   */
+  endsAt: string;
+  optionCount: number;
+  /** 0 Setup, 1 Voting, 2 Ended. Mirrors `Poll.Phase`. */
+  phase: number;
+  /** The contract's own tally total. */
+  totalVotes: number;
 }
 
 export interface Discrepancy {
-  candidateId: number;
+  optionId: number;
   onChain: number | null;
   indexed: number | null;
   /**
-   * Votes for this candidate found in the unindexed range. They were already
+   * Votes for this option found in the unindexed range. They were already
    * added to `indexed` before comparing, so a reader can tell why the raw
    * numbers differ.
    */
@@ -64,7 +86,10 @@ export interface ResultsResponse {
 export interface HealthResponse {
   status: "ok" | "degraded";
   chainId: number;
+  /** The factory this deployment reads polls from. */
   contract: string;
+  /** How many polls the factory has created, or null when the chain was unreadable. */
+  pollCount: number | null;
   confirmations: number;
   /**
    * Whether an index exists at all, i.e. whether `DATABASE_URL` is set.
@@ -119,10 +144,52 @@ export interface VoterResponse {
   address: string;
   source: "chain" | "index";
   whitelisted: boolean | null;
+  /** True when the address currently backs an option. */
   hasVoted: boolean;
+  /**
+   * The option the address currently backs, or null.
+   *
+   * Null is now a real state rather than only "has not voted": an address that
+   * withdrew its vote is back to having none, and the two must be told apart by
+   * the history (`voteTxHash` / refunds), not by this field alone.
+   */
   votedFor: number | null;
+  /** The stake currently held for this address, in wei. */
+  stakeWei: string;
+  /** Everything the address did, oldest first. */
+  history: VoteEventResponse[];
   voteTxHash: string | null;
   refunds: { amountWei: string; txHash: string }[];
+}
+
+/** One entry in a voter's history: a cast, a change, or a withdrawal. */
+export interface VoteEventResponse {
+  kind: "cast" | "changed" | "withdrawn";
+  /** The option involved. For "changed" this is the option moved TO. */
+  optionId: number | null;
+  blockNumber: string;
+  txHash: string;
+}
+
+/**
+ * The polls one address currently holds a vote in.
+ *
+ * This is the question the chain cannot answer cheaply: there is no reverse index
+ * from a voter to the polls they joined, and the factory only records who
+ * *created* what. Only the index can answer it in one query — see
+ * `getVotedPolls` for why that is allowed here and not elsewhere.
+ */
+export interface VotedPollsResponse {
+  address: string;
+  source: "index";
+  /** Poll addresses, newest first by the block the vote landed in. */
+  polls: {
+    address: string;
+    optionId: number;
+    question: string | null;
+    blockNumber: string;
+    txHash: string;
+  }[];
 }
 
 /** The outcome of one indexing pass, as returned by POST /api/index/sync. */

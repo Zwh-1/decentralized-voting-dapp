@@ -131,6 +131,18 @@ jobs:
           pnpm run indexer:migrate
           pnpm run indexer:migrate
 
+      - name: The vote-derivation views, against a real MySQL
+        # `current_votes` and `option_tally` are where "the last event wins"
+        # actually lives, and a correlated `NOT EXISTS` is exactly the kind of SQL
+        # that a mock would happily accept while the real engine rejects it or
+        # answers differently. `test/derivation.test.ts` runs its rows through the
+        # REAL views whenever `DATABASE_URL` is set, and skips the SQL leg when it
+        # is not — so without this variable CI would only ever exercise the
+        # TypeScript model of the views and never the views themselves.
+        env:
+          DATABASE_URL: mysql://root:root@127.0.0.1:3306/voting
+        run: pnpm run test:indexer
+
       - name: Build
         run: pnpm run build:web
 
@@ -197,22 +209,29 @@ jobs:
           tail -40 /tmp/hardhat-node.log
           exit 1
 
-      - name: Seed — deploys the contract and casts 200 votes
+      - name: Seed — deploys the factory and creates two polls
         # One command, and it is self-contained: `seed-local.ts` deploys its own
-        # instance at the deterministic first address. Adding `deploy:local`
-        # before it would leave a second, empty contract on the chain.
+        # factory and creates both polls itself. Adding `deploy:local` before it
+        # would leave a second, empty factory on the chain.
+        #
+        # It creates TWO polls on purpose (200 votes in one, 5 in the other), so
+        # this job also proves the per-poll isolation the platform rests on: a
+        # projection that mixed two polls' votes would double-count here.
         run: pnpm run seed:local
 
       - name: Index the chain
         run: pnpm run indexer:drain
 
-      - name: The index must agree with the chain
+      - name: The index must agree with the chain, for every poll
         # The project's headline claim. Until this job existed, nothing in CI
         # checked it — see the boundary note on the `web` job above.
+        #
+        # It now checks every poll the factory created rather than one fixed
+        # contract, and exits non-zero if ANY of them diverges.
         run: pnpm run indexer:check-consistency
 
       - name: Replaying the whole chain must not double-count
-        # M-6b. Resetting the cursor forces all 404 event rows through the
+        # M-6b. Resetting the cursor forces every event row through the
         # idempotent path again; the tally must not move.
         run: |
           mysql -h 127.0.0.1 -uroot -proot voting -e "UPDATE sync_cursor SET last_block = 0;"

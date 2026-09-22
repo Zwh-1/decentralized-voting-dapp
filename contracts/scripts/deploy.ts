@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
 /**
- * Deploys `Voting` and records the address per chain, so the indexer and the
- * frontend pick it up through `web/src/lib/contracts` with no manual copying.
+ * Deploys `VotingFactory` and records the address per chain, so the indexer and
+ * the frontend pick it up through `web/src/lib/contracts` with no manual
+ * copying.
  *
  *   pnpm --filter @voting/contracts deploy:local     # against `hardhat node`
  *   pnpm --filter @voting/contracts deploy:sepolia   # real testnet
  *
- * The owner defaults to the deployer. Override with `VOTING_OWNER` when the
- * administrator should be a different account.
+ * There is no `VOTING_OWNER` any more. The factory has no owner: every poll is
+ * owned by whoever created it, so a single configured administrator would be a
+ * concept that no longer exists. The deployer only pays for the deployment.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -36,21 +38,17 @@ const { viem } = await network.create();
 const [deployer] = await viem.getWalletClients();
 const publicClient = await viem.getPublicClient();
 
-const owner = (process.env.VOTING_OWNER ?? deployer.account.address) as `0x${string}`;
-
 console.log(`Network:  ${networkName}`);
 console.log(`Deployer: ${deployer.account.address}`);
-console.log(
-  `Owner:    ${owner}${process.env.VOTING_OWNER === undefined ? " (defaults to the deployer)" : ""}`,
-);
 console.log("");
 
-const { contract: voting, deploymentTransaction } = await viem.sendDeploymentTransaction("Voting", [
-  owner,
-]);
+const { contract: factory, deploymentTransaction } =
+  await viem.sendDeploymentTransaction("VotingFactory");
 
 const receipt = await publicClient.waitForTransactionReceipt({ hash: deploymentTransaction.hash });
 const chainId = await publicClient.getChainId();
+
+const implementation = await factory.read.implementation();
 
 const deployment = {
   chainId,
@@ -58,12 +56,12 @@ const deployment = {
   // generated registry in `web/src/lib/contracts` is guarded by a byte-exact
   // diff in CI — so both writers must agree on one form, and this is the form
   // the committed record already uses.
-  voting: voting.address.toLowerCase(),
-  owner: owner.toLowerCase(),
+  factory: factory.address.toLowerCase(),
+  implementation: implementation.toLowerCase(),
   deployer: deployer.account.address.toLowerCase(),
   deployedAt: new Date().toISOString(),
   /**
-   * The block the contract was created in.
+   * The block the factory was created in.
    *
    * The indexer starts here rather than at block 0. That is not an optimisation:
    * public RPCs prune old history — Sepolia's earliest available block is around
@@ -71,8 +69,9 @@ const deployment = {
    * a fresh index against Sepolia dies a couple of thousand blocks in with
    * `pruned history unavailable` and never recovers.
    *
-   * `undefined` on a chain whose receipt could not be read; `config.ts` then
-   * falls back to whatever the operator sets in `START_BLOCK`.
+   * This is also the block every poll's events are found from: polls are
+   * discovered by following `PollCreated`, which the factory can only emit after
+   * it exists.
    */
   blockNumber: Number(receipt.blockNumber),
 };
@@ -85,13 +84,22 @@ const outFile = path.join(outDir, `${chainId}.json`);
 // Overwriting silently would lose the previous address, which matters because
 // that record is what the app and `verify` read.
 try {
-  const existing = JSON.parse(await readFile(outFile, "utf8")) as { voting?: string };
+  const existing = JSON.parse(await readFile(outFile, "utf8")) as { factory?: string };
 
-  if (existing.voting !== undefined && existing.voting !== voting.address) {
+  // Case-insensitive, because the two sides carry different forms of the same
+  // address: this file stores the lower-case form on purpose (see the note on
+  // `deployment` below, and `seed-local.ts`), while viem returns an EIP-55
+  // checksummed one. Compared raw, re-deploying at the *same* address warned that
+  // "any index built against the previous address is now stale" — a false alarm
+  // about an index that was still valid, measured on a fresh local chain.
+  if (
+    existing.factory !== undefined &&
+    existing.factory.toLowerCase() !== factory.address.toLowerCase()
+  ) {
     console.warn(
       `WARNING: replacing the recorded deployment for chain ${chainId}.\n` +
-        `  previous: ${existing.voting}\n` +
-        `  new:      ${voting.address}\n` +
+        `  previous: ${existing.factory}\n` +
+        `  new:      ${factory.address}\n` +
         "  Any index built against the previous address is now stale and must be rebuilt.",
     );
   }
@@ -107,11 +115,12 @@ const explorers: Record<number, string> = {
 
 const explorer = explorers[chainId];
 
-console.log(`Voting deployed at ${voting.address} (chain ${chainId})`);
+console.log(`VotingFactory deployed at ${factory.address} (chain ${chainId})`);
+console.log(`Poll implementation at ${implementation}`);
 console.log(`Recorded deployment in ${outFile}`);
 
 if (explorer !== undefined) {
-  console.log(`Explorer: ${explorer}/address/${voting.address}`);
+  console.log(`Explorer: ${explorer}/address/${factory.address}`);
   console.log("");
   console.log("Next steps:");
   console.log(

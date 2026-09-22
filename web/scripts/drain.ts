@@ -40,7 +40,7 @@ try {
     const outcome = await syncOnce({
       pool,
       chain,
-      address: config.votingAddress,
+      factoryAddress: config.factoryAddress,
       confirmations: config.confirmations,
       chunkBlocks: config.chunkBlocks,
       ...(config.startBlock !== undefined ? { startBlock: config.startBlock } : {}),

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-09-22-close-known-gaps",
+  "currentTodo": "P1-6 sweepUnclaimed 收紧",
+  "completedTodos": ["coverage", "gas", "sepolia-redeploy", "sourcify-verify", "export-abi"],
+  "activeSlice": "P0-complete",
+  "evidenceRefs": [],
+  "blockedOn": null,
+  "nextStep": "P1-6",
+  "updatedAt": "2026-09-22"
+}

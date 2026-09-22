@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-09-22-close-known-gaps",
+  "taskIntentRef": "docs/aegis/work/2026-09-22-close-known-gaps/task-intent-draft.json",
+  "baselineRefs": [],
+  "scopeStatus": "not-yet-verified",
+  "compatStatus": "not-yet-verified",
+  "retirementStatus": "not-yet-verified",
+  "newRiskSignals": [],
+  "decision": "needs-verification"
+}

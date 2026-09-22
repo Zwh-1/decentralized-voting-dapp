@@ -21,14 +21,29 @@
  * unlocked account, so no private key is handled here.
  *
  * `TEST_ACCOUNT` selects the account to connect as. The drill reads that
- * account's `isWhitelisted`, `hasVoted`, `phase` and `stakeOf` straight from the
+ * account's `isWhitelisted`, `phase`, `stakeOf` and `voterState` straight from the
  * chain and asserts the rendered buttons match, so it is correct whether the
- * account can vote or refund, and whether it can do neither. With `--vote` it
- * additionally clicks through a real vote; with `--refund` a real refund. Both
- * wait for the receipt.
+ * account can vote, change, or refund, and whether it can do none of them. With
+ * `--vote` it additionally clicks through a real vote; with `--change` a real
+ * 改投; with `--refund` a real refund. All three wait for the receipt.
  *
- * Read-only by default: it never mutates the chain. Use `--vote` / `--refund`
- * only against a chain where that is acceptable, or under a snapshot.
+ * `--change` needs an account that already has a vote, so run `--vote` first (or
+ * point `TEST_ACCOUNT` at one that has voted). It is the mode that covers this
+ * project's newest capability end to end: the button, a signed transaction, the
+ * vote moving on chain, and the stake not being charged twice.
+ *
+ * With `--reject` the injected wallet refuses `eth_sendTransaction` with EIP-1193
+ * code 4001 — the shape of a reader clicking 拒绝 in their wallet — and the drill
+ * asserts the page says so in Chinese and that the chain is untouched. Nothing is
+ * broadcast in that mode, so unlike `--vote` / `--change` / `--refund` it is safe
+ * against any chain. See ADR-0022.
+ *
+ * Read-only by default: it never mutates the chain. Use `--vote` / `--change` /
+ * `--refund` only against a chain where that is acceptable, or under a snapshot.
+ * Those flags are also the only reason the drill used to insist on the local
+ * network — a run without them clicks nothing, so it can be pointed at any chain,
+ * including a deployed one, by setting `CHAIN_ID` / `RPC_URL` in `web/.env` and
+ * `APP_URL`.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -38,8 +53,10 @@ import path from "node:path";
 import { createPublicClient, defineChain, http } from "viem";
 
 import { loadServerConfig } from "../src/lib/config";
-import { votingAbi } from "../src/lib/contracts";
+import { factoryAbi, pollAbi } from "../src/lib/contracts";
+import { isPlausibleCid } from "../src/lib/ipfs";
 import { formatEth } from "../src/lib/voting";
+import { CdpBrowser, DEBUG_PORT, shorten, sleep } from "./lib/cdp";
 
 const CHROME_CANDIDATES = [
   process.env.CHROME_PATH,
@@ -50,10 +67,11 @@ const CHROME_CANDIDATES = [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 ].filter((value): value is string => typeof value === "string" && value.length > 0);
 
-const DEBUG_PORT = Number(process.env.CDP_PORT ?? 9333);
 const APP_URL = process.env.APP_URL ?? "http://127.0.0.1:3100/";
 const VOTE = process.argv.includes("--vote");
+const CHANGE = process.argv.includes("--change");
 const REFUND = process.argv.includes("--refund");
+const REJECT = process.argv.includes("--reject");
 const SHOT = process.env.SHOT ?? "";
 
 const config = loadServerConfig();
@@ -61,11 +79,19 @@ const config = loadServerConfig();
 // Guards run before any child process or temp directory exists, so `process.exit`
 // has no resource to race with here. Every exit after that uses `process.exitCode`
 // and lets the `finally` block clean up.
-if (config.chainId !== 31337) {
+//
+// The chain restriction is about *writes*, not reads. The injected provider
+// forwards whatever the page asks for to the configured RPC, and a local Hardhat
+// node signs `eth_sendTransaction` with its own unlocked account; a public network
+// would have nobody to sign. A run without `--vote` / `--change` / `--refund`
+// clicks nothing, so it is read-only and may point at any chain — which is what
+// lets the same assertions be run against a deployed ballot (Sepolia, say) instead
+// of only a local node.
+if ((VOTE || CHANGE || REFUND) && config.chainId !== 31337) {
   console.error(
-    `Refusing to run: this drill sends real transactions when given --vote or ` +
-      `--refund, so it is limited to the local Hardhat network (31337). ` +
-      `CHAIN_ID is ${config.chainId}.`,
+    `Refusing to run: --vote, --change and --refund send real transactions, and only the local ` +
+      `Hardhat network (31337) signs them. CHAIN_ID is ${config.chainId}. Drop those flags to check ` +
+      `the rendering read-only against this chain.`,
   );
   process.exit(1);
 }
@@ -82,6 +108,51 @@ const chain = defineChain({
 
 const client = createPublicClient({ chain, transport: http(config.rpcUrl) });
 
+/**
+ * The poll this drill drives the UI for, and the page that shows it.
+ *
+ * Discovered from the factory rather than configured: the app's own list page is
+ * reached at `/`, but every voting control lives on `/poll/<address>`, and a
+ * hardcoded address would keep "working" against a poll that no longer exists
+ * after any redeploy — the drill would then be asserting against a page that
+ * cannot read its contract, and every read-failure branch would pass for the
+ * wrong reason.
+ *
+ * `POLL_ADDRESS` overrides the discovery, which is what a CI job wants when it
+ * needs the drill to target a specific poll.
+ */
+const pollAddress: `0x${string}` = await (async (): Promise<`0x${string}`> => {
+  const explicit = process.env.POLL_ADDRESS;
+
+  if (explicit !== undefined && explicit.length > 0) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(explicit)) {
+      throw new Error("POLL_ADDRESS must be a 20 byte hex address.");
+    }
+
+    return explicit as `0x${string}`;
+  }
+
+  const all = await client.readContract({
+    address: config.factoryAddress,
+    abi: factoryAbi,
+    functionName: "allPolls",
+  });
+
+  const first = all[0];
+
+  if (first === undefined) {
+    throw new Error(
+      "The factory has created no polls, so there is no ballot page to drill. " +
+        "Run `pnpm seed:local` first (or set POLL_ADDRESS).",
+    );
+  }
+
+  return first;
+})();
+
+/** The poll's own page, which is where every voting control lives. */
+const POLL_URL = new URL(`/poll/${pollAddress}`, APP_URL).toString();
+
 interface ButtonState {
   text: string;
   disabled: boolean;
@@ -92,25 +163,64 @@ interface PageState {
   buttons: ButtonState[];
   hasSubmittingLabel: boolean;
   whitelistRow: string | null;
+  /** The 可投票 row, which every poll shows whatever its admission mode. */
+  canVoteRow: string | null;
+  /** The 准入方式 row, shown only on an open poll. */
+  modeRow: string | null;
   stakeRow: string | null;
+  /** Did the "我的状态" heading the row reads start from exist at all? */
+  panelFound: boolean;
+  /** Did the panel have a closing boundary, or did the slice run to page end? */
+  panelBounded: boolean;
+  /** How many option cards report `data-option-mine="true"`. */
+  myOptionButtons: number;
+  /** The text of each option's action button, for failure messages. */
+  voteButtonTexts: string[];
+  /** How many option action controls the ballot rendered, one per option. */
+  optionActionCount: number;
   refundReason: string | null;
   ipfsLabels: string[];
+  /** Per IPFS row, in the same order as `ipfsLabels`: the CID that row is about. */
+  metadataCids: string[];
   /** Per IPFS row, in the same order as `ipfsLabels`: does it offer a retry? */
   ipfsRetries: boolean[];
+  /** Per option card, in DOM order: the heading the card is currently showing. */
+  cardNames: string[];
   cardCount: number;
+  /** True while any row on the page still says it is reading. */
+  pending: boolean;
   connected: boolean;
   hasProvider: boolean;
   connectError: string | null;
+  /**
+   * The write path's own error line, read by its data attribute rather than by
+   * matching the sentence: `classified` means the app identified who refused,
+   * `unclassified` means it declined to guess. Both the text and the flag are
+   * asserted, so neither a leaked English string nor a wrongly confident
+   * sentence can pass.
+   */
+  writeError: string | null;
+  writeErrorKind: string | null;
   walletMethods: string[];
 }
 
 /** The provider injected before any page script, so wagmi sees a wallet. */
-function walletSource(rpcUrl: string, address: `0x${string}`, chainIdHex: string): string {
+function walletSource(
+  rpcUrl: string,
+  address: `0x${string}`,
+  chainIdHex: string,
+  rejectSends: boolean,
+): string {
   return `
 (() => {
   const RPC = ${JSON.stringify(rpcUrl)};
   const ACCOUNT = ${JSON.stringify(address)};
   const CHAIN_ID_HEX = ${JSON.stringify(chainIdHex)};
+  // Refuses the signature the way a wallet does when the reader clicks 拒绝:
+  // EIP-1193 code 4001, raised at eth_sendTransaction. Reads still work, so the
+  // page behaves exactly as it does in front of a real wallet. Nothing is
+  // broadcast, which is what makes this mode safe on a deployed chain.
+  const REJECT_SENDS = ${rejectSends ? "true" : "false"};
   let id = 1;
   const listeners = {};
   window.__walletCalls = [];
@@ -139,6 +249,12 @@ function walletSource(rpcUrl: string, address: `0x${string}`, chainIdHex: string
       if (method === "wallet_requestPermissions") return [{ parentCapability: "eth_accounts" }];
       if (method === "wallet_getPermissions") return [{ parentCapability: "eth_accounts" }];
       if (method.startsWith("wallet_")) return null;
+      if (REJECT_SENDS && method === "eth_sendTransaction") {
+        window.__walletCalls.push(method + ":refused");
+        const refusal = new Error("User rejected the request.");
+        refusal.code = 4001;
+        throw refusal;
+      }
       return forward(method, params);
     },
     on(event, handler) { (listeners[event] ??= []).push(handler); return provider; },
@@ -158,16 +274,30 @@ const READ_PAGE = `(() => {
     text: b.textContent.trim(), disabled: b.disabled, title: b.title || null,
   }));
   const text = document.body.innerText;
-  // The whitelist row is read from the "我的状态" panel specifically. A bare
-  // search for the label matches the privacy notice earlier on the page, which
-  // says the real gate is "管理员维护的白名单".
+  // Where the "我的状态" panel begins and ends, in the page's innerText. These
+  // bound the panel for the assertion below, which checks that the boundary is
+  // real: the headings render as "我的状态" and "选项（<n>）", and a rename that
+  // broke either literal would leave the index at -1 and quietly let the slice
+  // run to the end of the page. No backticks in this comment: it lives inside a
+  // template literal.
   const panelStart = text.indexOf('我的状态');
-  const panelEnd = text.indexOf('候选人（');
-  const panel = panelStart < 0 ? '' : text.slice(panelStart, panelEnd < 0 ? undefined : panelEnd);
+  const optionsHeading = text.indexOf('选项（');
+  const panelEnd = optionsHeading < 0 ? text.indexOf('选项') : optionsHeading;
+  // Reads the value of a labeled row, by DOM structure.
+  //
+  // This used to be a substring search over the panel's innerText, which broke
+  // the moment two different rows' text overlapped: a disabled button's reason
+  // sentence contains the word 白名单, so searching for that label found the
+  // REASON and reported the next line of prose as if it were the row's value —
+  // the assertion then compared 已投票 against isWhitelisted and failed while the
+  // page was correct. Anchoring on the <dt> element means only a real label can
+  // match. No backticks in this comment: it lives inside a template literal.
   const rowAfter = (label) => {
-    const i = panel.indexOf(label);
-    if (i < 0) return null;
-    return panel.slice(i + label.length).split('\\n').map((s) => s.trim()).filter(Boolean)[0] ?? null;
+    const dt = [...document.querySelectorAll('dt')].find(
+      (node) => node.textContent.trim() === label,
+    );
+    if (!dt) return null;
+    return dt.parentElement?.querySelector('dd')?.textContent.trim() ?? null;
   };
   // The refund reason is a <span> sibling of the refund button inside the same
   // row. Read it from the DOM rather than from a line of innerText: the reason
@@ -182,7 +312,7 @@ const READ_PAGE = `(() => {
         .filter(Boolean)
         .join(' ') || null
     : null;
-  // One IPFS row per candidate card. Read the <dd> next to the <dt>IPFS</dt>
+  // One IPFS row per option card. Read the <dd> next to the <dt>IPFS</dt>
   // rather than searching innerText, so a card that renders nothing at all shows
   // up as an empty string instead of being silently absent from the results.
   // The retry control is a sibling of the <dd>, so this text stays the card's
@@ -198,6 +328,18 @@ const READ_PAGE = `(() => {
   const ipfsRetries = ipfsRows.map(
     (dt) => dt.parentElement?.querySelector('[data-metadata-retry]') !== null,
   );
+  // The CID each IPFS row is about, read from the sibling row inside the same
+  // card. Without it the drill can only check that the sentence is one of the
+  // known ones; with it, the sentence can be compared against the string it
+  // describes, which is the check that would have caught the seeded ballot whose
+  // CID was not a CID.
+  const metadataCids = ipfsRows.map((dt) => {
+    const card = dt.parentElement?.parentElement;
+    const label = [...(card?.querySelectorAll('dt') ?? [])].find(
+      (other) => other.textContent.trim() === '元数据 CID',
+    );
+    return label?.parentElement?.querySelector('dd')?.textContent.trim() ?? '';
+  });
   // The number of cards, counted independently of the IPFS rows so the two can be
   // compared. Deliberately NOT derived from the vote buttons: their text changes
   // with the phase ("投一票" becomes "你已投给该候选人" once you have voted), so a
@@ -205,172 +347,81 @@ const READ_PAGE = `(() => {
   const cardCount = [...document.querySelectorAll('dt')].filter(
     (dt) => dt.textContent.trim() === '元数据 CID',
   ).length;
+  // The name each card is showing. "已解析" alone proves the document arrived but
+  // not that anything of it is on screen: the card falls back to a numbered
+  // heading ("选项 #<id>") for every outcome that is not ok, so a card that
+  // resolved and still rendered the number would satisfy every other assertion
+  // here. No backticks in this comment: it lives inside a template literal.
+  const cardNames = [...document.querySelectorAll('dt')]
+    .filter((dt) => dt.textContent.trim() === '元数据 CID')
+    .map((dt) => dt.closest('article')?.querySelector('h3')?.textContent.trim() ?? '');
+  // The write path's error line, located by the attribute the component sets so
+  // this read cannot drift into picking up some other rose-coloured text.
+  const writeErrorNode = document.querySelector('[data-write-error]');
+  // Whether each option is the one this account currently backs, read from the
+  // attribute the component sets for exactly that fact.
+  //
+  // The option this account backs renders its button as "你当前投给了这个选项" and
+  // offers no action; every other option offers \`vote\` before a vote exists and
+  // \`change\` afterwards. Asserting on that wording is what broke when the ballot
+  // became multi-tenant — the old sentence no longer existed, so the assertion
+  // could never pass and had quietly stopped being a check. The attribute does not
+  // move when the wording does.
+  const myOptionButtons = document.querySelectorAll('[data-option-mine="true"]').length;
+  const voteButtonTexts = [...document.querySelectorAll('[data-option-action]')].map((b) =>
+    b.textContent.trim(),
+  );
+  // One entry per option, whatever that option's control currently offers.
+  const optionActionCount = voteButtonTexts.length;
   return {
     buttons,
     hasSubmittingLabel: text.includes('提交中…'),
     whitelistRow: rowAfter('白名单'),
+    canVoteRow: rowAfter('可投票'),
+    modeRow: rowAfter('准入方式'),
     stakeRow: rowAfter('押金'),
+    // Both ends of the "我的状态" panel, so the drill can assert that the slice it
+    // reads the rows out of is actually a slice. Without these, a renamed heading
+    // makes the panel silently run to the end of the page and every row assertion
+    // keeps passing against a much larger body of text.
+    panelFound: panelStart >= 0,
+    panelBounded: panelStart >= 0 && panelEnd > panelStart,
+    myOptionButtons,
+    voteButtonTexts,
+    optionActionCount,
     refundReason,
     ipfsLabels,
+    metadataCids,
     ipfsRetries,
+    cardNames,
     cardCount,
+    pending: text.includes('读取中…'),
     connected: buttons.some((b) => b.text === '断开'),
     hasProvider: typeof window.ethereum !== 'undefined',
     connectError: document.querySelector('.text-rose-600')?.textContent?.trim() ?? null,
+    writeError: writeErrorNode ? writeErrorNode.textContent.trim() : null,
+    writeErrorKind: writeErrorNode ? writeErrorNode.getAttribute('data-write-error') : null,
     walletMethods: [...new Set(window.__walletCalls ?? [])],
   };
 })()`;
 
-let nextId = 1;
-const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
-let socket: WebSocket | undefined;
+// The CDP transport lives in `scripts/lib/cdp.ts`; see that file for why a raw
+// socket is used rather than a driver library. What stays here is everything that
+// interprets the page: the assertions, the fake wallet, and the read expression.
+const browser = new CdpBrowser(DEBUG_PORT);
+const browserMessages = browser.messages;
 
-/**
- * What the page said while the drill was driving it.
- *
- * Nothing else in this project can see this. The API routes are covered by unit
- * tests and the DOM is covered by the assertions below, but a React hydration
- * mismatch and an uncaught client-side exception are both invisible to a Node
- * test runner: hydration depends on a real browser reconciling server HTML
- * against its own render, and an exception in an event handler never reaches the
- * HTTP response. Both would leave every assertion above passing.
- */
-interface BrowserMessage {
-  kind: "console" | "exception" | "log";
-  level: string;
-  text: string;
-}
+/** Reads the page once it has stopped loading anything. */
+async function settled(sessionId: string, budgetMs: number): Promise<PageState> {
+  const deadline = Date.now() + budgetMs;
+  let state = await browser.evaluate<PageState>(sessionId, READ_PAGE);
 
-const browserMessages: BrowserMessage[] = [];
-
-function shorten(value: unknown): string {
-  return String(value ?? "")
-    .replace(/\s+/g, " ")
-    .slice(0, 400);
-}
-
-function send(
-  method: string,
-  params: Record<string, unknown> = {},
-  sessionId?: string,
-): Promise<any> {
-  const id = nextId++;
-  const payload: Record<string, unknown> = { id, method, params };
-  if (sessionId !== undefined) payload.sessionId = sessionId;
-  socket!.send(JSON.stringify(payload));
-  return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
-}
-
-async function evaluate<T>(sessionId: string, expression: string): Promise<T> {
-  const result = await send(
-    "Runtime.evaluate",
-    { expression, returnByValue: true, awaitPromise: true },
-    sessionId,
-  );
-  if (result.exceptionDetails) {
-    throw new Error(`page evaluation failed: ${result.exceptionDetails.exception?.description}`);
+  while (Date.now() < deadline && state.pending) {
+    await sleep(500);
+    state = await browser.evaluate<PageState>(sessionId, READ_PAGE);
   }
-  return result.result.value as T;
-}
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function waitForCdp(): Promise<{ Browser: string; webSocketDebuggerUrl: string }> {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/version`);
-      if (response.ok) return (await response.json()) as never;
-    } catch {
-      // Chrome is not listening yet.
-    }
-    await sleep(300);
-  }
-  throw new Error(`Chrome did not open a DevTools endpoint on port ${DEBUG_PORT}`);
-}
-
-async function connectToPage(source: string): Promise<string> {
-  const version = await waitForCdp();
-  socket = new WebSocket(version.webSocketDebuggerUrl);
-  await new Promise<void>((resolve, reject) => {
-    socket!.addEventListener("open", () => resolve(), { once: true });
-    socket!.addEventListener("error", () => reject(new Error("CDP socket failed")), { once: true });
-  });
-
-  const loaded = new Set<string>();
-  socket.addEventListener("message", (event: MessageEvent) => {
-    const message = JSON.parse(String(event.data)) as any;
-    if (message.id !== undefined && pending.has(message.id)) {
-      const entry = pending.get(message.id)!;
-      pending.delete(message.id);
-      if (message.error) entry.reject(new Error(JSON.stringify(message.error)));
-      else entry.resolve(message.result);
-      return;
-    }
-    if (message.method === "Page.loadEventFired" && message.sessionId)
-      loaded.add(message.sessionId);
-
-    if (message.method === "Runtime.consoleAPICalled") {
-      const text = (message.params.args ?? [])
-        .map((argument: any) => argument.value ?? argument.description ?? argument.type)
-        .join(" ");
-      browserMessages.push({ kind: "console", level: message.params.type, text: shorten(text) });
-      return;
-    }
-
-    if (message.method === "Runtime.exceptionThrown") {
-      const details = message.params.exceptionDetails ?? {};
-      browserMessages.push({
-        kind: "exception",
-        level: "error",
-        text: shorten(details.exception?.description ?? details.text),
-      });
-      return;
-    }
-
-    // `Log` carries what never reaches `Runtime`: failed requests, CSP reports,
-    // and anything the browser itself refuses. A 404 for a missing asset shows up
-    // here and nowhere else.
-    if (message.method === "Log.entryAdded") {
-      const entry = message.params.entry ?? {};
-      browserMessages.push({
-        kind: "log",
-        level: entry.level,
-        text: shorten(`${entry.source}: ${entry.text}${entry.url ? ` (${entry.url})` : ""}`),
-      });
-      return;
-    }
-  });
-
-  const target = await send("Target.createTarget", { url: "about:blank" });
-  const { sessionId } = (await send("Target.attachToTarget", {
-    targetId: target.targetId,
-    flatten: true,
-  })) as { sessionId: string };
-
-  await send("Page.enable", {}, sessionId);
-  await send("Runtime.enable", {}, sessionId);
-  await send("Log.enable", {}, sessionId);
-  await send(
-    "Emulation.setDeviceMetricsOverride",
-    {
-      width: 1440,
-      height: 1600,
-      deviceScaleFactor: 1,
-      mobile: false,
-    },
-    sessionId,
-  );
-  await send("Page.addScriptToEvaluateOnNewDocument", { source }, sessionId);
-  await send("Page.navigate", { url: APP_URL }, sessionId);
-
-  const deadline = Date.now() + 30_000;
-  while (!loaded.has(sessionId) && Date.now() < deadline) await sleep(200);
-  if (!loaded.has(sessionId)) throw new Error(`the app at ${APP_URL} never finished loading`);
-
-  // React hydration plus wagmi's first reads.
-  await sleep(5000);
-  return sessionId;
+  return state;
 }
 
 async function main(): Promise<number> {
@@ -414,51 +465,85 @@ async function main(): Promise<number> {
     // is a SyntaxError, and a broken injected script fails silently, leaving the
     // page with no wallet and the drill chasing the wrong symptom.
     const chainIdHex = `0x${config.chainId.toString(16)}`;
-    const sessionId = await connectToPage(walletSource(config.rpcUrl, account, chainIdHex));
+    const sessionId = await browser.openPage({
+      source: walletSource(config.rpcUrl, account, chainIdHex, REJECT),
+      url: POLL_URL,
+    });
 
     // What the chain says, read independently of the page.
-    const [isWhitelisted, hasVoted, phase, stake] = await Promise.all([
+    //
+    // `voterState` answers all four questions in one call. Four separate getters
+    // would let this snapshot mix two blocks — "has voted" from one and "voted
+    // for 0" from the next — and the drill compares this against a page that read
+    // its own single-block state, so a torn read here would show up as a UI
+    // disagreement that is really a measurement artifact.
+    const [isWhitelisted, phase, stake, voter] = await Promise.all([
       client.readContract({
-        address: config.votingAddress,
-        abi: votingAbi,
+        address: pollAddress,
+        abi: pollAbi,
         functionName: "isWhitelisted",
         args: [account],
       }),
       client.readContract({
-        address: config.votingAddress,
-        abi: votingAbi,
-        functionName: "hasVoted",
-        args: [account],
-      }),
-      client.readContract({
-        address: config.votingAddress,
-        abi: votingAbi,
+        address: pollAddress,
+        abi: pollAbi,
         functionName: "phase",
       }),
       client.readContract({
-        address: config.votingAddress,
-        abi: votingAbi,
+        address: pollAddress,
+        abi: pollAbi,
         functionName: "stakeOf",
+        args: [account],
+      }),
+      client.readContract({
+        address: pollAddress,
+        abi: pollAbi,
+        functionName: "voterState",
         args: [account],
       }),
     ]);
 
+    // `voterState` returns (whitelisted, currentOptionId, stake, marked, canVote).
+    // "Has voted" is no longer a boolean on chain: a voter can withdraw, so the
+    // question is whether an option is currently backed.
+    const hasVoted = voter[1] !== 0n;
+    // Which option the chain says this account backs, or null for none. Read from
+    // the same tuple as `hasVoted`, so the two can never disagree about which
+    // block they describe.
+    const votedForOption: number | null = voter[1] === 0n ? null : Number(voter[1]);
+
     const PHASE_VOTING = 1;
     const PHASE_ENDED = 2;
     const STAKE_WEI = 1_000_000_000_000_000n;
-    const chainSaysVotable = isWhitelisted && !hasVoted && Number(phase) === PHASE_VOTING;
+
+    // Whether the poll admits everyone is read from the poll, not inferred from
+    // `isWhitelisted`. On an open poll that getter is `false` for every address
+    // including admitted ones, so an assertion built on it alone would demand a
+    // disabled vote button on a poll where everyone may vote — which is exactly
+    // the false failure this drill produced the first time it met an open poll.
+    const openToAll = await client.readContract({
+      address: pollAddress,
+      abi: pollAbi,
+      functionName: "openToAll",
+    });
+    // `voterState`'s fifth field is the contract's own answer to "may this address
+    // vote", so the drill asserts against the authority rather than re-deriving
+    // the rule. Reading it also keeps the check honest if the rule changes again.
+    const chainSaysCanVote = voter[4];
+    const chainSaysVotable = chainSaysCanVote && !hasVoted && Number(phase) === PHASE_VOTING;
     const chainSaysRefundable = Number(phase) === PHASE_ENDED && stake > 0n;
 
     console.log(`\naccount          ${account}`);
     console.log(
-      `chain            isWhitelisted=${isWhitelisted}  hasVoted=${hasVoted}  phase=${phase}  stakeOf=${stake} wei`,
+      `chain            openToAll=${openToAll}  isWhitelisted=${isWhitelisted}  canVote=${chainSaysCanVote}` +
+        `  hasVoted=${hasVoted}  phase=${phase}  stakeOf=${stake} wei`,
     );
-    console.log(`app              ${APP_URL}\n`);
+    console.log(`app              ${POLL_URL}\n`);
 
     // Fail loudly if the injection did not take. A silently broken injected
     // script leaves the page wallet-less, and every assertion below would then
     // pass or fail for reasons that have nothing to do with the app.
-    const providerPresent = await evaluate<boolean>(
+    const providerPresent = await browser.evaluate<boolean>(
       sessionId,
       `typeof window.ethereum !== 'undefined'`,
     );
@@ -474,7 +559,7 @@ async function main(): Promise<number> {
     // a fresh browser profile has no persisted connector state, so without this
     // the page stays disconnected and every vote button is disabled for the
     // uninteresting reason.
-    const connectClick = await evaluate<string>(
+    const connectClick = await browser.evaluate<string>(
       sessionId,
       `(() => {
         const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === '连接钱包');
@@ -488,7 +573,7 @@ async function main(): Promise<number> {
     let connected = false;
     while (Date.now() < connectDeadline && !connected) {
       await sleep(500);
-      connected = await evaluate<boolean>(
+      connected = await browser.evaluate<boolean>(
         sessionId,
         `[...document.querySelectorAll('button')].some((b) => b.textContent.trim() === '断开')`,
       );
@@ -497,14 +582,29 @@ async function main(): Promise<number> {
       `\nconnect: ${connectClick} -> ${connected ? "connected" : "still disconnected"}\n`,
     );
 
-    const before = await evaluate<PageState>(sessionId, READ_PAGE);
+    const metadataStarted = Date.now();
+    const before = await settled(sessionId, 90_000);
+    console.log(
+      `metadata         ${before.ipfsLabels.join(" / ")}  (settled in ${Date.now() - metadataStarted} ms)`,
+    );
+    console.log(`names            ${before.cardNames.join(" / ")}\n`);
     console.log(
       `diagnostics: provider injected=${before.hasProvider}` +
         `  connectError=${JSON.stringify(before.connectError)}` +
         `  walletMethods=${JSON.stringify(before.walletMethods)}\n`,
     );
+    // The ballot's option controls, counted by the component's own attribute
+    // rather than by button wording. Counting `投一票` made this vacuous once the
+    // account had already voted: the vote button is not rendered at all then, so
+    // the count was 0, `voteButtons.length > 0` failed, and the *next* assertion
+    // ("enabled exactly when the chain allows it") compared 0 against 0 and passed
+    // without testing anything. Every option always renders exactly one action
+    // control, whether that control offers `vote`, `change`, or the backed state,
+    // so that is what gets counted.
+    const optionActionButtons = before.optionActionCount;
     const voteButtons = before.buttons.filter((b) => b.text.includes("投一票"));
     const enabledVoteButtons = voteButtons.filter((b) => !b.disabled);
+    const changeButtons = before.buttons.filter((b) => b.text.includes("改投到这个选项"));
 
     console.log("assertions");
     check("the wallet connected", connected);
@@ -513,7 +613,29 @@ async function main(): Promise<number> {
       !before.hasSubmittingLabel,
       before.hasSubmittingLabel ? "a button rendered the submitting label" : "",
     );
-    check("the ballot rendered a vote button per candidate", voteButtons.length > 0);
+    // One control per option, always. This is the assertion that stays meaningful
+    // in every voter state; the vote-button count below is deliberately allowed to
+    // be zero when the account has already voted.
+    check(
+      "every option rendered exactly one action control",
+      optionActionButtons === before.cardCount && optionActionButtons > 0,
+      `actionControls=${optionActionButtons} cards=${before.cardCount}`,
+    );
+    check(
+      "an account that has not voted yet is offered a vote button on every option",
+      hasVoted || voteButtons.length === before.cardCount,
+      `hasVoted=${hasVoted} voteButtons=${voteButtons.length} cards=${before.cardCount}`,
+    );
+    check(
+      "an account that has voted is offered 改投 on every other option and no vote button",
+      !hasVoted || (voteButtons.length === 0 && changeButtons.length === before.cardCount - 1),
+      `hasVoted=${hasVoted} voteButtons=${voteButtons.length} changeButtons=${changeButtons.length} cards=${before.cardCount}`,
+    );
+    check(
+      "exactly one option is marked as the one this account backed, and none when it has no vote",
+      before.myOptionButtons === (votedForOption === null ? 0 : 1),
+      `myOptions=${before.myOptionButtons} chainVotedFor=${votedForOption}`,
+    );
     check(
       "vote buttons are enabled exactly when the chain says the account may vote",
       chainSaysVotable
@@ -521,10 +643,47 @@ async function main(): Promise<number> {
         : enabledVoteButtons.length === 0,
       `chainSaysVotable=${chainSaysVotable} enabled=${enabledVoteButtons.length}/${voteButtons.length}`,
     );
+    // Asserted before the row checks that depend on it, because the failure it
+    // guards is silent: if the closing heading is renamed, `panelEnd` is -1, the
+    // slice runs to the end of the page, and the 白名单 assertion below starts
+    // reading text from the whole document — passing for a reason that has nothing
+    // to do with the panel. This check fails loudly instead.
     check(
-      "the 白名单 row matches isWhitelisted",
-      before.whitelistRow === (isWhitelisted ? "是" : "否"),
-      `row=${JSON.stringify(before.whitelistRow)}`,
+      "the 我的状态 panel was located and bounded, so the row reads come from it",
+      before.panelFound && before.panelBounded,
+      `panelFound=${before.panelFound} panelBounded=${before.panelBounded}`,
+    );
+    // The panel reports admission with one row or the other, never both, and the
+    // rule is that each appears exactly where it carries information:
+    //
+    //   * a 白名单 row whenever the poll HAS a list — and it must report this
+    //     reader's membership even when `canVote` is true, because an admitted
+    //     reader on a whitelisted poll otherwise cannot tell it apart from an
+    //     open one;
+    //   * a 准入方式 row only when the poll is open, since an open poll has no
+    //     list and the mode is the fact worth stating.
+    //
+    // Both directions have been wrong in this drill's lifetime, in opposite ways,
+    // which is why the assertion pins the exact pairing rather than checking one
+    // row in isolation.
+    const admissionCorrect = openToAll
+      ? before.whitelistRow === null && before.modeRow === "所有人可投"
+      : before.modeRow === null && before.whitelistRow === (isWhitelisted ? "是" : "否");
+
+    check(
+      openToAll
+        ? "an open poll names the mode and shows no 白名单 row"
+        : "a whitelisted poll shows the 白名单 row and no 准入方式 row",
+      admissionCorrect,
+      `openToAll=${openToAll} mode=${JSON.stringify(before.modeRow)} ` +
+        `whitelist=${JSON.stringify(before.whitelistRow)} chainIsWhitelisted=${isWhitelisted}`,
+    );
+    // The row that replaces it. On both modes the panel must state the admission
+    // verdict the contract itself returns, which is what `canVote` is.
+    check(
+      "the 可投票 row matches the contract's own canVote",
+      before.canVoteRow === (chainSaysCanVote ? "是" : "否"),
+      `openToAll=${openToAll} row=${JSON.stringify(before.canVoteRow)} canVote=${chainSaysCanVote}`,
     );
     check(
       "a disabled account is told why",
@@ -572,9 +731,47 @@ async function main(): Promise<number> {
       /^\d+ 个网关均不可达，已降级显示编号$/.test(label) ||
       /^网关可访问（\d+\/\d+ 个已作答），但没有返回可用的候选人元数据$/.test(label);
     check(
-      "every candidate card states its metadata outcome in words",
+      "every option card states its metadata outcome in words",
       before.ipfsLabels.length === before.cardCount && before.ipfsLabels.every(knownMetadataLabel),
       `cards=${before.cardCount} labels=${JSON.stringify(before.ipfsLabels)}`,
+    );
+    // The defect this ties down: a ballot was seeded with `bafyseededcandidate0`,
+    // and every card said "CID 格式无效，无法解析" — truthfully. The fault was
+    // upstream, in the seed data, and nothing connected the sentence to the string
+    // it was about. Asserted in both directions, so neither a resolvable CID
+    // reported as malformed nor a malformed one passed off as a network problem
+    // can get through unnoticed.
+    const calledMalformed = (label: string): boolean => label === "CID 格式无效，无法解析";
+    check(
+      "a CID is called malformed exactly when it is not a shape that can resolve",
+      before.ipfsLabels.every(
+        (label, i) => calledMalformed(label) === !isPlausibleCid(before.metadataCids[i] ?? ""),
+      ),
+      `cids=${JSON.stringify(before.metadataCids)} labels=${JSON.stringify(before.ipfsLabels)}`,
+    );
+    // Asserted in both directions, because the failure this ties down is exactly
+    // the placeholder that was on chain: metadata that arrives but is not rendered
+    // looks identical to metadata that never arrived, and only the name tells them
+    // apart. An empty read is NOT "not numbered" — the first version of this check
+    // passed on `["","",""]` while every card said 已解析, which is the same
+    // empty-assertion defect it was written to catch. The numbered fallback is
+    // recognised by shape rather than against the option's id, which this script
+    // does not assume equals the card's position.
+    //
+    // The shape has to track `optionName` in `src/lib/ballot-labels.ts`: it falls
+    // back to `选项 #<id>`. It read `候选人 #<id>` before this project became
+    // multi-tenant, and that stale pattern made the check one-directional without
+    // failing — no real name could ever match it, so a card that had silently
+    // stopped rendering its name would still have been reported as fine. Anything
+    // that matches neither a document name nor this fallback is a defect.
+    const namedFromDocument = (name: string): boolean =>
+      name.length > 0 && !/^选项 #\d+$/.test(name);
+    check(
+      "a card shows a name from its document exactly when it resolved one",
+      before.ipfsLabels.every(
+        (label, i) => namedFromDocument(before.cardNames[i] ?? "") === (label === "已解析"),
+      ),
+      `names=${JSON.stringify(before.cardNames)} labels=${JSON.stringify(before.ipfsLabels)}`,
     );
     // The card offers to ask again only where another attempt could differ. A
     // malformed CID is decided by `isPlausibleCid` before any request, so a retry
@@ -599,12 +796,116 @@ async function main(): Promise<number> {
       `retries=${JSON.stringify(before.ipfsRetries)} labels=${JSON.stringify(before.ipfsLabels)}`,
     );
 
+    if (REJECT) {
+      console.log("\nreject");
+      // The reader clicked 拒绝 in their wallet. Everything up to and including
+      // the gas estimate succeeded; only the signature was refused, which is the
+      // exact sequence that rendered `User rejected the request.` before ADR-0022.
+      if (!chainSaysVotable) {
+        check(
+          "--reject requested, but the chain does not let this account start a vote",
+          false,
+          `openToAll=${openToAll} canVote=${chainSaysCanVote} hasVoted=${hasVoted} phase=${phase}`,
+        );
+      } else {
+        const clicked = await browser.evaluate<string>(
+          sessionId,
+          `(() => {
+            const b = [...document.querySelectorAll('button')].find((x) => !x.disabled && x.textContent.includes('投一票'));
+            if (!b) return 'none';
+            b.click();
+            return 'clicked';
+          })()`,
+        );
+        check("an enabled vote button could be clicked", clicked === "clicked", clicked);
+
+        let after: PageState | undefined;
+        const deadline = Date.now() + 30_000;
+        while (Date.now() < deadline && after?.writeError == null) {
+          await sleep(1000);
+          after = await browser.evaluate<PageState>(sessionId, READ_PAGE);
+        }
+
+        check(
+          "the refusal produced an error line at all",
+          after?.writeError != null,
+          `writeError=${JSON.stringify(after?.writeError ?? null)}`,
+        );
+        check(
+          "the refusal is rendered as an identified cause, not as an unknown one",
+          after?.writeErrorKind === "classified",
+          `kind=${JSON.stringify(after?.writeErrorKind ?? null)}`,
+        );
+        check(
+          "the sentence names the wallet and says nothing was sent",
+          after?.writeError === "你在钱包里拒绝了这笔交易，链上没有任何变化。",
+          `text=${JSON.stringify(after?.writeError ?? null)}`,
+        );
+        check(
+          "no English from the wallet or viem survives into the page",
+          after?.writeError != null && !/[A-Za-z]/.test(after.writeError),
+          `text=${JSON.stringify(after?.writeError ?? null)}`,
+        );
+        check(
+          "the refusal came from the wallet, after the page asked it to sign",
+          after?.walletMethods.includes("eth_sendTransaction:refused") === true,
+          after?.walletMethods.join(", ") ?? "",
+        );
+        check(
+          "a refused signature is not called 提交中…",
+          after != null && !after.hasSubmittingLabel,
+        );
+
+        // The claim the sentence makes. Asserted against the chain rather than
+        // taken on trust, and compared with what the chain said *before* the
+        // click — the account may legitimately have voted earlier in its life, so
+        // "no vote" is not the property; "no change" is.
+        //
+        // `voterState` is compared as a whole tuple rather than field by field:
+        // the sentence claims nothing at all changed, and comparing the tuple
+        // cannot accidentally omit a field that a future write path starts
+        // touching. `stakeOf` is read separately as well because the tuple's stake
+        // slot is the same value, and a mismatch between the two would itself be
+        // worth knowing about.
+        const [voterAfter, stakeAfter] = await Promise.all([
+          client.readContract({
+            address: pollAddress,
+            abi: pollAbi,
+            functionName: "voterState",
+            args: [account],
+          }),
+          client.readContract({
+            address: pollAddress,
+            abi: pollAbi,
+            functionName: "stakeOf",
+            args: [account],
+          }),
+        ]);
+        const votedAfter = voterAfter[1] !== 0n;
+        check(
+          "链上没有任何变化 was true: voterState and stakeOf are what they were before the click",
+          votedAfter === hasVoted && stakeAfter === stake,
+          `before hasVoted=${hasVoted} stakeOf=${stake} wei, after hasVoted=${votedAfter} stakeOf=${stakeAfter} wei`,
+        );
+      }
+    }
+
     if (VOTE) {
       console.log("\nvote");
       if (!chainSaysVotable) {
-        check("--vote requested, but the chain does not allow this account to vote", false);
+        // Not a defect, and the message says so: this is the drill refusing to
+        // pretend it tested something. `--vote` cannot be driven for an account the
+        // contract would reject, and the interesting cases are all reachable from a
+        // fresh account. Naming the reason saves the reader from re-deriving it
+        // from `hasVoted` / `phase` themselves.
+        check(
+          "--vote requested, but the chain does not allow this account to vote — use a fresh account",
+          false,
+          `openToAll=${openToAll} canVote=${chainSaysCanVote} hasVoted=${hasVoted} phase=${phase}; ` +
+            `a vote needs canVote=true, hasVoted=false, phase=${PHASE_VOTING}`,
+        );
       } else {
-        const clicked = await evaluate<string>(
+        const clicked = await browser.evaluate<string>(
           sessionId,
           `(() => {
             const b = [...document.querySelectorAll('button')].find((x) => !x.disabled && x.textContent.includes('投一票'));
@@ -616,22 +917,130 @@ async function main(): Promise<number> {
         check("clicking an enabled vote button was possible", clicked === "clicked", clicked);
 
         let confirmed = false;
+        let lastState: PageState | undefined;
         const deadline = Date.now() + 60_000;
         while (Date.now() < deadline && !confirmed) {
           await sleep(2000);
-          confirmed = await evaluate<boolean>(
+          lastState = await browser.evaluate<PageState>(sessionId, READ_PAGE);
+          confirmed = await browser.evaluate<boolean>(
             sessionId,
             `document.body.innerText.includes('已确认')`,
           );
         }
-        check("the transaction reached a confirmed receipt", confirmed);
-
-        const after = await evaluate<PageState>(sessionId, READ_PAGE);
+        // The page's own account of the failure, so a stuck write reports WHY
+        // rather than only that it did not confirm. Without this the drill says
+        // "no receipt" and leaves the reader to guess between a rejected send, a
+        // revert, and a page that never got that far.
         check(
-          "the card switched to 你已投给该候选人",
-          after.buttons.some((b) => b.text.includes("你已投给该候选人")),
+          "the transaction reached a confirmed receipt",
+          confirmed,
+          `writeError=${JSON.stringify(lastState?.writeError ?? null)} ` +
+            `kind=${JSON.stringify(lastState?.writeErrorKind ?? null)}`,
+        );
+
+        const after = await browser.evaluate<PageState>(sessionId, READ_PAGE);
+        // The label this used to look for ("你已投给该候选人") dates from the
+        // single-poll ballot and no longer exists, which made this assertion
+        // unsatisfiable rather than merely stale — it could never pass, so it was
+        // never a check. It reads the `data-option-action` attribute now, which is
+        // the component's own contract for what each button does and does not
+        // change with wording. Exactly one option must report `withdraw`-eligible
+        // state as mine: the one just voted for.
+        check(
+          "exactly one option is now marked as the one this account backed",
+          after.myOptionButtons === 1,
+          `options reporting the voted state: ${after.myOptionButtons} (labels: ${JSON.stringify(after.voteButtonTexts)})`,
         );
         check('no button is stuck on "提交中…" afterwards', !after.hasSubmittingLabel);
+      }
+    }
+
+    if (CHANGE) {
+      console.log("\nchange");
+      // 改投 is the capability this project gained when it became multi-tenant,
+      // and it is the one the contract implements as a *distinct* event
+      // (ADR-0024). Clicking it is the only way to prove the whole path: the
+      // button's enabled state, a real signed transaction, the index folding the
+      // change into the derived tally, and the option that is no longer backed
+      // losing its vote.
+      if (votedForOption === null) {
+        check(
+          "--change requested, but this account has no vote to change — use --vote first",
+          false,
+          `voterState.currentOptionId=0; a change needs an existing vote`,
+        );
+      } else {
+        // Click a 改投 button, and remember which option it belonged to so the
+        // chain can be asked about that exact option afterwards.
+        const target = await browser.evaluate<{ clicked: string; optionId: string | null }>(
+          sessionId,
+          `(() => {
+            const b = [...document.querySelectorAll('button[data-option-action="change"]')].find(
+              (x) => !x.disabled,
+            );
+            if (!b) return { clicked: 'none', optionId: null };
+            const optionId = b.getAttribute('data-option-id');
+            b.click();
+            return { clicked: 'clicked', optionId };
+          })()`,
+        );
+        check(
+          "clicking an enabled 改投 button was possible",
+          target.clicked === "clicked",
+          `clicked=${target.clicked} optionId=${JSON.stringify(target.optionId)}`,
+        );
+        check(
+          "the 改投 button names the option it would move the vote to",
+          target.optionId !== null && target.optionId !== String(votedForOption),
+          `targetOption=${JSON.stringify(target.optionId)} currentlyBacked=${votedForOption}`,
+        );
+
+        let confirmed = false;
+        const deadline = Date.now() + 60_000;
+        while (Date.now() < deadline && !confirmed) {
+          await sleep(2000);
+          confirmed = await browser.evaluate<boolean>(
+            sessionId,
+            `document.body.innerText.includes('已确认')`,
+          );
+        }
+        check("the change reached a confirmed receipt", confirmed);
+
+        // The chain is the judge, not the page. Read `voterState` back and require
+        // that the vote moved to the option whose button was clicked — a UI that
+        // silently kept the old option while reporting success would fail here.
+        const moved = await client.readContract({
+          address: pollAddress,
+          abi: pollAbi,
+          functionName: "voterState",
+          args: [account],
+        });
+        const newOption = Number(moved[1]);
+        check(
+          "the chain moved the vote to the option whose button was clicked",
+          newOption === Number(target.optionId),
+          `was ${votedForOption}, clicked ${target.optionId}, chain now says ${newOption}`,
+        );
+        check(
+          "the account still backs exactly one option after changing",
+          newOption !== 0,
+          `currentOptionId=${newOption}`,
+        );
+        // The stake is not taken twice by a change: it is a move, not a second
+        // vote, and the contract must not charge for it beyond gas.
+        check(
+          "a change did not add a second stake",
+          moved[2] === stake,
+          `stake before=${stake} wei, after=${moved[2]} wei`,
+        );
+
+        const after = await browser.evaluate<PageState>(sessionId, READ_PAGE);
+        check(
+          "the page marks the new option as mine and offers 改投 on the old one",
+          after.myOptionButtons === 1,
+          `myOptions=${after.myOptionButtons} labels=${JSON.stringify(after.voteButtonTexts)}`,
+        );
+        check('no button is stuck on "提交中…" after a change', !after.hasSubmittingLabel);
       }
     }
 
@@ -644,7 +1053,7 @@ async function main(): Promise<number> {
           `phase=${phase} (needs ${PHASE_ENDED}) stake=${stake} wei (needs > 0)`,
         );
       } else {
-        const clicked = await evaluate<string>(
+        const clicked = await browser.evaluate<string>(
           sessionId,
           `(() => {
             const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('取回押金'));
@@ -660,7 +1069,7 @@ async function main(): Promise<number> {
         const deadline = Date.now() + 60_000;
         while (Date.now() < deadline && !confirmed) {
           await sleep(2000);
-          confirmed = await evaluate<boolean>(
+          confirmed = await browser.evaluate<boolean>(
             sessionId,
             `document.body.innerText.includes('已确认')`,
           );
@@ -670,8 +1079,8 @@ async function main(): Promise<number> {
         // The strongest assertion available: read the stake back off the chain
         // rather than trusting the UI to report it.
         const stakeAfter = await client.readContract({
-          address: config.votingAddress,
-          abi: votingAbi,
+          address: pollAddress,
+          abi: pollAbi,
           functionName: "stakeOf",
           args: [account],
         });
@@ -681,7 +1090,7 @@ async function main(): Promise<number> {
           `stakeOf=${stakeAfter} wei (was ${stake}, stake constant is ${STAKE_WEI})`,
         );
 
-        const after = await evaluate<PageState>(sessionId, READ_PAGE);
+        const after = await browser.evaluate<PageState>(sessionId, READ_PAGE);
         const refundAfter = after.buttons.find((b) => b.text.includes("取回押金"));
         check(
           "the refund button disabled itself once the stake was gone",
@@ -701,14 +1110,14 @@ async function main(): Promise<number> {
     }
 
     if (SHOT) {
-      const shot = await send("Page.captureScreenshot", { format: "png" }, sessionId);
+      const shot = await browser.send("Page.captureScreenshot", { format: "png" }, sessionId);
       writeFileSync(SHOT, Buffer.from(shot.data as string, "base64"));
       console.log(`\nscreenshot: ${SHOT}`);
     }
 
     // Read this last, so it reflects everything the page asked the wallet for —
     // including `eth_sendTransaction` when `--vote` or `--refund` ran.
-    const finalState = await evaluate<PageState>(sessionId, READ_PAGE);
+    const finalState = await browser.evaluate<PageState>(sessionId, READ_PAGE);
     console.log(`\nwallet methods requested: ${finalState.walletMethods.join(", ")}`);
 
     console.log(`\nbrowser console (${browserMessages.length} message(s)):`);

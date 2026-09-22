@@ -13,33 +13,31 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { classifyConsistency, compareTally } from "../src/lib/report";
-import type { ApiCandidate, TallyResponse } from "../src/lib/types";
+import type { ApiOption, TallyResponse } from "../src/lib/types";
 
 function tally(source: "chain" | "index", counts: number[]): TallyResponse {
-  const candidates: ApiCandidate[] = counts.map((voteCount, offset) => ({
+  const options: ApiOption[] = counts.map((voteCount, offset) => ({
     id: offset + 1,
-    metadataCid: `bafy${offset}`,
+    labelCid: `bafy${offset}`,
     voteCount,
   }));
 
-  return { source, total: counts.reduce((sum, n) => sum + n, 0), candidates };
+  return { source, total: counts.reduce((sum, n) => sum + n, 0), options };
 }
 
 describe("compareTally", () => {
-  it("reports agreement when every candidate and the total match", () => {
+  it("reports agreement when every option and the total match", () => {
     const report = compareTally(tally("chain", [67, 67, 66]), tally("index", [67, 67, 66]));
 
     assert.equal(report.consistent, true);
     assert.deepEqual(report.discrepancies, []);
   });
 
-  it("names the candidate that differs, with both numbers", () => {
+  it("names the option that differs, with both numbers", () => {
     const report = compareTally(tally("chain", [67, 67, 66]), tally("index", [67, 66, 66]));
 
     assert.equal(report.consistent, false);
-    assert.deepEqual(report.discrepancies, [
-      { candidateId: 2, onChain: 67, indexed: 66, pending: 0 },
-    ]);
+    assert.deepEqual(report.discrepancies, [{ optionId: 2, onChain: 67, indexed: 66, pending: 0 }]);
   });
 
   it("accepts a shortfall that the unindexed range fully explains", () => {
@@ -76,30 +74,28 @@ describe("compareTally", () => {
     );
 
     assert.equal(report.consistent, false);
-    assert.deepEqual(report.discrepancies, [
-      { candidateId: 3, onChain: 66, indexed: 65, pending: 0 },
-    ]);
+    assert.deepEqual(report.discrepancies, [{ optionId: 3, onChain: 66, indexed: 65, pending: 0 }]);
   });
 
-  it("reports a candidate the index is missing entirely", () => {
+  it("reports an option the index is missing entirely", () => {
     const report = compareTally(tally("chain", [67, 67]), tally("index", [67]));
 
     assert.equal(report.consistent, false);
     assert.deepEqual(report.discrepancies, [
-      { candidateId: 2, onChain: 67, indexed: null, pending: 0 },
+      { optionId: 2, onChain: 67, indexed: null, pending: 0 },
     ]);
   });
 
-  it("reports a candidate the index invented", () => {
+  it("reports an option the index invented", () => {
     const report = compareTally(tally("chain", [67]), tally("index", [67, 5]));
 
     assert.equal(report.consistent, false);
     assert.deepEqual(report.discrepancies, [
-      { candidateId: 2, onChain: null, indexed: 5, pending: 0 },
+      { optionId: 2, onChain: null, indexed: 5, pending: 0 },
     ]);
   });
 
-  it("does not accept matching per-candidate counts with a mismatched total", () => {
+  it("does not accept matching per-option counts with a mismatched total", () => {
     const onChain = tally("chain", [67, 67]);
     const indexed = { ...tally("index", [67, 67]), total: 999 };
 

@@ -18,8 +18,8 @@ import type { ConsistencyStatus, Discrepancy, TallyResponse } from "./types";
  */
 
 interface TallyRow extends RowDataPacket {
-  candidate_id: number;
-  metadata_cid: string;
+  option_id: number;
+  label_cid: string;
   vote_count: string;
 }
 
@@ -32,23 +32,68 @@ interface TallyRow extends RowDataPacket {
  */
 const DEFAULT_MAX_UNINDEXED_BLOCKS = 5_000;
 
-/** The indexed projection's answer to `results()`. */
-export async function readIndexedTally(pool: Pool | PoolConnection): Promise<TallyResponse> {
+/**
+ * The indexed projection's answer to a poll's `results()`.
+ *
+ * Reads `option_tally`, which is a view over the `votes` event stream — not a
+ * stored counter. That is what keeps this comparison meaningful: the index
+ * derives the current vote from the same events the chain does, so a
+ * disagreement is a real fault rather than a difference of opinion between two
+ * tallies.
+ *
+ * `pollAddress` became a required argument with the multi-tenant rewrite. Two
+ * polls share an ABI and an event signature, so an unqualified tally would sum
+ * every poll's votes into one meaningless number.
+ */
+export async function readIndexedTally(
+  pool: Pool | PoolConnection,
+  pollAddress: string,
+): Promise<TallyResponse> {
   const [rows] = await pool.query<TallyRow[]>(
-    "SELECT candidate_id, metadata_cid, vote_count FROM candidate_tally ORDER BY candidate_id",
+    `SELECT option_id, label_cid, vote_count
+     FROM option_tally
+     WHERE poll_address = ?
+     ORDER BY option_id`,
+    [pollAddress.toLowerCase()],
   );
 
-  const candidates = rows.map((row) => ({
-    id: Number(row.candidate_id),
-    metadataCid: row.metadata_cid,
+  const options = rows.map((row) => ({
+    id: Number(row.option_id),
+    labelCid: row.label_cid,
     voteCount: Number(row.vote_count),
   }));
 
   return {
     source: "index",
-    total: candidates.reduce((sum, candidate) => sum + candidate.voteCount, 0),
-    candidates,
+    total: options.reduce((sum, option) => sum + option.voteCount, 0),
+    options,
   };
+}
+
+export interface IndexedPollRow extends RowDataPacket {
+  address: string;
+  creator: string;
+  question: string;
+  ends_at: string;
+  option_count: number;
+}
+
+/** Every poll the index knows about, in creation order. */
+export async function readIndexedPolls(
+  pool: Pool | PoolConnection,
+): Promise<{ address: string; creator: string; question: string; endsAt: string }[]> {
+  const [rows] = await pool.query<IndexedPollRow[]>(
+    `SELECT address, creator, question, ends_at, option_count
+     FROM polls
+     ORDER BY block_number ASC, log_index ASC`,
+  );
+
+  return rows.map((row) => ({
+    address: row.address,
+    creator: row.creator,
+    question: row.question,
+    endsAt: row.ends_at,
+  }));
 }
 
 export interface ConsistencyReport {
@@ -66,7 +111,7 @@ export interface ConsistencyReport {
  * comparison reports a mismatch on correct behaviour, and the alarm it raises is
  * one nobody would read by the time a real fault arrived.
  *
- * `pendingVotes` is the count, per candidate, of votes found in the blocks
+ * `pendingVotes` is the count, per option, of votes found in the blocks
  * between the index's cursor and the chain head. Adding them back asks the only
  * question worth asking: does the index, plus everything it has not yet been
  * allowed to see, equal what the chain says?
@@ -78,31 +123,31 @@ export function compareTally(
 ): ConsistencyReport {
   const discrepancies: Discrepancy[] = [];
 
-  const indexedById = new Map(indexed.candidates.map((candidate) => [candidate.id, candidate]));
-  const onChainById = new Map(onChain.candidates.map((candidate) => [candidate.id, candidate]));
+  const indexedById = new Map(indexed.options.map((option) => [option.id, option]));
+  const onChainById = new Map(onChain.options.map((option) => [option.id, option]));
 
-  for (const candidate of onChain.candidates) {
-    const other = indexedById.get(candidate.id);
-    const pending = pendingVotes.get(candidate.id) ?? 0;
+  for (const option of onChain.options) {
+    const other = indexedById.get(option.id);
+    const pending = pendingVotes.get(option.id) ?? 0;
     const expected = other === undefined ? null : other.voteCount + pending;
 
-    if (expected === null || expected !== candidate.voteCount) {
+    if (expected === null || expected !== option.voteCount) {
       discrepancies.push({
-        candidateId: candidate.id,
-        onChain: candidate.voteCount,
+        optionId: option.id,
+        onChain: option.voteCount,
         indexed: other?.voteCount ?? null,
         pending,
       });
     }
   }
 
-  for (const candidate of indexed.candidates) {
-    if (!onChainById.has(candidate.id)) {
+  for (const option of indexed.options) {
+    if (!onChainById.has(option.id)) {
       discrepancies.push({
-        candidateId: candidate.id,
+        optionId: option.id,
         onChain: null,
-        indexed: candidate.voteCount,
-        pending: pendingVotes.get(candidate.id) ?? 0,
+        indexed: option.voteCount,
+        pending: pendingVotes.get(option.id) ?? 0,
       });
     }
   }
@@ -149,7 +194,7 @@ export interface ConsistencyCheck {
 /**
  * The index's tally and the cursor it was committed with, read as one snapshot.
  *
- * These two values are meaningless apart. `candidate_tally` is a view over
+ * These two values are meaningless apart. `option_tally` is a view over
  * `votes`, and the cursor says how far the index has consumed the chain; the
  * unindexed range is derived from the cursor and subtracted from the *difference*
  * between the two tallies. If the indexer commits a batch between reading one and
@@ -166,13 +211,14 @@ export interface ConsistencyCheck {
  */
 export async function readIndexSnapshot(
   pool: Pool,
+  pollAddress: string,
 ): Promise<{ indexed: TallyResponse; cursor: bigint | null }> {
   const connection = await pool.getConnection();
 
   try {
     await connection.beginTransaction();
 
-    const indexed = await readIndexedTally(connection);
+    const indexed = await readIndexedTally(connection, pollAddress);
     const cursor = await readCursor(connection);
 
     await connection.commit();
@@ -206,7 +252,7 @@ export async function checkConsistency(input: {
   address: `0x${string}`;
   maxUnindexedBlocks?: number;
 }): Promise<ConsistencyCheck> {
-  const { indexed, cursor } = await readIndexSnapshot(input.pool);
+  const { indexed, cursor } = await readIndexSnapshot(input.pool, input.address);
 
   const head = await input.client.getBlockNumber();
   const onChain = await readOnChainTally(input.client, input.address, head);
@@ -226,7 +272,14 @@ export async function checkConsistency(input: {
     });
 
     for (const vote of decodeLogs(logs).votes) {
-      pendingVotes.set(vote.candidateId, (pendingVotes.get(vote.candidateId) ?? 0) + 1);
+      // A `withdrawn` row carries option_id 0 and is not a vote for anything, so
+      // it must not be added back as a pending vote for option 0. Only events
+      // that currently back an option reconcile a shortfall.
+      if (vote.eventType === "withdrawn") {
+        continue;
+      }
+
+      pendingVotes.set(vote.optionId, (pendingVotes.get(vote.optionId) ?? 0) + 1);
     }
   }
 

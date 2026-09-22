@@ -15,7 +15,7 @@
  *   pnpm indexer:refund-drill
  *
  * Requires a running `hardhat node` (chain 31337) with a freshly seeded,
- * drained ballot, and the app stopped. `endVoting()` is irreversible, so the
+ * drained poll, and the app stopped. `endPoll()` is irreversible, so the
  * whole scenario runs inside one snapshot and is reverted at the end — on
  * failure as well as on success.
  */
@@ -25,7 +25,7 @@ import type { RowDataPacket } from "mysql2/promise";
 
 import { asChainReader, readOnChainTally } from "../src/lib/chain";
 import { loadServerConfig } from "../src/lib/config";
-import { votingAbi } from "../src/lib/contracts";
+import { factoryAbi, pollAbi } from "../src/lib/contracts";
 import { migrate } from "../src/lib/db/migrate";
 import { createPool } from "../src/lib/db/pool";
 import { syncOnce, type SyncDeps, type SyncOutcome } from "../src/lib/indexer/sync";
@@ -97,10 +97,51 @@ const databaseUrl = config.databaseUrl;
 await migrate(databaseUrl);
 const pool = createPool(databaseUrl);
 
+/**
+ * The poll this drill operates on.
+ *
+ * Discovered from the factory rather than configured, for the same reason the
+ * app does it: a hardcoded poll address would silently keep working against a
+ * poll that no longer exists after any redeploy, and the drill would report a
+ * chain-versus-index mismatch that is really just a stale constant.
+ *
+ * `POLL_ADDRESS` overrides it, which is what the CI job uses to pin the drill to
+ * the poll the seed script created.
+ */
+const pollAddress: `0x${string}` = await (async (): Promise<`0x${string}`> => {
+  const explicit = process.env.POLL_ADDRESS;
+
+  if (explicit !== undefined && explicit.length > 0) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(explicit)) {
+      console.error("POLL_ADDRESS must be a 20 byte hex address.");
+      process.exit(1);
+    }
+
+    return explicit as `0x${string}`;
+  }
+
+  const all = await publicClient.readContract({
+    address: config.factoryAddress,
+    abi: factoryAbi,
+    functionName: "allPolls",
+  });
+
+  const first = all[0];
+
+  if (first === undefined) {
+    console.error(
+      "The factory has created no polls, so there is nothing to drill. Run `pnpm seed:local`.",
+    );
+    process.exit(1);
+  }
+
+  return first;
+})();
+
 const deps: SyncDeps = {
   pool,
   chain: asChainReader(publicClient),
-  address: config.votingAddress,
+  factoryAddress: config.factoryAddress,
   confirmations: config.confirmations,
   chunkBlocks: config.chunkBlocks,
   ...(config.startBlock !== undefined ? { startBlock: config.startBlock } : {}),
@@ -122,8 +163,8 @@ async function drainToIdle(): Promise<SyncOutcome[]> {
   throw new Error(`did not reach idle within ${MAX_ROUNDS} rounds`);
 }
 
-async function countOf(sql: string): Promise<number> {
-  const [rows] = await pool.query<CountRow[]>(sql);
+async function countOf(sql: string, params: unknown[] = []): Promise<number> {
+  const [rows] = await pool.query<CountRow[]>(sql, params);
 
   return Number(rows[0]?.n ?? 0);
 }
@@ -186,11 +227,20 @@ async function observe(): Promise<Observation> {
     cursor: cursorRows[0] === undefined ? null : BigInt(cursorRows[0].last_block),
     refundRows: await countOf("SELECT COUNT(*) AS n FROM refunds"),
     phaseRows: await countOf("SELECT COUNT(*) AS n FROM phase_events"),
-    tallyTotal: await countOf("SELECT COALESCE(SUM(vote_count), 0) AS n FROM candidate_tally"),
+    // Scoped to THIS poll, because that is what `readOnChainTally` measures. An
+    // unscoped `SUM(vote_count)` silently adds up every poll in the database, so
+    // the comparison below was really "one poll's chain tally" against "every
+    // poll's indexed tally" — which agrees only while a single poll exists. The
+    // seed creates two, so the check failed by exactly the second poll's total
+    // and blamed the indexer for a measurement that was never comparable.
+    tallyTotal: await countOf(
+      "SELECT COALESCE(SUM(vote_count), 0) AS n FROM option_tally WHERE poll_address = ?",
+      [pollAddress.toLowerCase()],
+    ),
     phase: Number(
       await publicClient.readContract({
-        address: config.votingAddress,
-        abi: votingAbi,
+        address: pollAddress,
+        abi: pollAbi,
         functionName: "phase",
       }),
     ),
@@ -238,33 +288,33 @@ try {
   // checked against this rather than a hard-coded constant, so the two cannot
   // drift apart without the drill noticing.
   const owed = (await publicClient.readContract({
-    address: config.votingAddress,
-    abi: votingAbi,
+    address: pollAddress,
+    abi: pollAbi,
     functionName: "stakeOf",
     args: [voter.address],
   })) as bigint;
   report.owedWei = owed.toString();
   check(owed > 0n, "the drill voter has no stake to refund; re-seed before running");
 
-  // `endVoting()` is irreversible short of a revert, so everything from here
+  // `endPoll()` is irreversible short of a revert, so everything from here
   // happens inside a snapshot.
   snapshotId = await hardhatRpc<string>("evm_snapshot");
   report.snapshot = { id: snapshotId };
 
-  // ---- 1. Close the ballot ---------------------------------------------
+  // ---- 1. Close the poll -----------------------------------------------
   const endHash = await owner.writeContract({
-    address: config.votingAddress,
-    abi: votingAbi,
-    functionName: "endVoting",
+    address: pollAddress,
+    abi: pollAbi,
+    functionName: "endPoll",
   });
   const endReceipt = await publicClient.waitForTransactionReceipt({ hash: endHash });
-  check(endReceipt.status === "success", `endVoting reverted (status ${endReceipt.status})`);
+  check(endReceipt.status === "success", `endPoll reverted (status ${endReceipt.status})`);
 
   await waitForHeadAbove(before.head);
   await drainToIdle();
 
   const ended = await observe();
-  report.afterEndVoting = describe(ended);
+  report.afterEndPoll = describe(ended);
   check(ended.phase === 2, `expected the chain to report the Ended phase (2), got ${ended.phase}`);
   check(
     ended.phaseRows === before.phaseRows + 1,
@@ -273,8 +323,8 @@ try {
 
   // ---- 2. Refund the stake ---------------------------------------------
   const refundHash = await voterWallet.writeContract({
-    address: config.votingAddress,
-    abi: votingAbi,
+    address: pollAddress,
+    abi: pollAbi,
     functionName: "refund",
   });
   const refundReceipt = await publicClient.waitForTransactionReceipt({ hash: refundHash });
@@ -320,7 +370,7 @@ try {
       "The contract does not decrement voteCount on refund, so the index must not either.",
   );
 
-  const onChain = await readOnChainTally(publicClient, config.votingAddress);
+  const onChain = await readOnChainTally(publicClient, pollAddress);
   report.consistency = { onChainTotal: onChain.total, indexedTotal: refunded.tallyTotal };
   check(
     onChain.total === refunded.tallyTotal,
@@ -343,7 +393,7 @@ try {
   );
   check(
     restored.phaseRows === before.phaseRows,
-    `the endVoting phase row outlived the revert: ${restored.phaseRows}, expected ${before.phaseRows}`,
+    `the endPoll phase row outlived the revert: ${restored.phaseRows}, expected ${before.phaseRows}`,
   );
   check(
     restored.tallyTotal === before.tallyTotal,

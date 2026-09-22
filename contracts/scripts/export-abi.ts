@@ -1,14 +1,21 @@
 // SPDX-License-Identifier: MIT
 /**
- * Publishes the compiled contract interface into the web app:
+ * Publishes the compiled contract interfaces into the web app:
  *
- *   * `voting-abi.ts`   — the ABI, plus the `VotingPhase` enum mirror
- *   * `deployments.ts`  — chain id -> deployed address, read from ./deployments
+ *   * `voting-abi.ts`   — the `VotingFactory` and `Poll` ABIs, plus the
+ *                         `PollPhase` enum mirror
+ *   * `deployments.ts`  — chain id -> deployed factory address, read from
+ *                         ./deployments
  *   * `index.ts`        — a single entry point that re-exports both
  *
  * They land in `web/src/lib/contracts/`, which keeps the repository at two
  * layers (`contracts/` and `web/`) instead of introducing a third package that
  * exists only to hold generated types.
+ *
+ * Two ABIs, not one, because there are two contracts now. The factory ABI is
+ * what a browser needs to create and list polls; the poll ABI is what it needs
+ * to read and write a single one. They are not interchangeable and neither
+ * re-exports the other.
  *
  * All three files are committed. That is deliberate: it lets the web app
  * typecheck and build without a full Hardhat compile, while CI re-runs this
@@ -28,13 +35,13 @@ interface Artifact {
 
 interface DeploymentRecord {
   chainId: number;
-  voting: string;
-  owner: string;
+  factory: string;
+  implementation: string;
   deployer: string;
   deployedAt: string;
   /**
-   * The block the contract was created in, so the indexer can start there
-   * instead of at block 0. Absent in records written before this field existed.
+   * The block the factory was created in, so the indexer can start there
+   * instead of at block 0.
    */
   blockNumber?: number;
 }
@@ -44,14 +51,8 @@ const BANNER = `// SPDX-License-Identifier: MIT
 // Regenerate with: pnpm export-abi
 `;
 
-async function readArtifact(): Promise<Artifact> {
-  const artifactPath = path.join(
-    contractsDir,
-    "artifacts",
-    "contracts",
-    "Voting.sol",
-    "Voting.json",
-  );
+async function readArtifact(source: string, name: string): Promise<Artifact> {
+  const artifactPath = path.join(contractsDir, "artifacts", "contracts", source, `${name}.json`);
 
   try {
     return JSON.parse(await readFile(artifactPath, "utf8")) as Artifact;
@@ -67,8 +68,8 @@ async function readArtifact(): Promise<Artifact> {
  * The phase enum is mirrored as a TS enum so consumers can compare against
  * named members instead of magic numbers.
  */
-const PHASE_ENUM = `/** Mirrors the on-chain \`Voting.Phase\` enum. */
-export enum VotingPhase {
+const PHASE_ENUM = `/** Mirrors the on-chain \`Poll.Phase\` enum. */
+export enum PollPhase {
   Setup = 0,
   Voting = 1,
   Ended = 2,
@@ -87,11 +88,30 @@ async function readDeployments(): Promise<DeploymentRecord[]> {
 
   const records: DeploymentRecord[] = [];
   for (const file of files.sort()) {
+    let record: Partial<DeploymentRecord> & { voting?: string };
     try {
-      records.push(JSON.parse(await readFile(path.join(dir, file), "utf8")) as DeploymentRecord);
+      record = JSON.parse(await readFile(path.join(dir, file), "utf8")) as typeof record;
     } catch (error) {
       throw new Error(`Malformed deployment file ${file}: ${String(error)}`);
     }
+
+    // A record from before the factory existed carries `voting` and no
+    // `factory`. Publishing it would emit the string "undefined" as an address,
+    // which typechecks and then fails at runtime as an invalid address — a
+    // silent corruption this file is the last place to catch. Naming the file
+    // and the fix is the whole point of failing here.
+    if (record.factory === undefined || record.implementation === undefined) {
+      throw new Error(
+        `Deployment record ${file} has no "factory"/"implementation" address` +
+          (record.voting === undefined ? "" : ` (it still has the retired "voting" field)`) +
+          ".\n" +
+          `  This record predates the voting-platform deployment. Re-deploy that chain ` +
+          `(pnpm deploy:sepolia or pnpm seed:local) so the record matches the deployed ` +
+          `contracts, or delete the file if that chain is no longer in use.`,
+      );
+    }
+
+    records.push(record as DeploymentRecord);
   }
 
   return records;
@@ -99,11 +119,15 @@ async function readDeployments(): Promise<DeploymentRecord[]> {
 
 await mkdir(generatedDir, { recursive: true });
 
-const artifact = await readArtifact();
+const factoryArtifact = await readArtifact("VotingFactory.sol", "VotingFactory");
+const pollArtifact = await readArtifact("Poll.sol", "Poll");
 
 const abiFile = `${BANNER}
-/** The deployed \`Voting\` contract interface, as emitted by solc. */
-export const votingAbi = ${JSON.stringify(artifact.abi, null, 2)} as const;
+/** The deployed \`VotingFactory\` interface, as emitted by solc. */
+export const factoryAbi = ${JSON.stringify(factoryArtifact.abi, null, 2)} as const;
+
+/** The \`Poll\` interface, as emitted by solc. Every poll shares it. */
+export const pollAbi = ${JSON.stringify(pollArtifact.abi, null, 2)} as const;
 
 ${PHASE_ENUM}`;
 
@@ -121,8 +145,8 @@ const entries = records
     // the chain alone.
     (record) => `  ${record.chainId}: {
     chainId: ${record.chainId},
-    voting: "${record.voting}",
-    owner: "${record.owner}",
+    factory: "${record.factory}",
+    implementation: "${record.implementation}",
     deployer: "${record.deployer}",
     blockNumber: ${record.blockNumber ?? "undefined"},
   },`,
@@ -132,11 +156,13 @@ const entries = records
 const deploymentsFile = `${BANNER}
 export interface Deployment {
   chainId: number;
-  voting: \`0x\${string}\`;
-  owner: \`0x\${string}\`;
+  /** The factory that creates polls. This is what the app talks to. */
+  factory: \`0x\${string}\`;
+  /** The implementation every poll clone delegates to. Informational. */
+  implementation: \`0x\${string}\`;
   deployer: \`0x\${string}\`;
   /**
-   * The block the contract was created in. The indexer starts here rather than
+   * The block the factory was created in. The indexer starts here rather than
    * at block 0, because public RPCs prune old history and a scan from genesis
    * fails outright on Sepolia instead of merely being slow.
    */
@@ -151,7 +177,7 @@ export const CHAIN_IDS = {
 
 /**
  * Deployed addresses by chain id. Populated from \`contracts/deployments/*.json\`
- * by \`export-abi\`; empty until the contract is deployed somewhere.
+ * by \`export-abi\`; empty until the factory is deployed somewhere.
  */
 export const deployments: Record<number, Deployment> = {
 ${entries}
@@ -166,7 +192,7 @@ export function getDeployment(chainId: number): Deployment | undefined {
 await writeFile(path.join(generatedDir, "deployments.ts"), deploymentsFile, "utf8");
 
 const indexPath = `${BANNER}
-export { votingAbi, VotingPhase } from "./voting-abi";
+export { factoryAbi, pollAbi, PollPhase } from "./voting-abi";
 export {
   CHAIN_IDS,
   deployments,

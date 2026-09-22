@@ -21,11 +21,47 @@ const DEFAULT_GATEWAYS = [
   "https://gateway.pinata.cloud/ipfs/",
 ];
 
-const configured = process.env.NEXT_PUBLIC_IPFS_GATEWAY;
+/**
+ * The gateways to try, in order, given the optional configured one.
+ *
+ * A blank value counts as "not configured", the same reading `preflight.ts` and
+ * `seed-sepolia.ts` give an empty variable: a blank line someone thinks is
+ * unset must not turn into an instruction to fetch a relative URL.
+ *
+ * De-duplicated, because the natural thing to configure is one of the defaults —
+ * this project pins to Pinata, so `NEXT_PUBLIC_IPFS_GATEWAY` is set to the Pinata
+ * gateway. Appending the defaults blindly would then try that host first and
+ * again last: one extra request that cannot produce a different answer, and one
+ * extra unit in the `attempts` count the failure sentence reports.
+ */
+export function gatewaysFor(configured: string | undefined): string[] {
+  if (configured === undefined || configured.trim() === "") {
+    return DEFAULT_GATEWAYS;
+  }
 
-const GATEWAYS = configured === undefined ? DEFAULT_GATEWAYS : [configured, ...DEFAULT_GATEWAYS];
+  return [...new Set([configured, ...DEFAULT_GATEWAYS])];
+}
 
-const TIMEOUT_MS = 6000;
+const GATEWAYS = gatewaysFor(process.env.NEXT_PUBLIC_IPFS_GATEWAY);
+
+/**
+ * How long a single gateway gets before it is treated as not answering.
+ *
+ * Measured against the gateway the metadata of this project is actually pinned
+ * to (`gateway.pinata.cloud`), from this machine, for a 180-byte document:
+ * repeated fetches took 7.2 s, 3.7 s, 7.0 s, 3.7 s — a 6-second budget, which is
+ * what this used to be, turned a working gateway into "unreachable" about half
+ * the time. A timeout shorter than the slowest real answer is not a safety
+ * limit; it is a source of false reports, and it reported them in the same words
+ * a genuinely dead gateway gets.
+ *
+ * The cost is the other direction, and it is deliberate: three gateways that
+ * never answer now take up to 45 s to say so, where they used to take 18. The
+ * card renders "读取中…" for that whole time rather than claiming anything, which
+ * is the honest trade — a wrong "all gateways are unreachable" sends the reader
+ * to check a network that is fine.
+ */
+const TIMEOUT_MS = 15_000;
 
 /**
  * A cheap sanity check before spending a request on a gateway.

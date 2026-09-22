@@ -21,7 +21,10 @@
     "gas": "pnpm --filter @voting/contracts gas",
     "deploy:local": "pnpm --filter @voting/contracts deploy:local",
     "deploy:sepolia": "pnpm --filter @voting/contracts deploy:sepolia",
+    "verify:sourcify": "pnpm --filter @voting/contracts verify:sourcify",
     "seed:local": "pnpm --filter @voting/contracts seed:local",
+    "create-poll:sepolia": "pnpm --filter @voting/contracts create-poll:sepolia",
+    "pin:metadata": "pnpm --filter @voting/contracts pin:metadata",
     "indexer:migrate": "pnpm --filter @voting/web migrate",
     "indexer:drain": "pnpm --filter @voting/web drain",
     "indexer:check-consistency": "pnpm --filter @voting/web check-consistency",
@@ -31,7 +34,8 @@
     "web:dev": "pnpm --filter @voting/web dev",
     "web:start": "pnpm --filter @voting/web start",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "ui:drill:change": "pnpm --filter @voting/web ui-drill:change"
   },
   "devDependencies": {
     "prettier": "3.9.8"

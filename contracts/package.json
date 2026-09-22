@@ -16,7 +16,10 @@
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
     "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia",
     "verify:sepolia": "hardhat run scripts/verify.ts --network sepoliaReadOnly",
-    "seed:local": "hardhat run scripts/seed-local.ts --network localhost"
+    "verify:sourcify": "hardhat run scripts/verify-sourcify.ts",
+    "seed:local": "hardhat run scripts/seed-local.ts --network localhost",
+    "create-poll:sepolia": "hardhat run scripts/create-poll.ts --network sepolia",
+    "pin:metadata": "hardhat run scripts/pin-metadata.ts"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-network-helpers": "3.0.11",

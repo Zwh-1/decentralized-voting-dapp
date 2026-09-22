@@ -1,54 +1,80 @@
 // SPDX-License-Identifier: MIT
-import { Ballot } from "@/components/Ballot";
-import { getHealth, getResults, getTally } from "@/lib/data";
+import { CreatePollForm } from "@/components/CreatePollForm";
+import { PageShell } from "@/components/PageShell";
+import { PollList } from "@/components/PollList";
+import { getConfiguredTarget, getPolls } from "@/lib/data";
+import { describeFailure } from "@/lib/failure";
+import type { PollSummary } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 /**
- * The ballot page.
+ * The poll list: every poll the factory has created.
  *
- * A server component that reads the initial data directly, so the first paint
- * already shows the real tally and the consistency verdict rather than a
- * loading state. The client component then takes over polling.
+ * A server component that prefetches the list so the first paint already shows
+ * real polls instead of a loading state, and hands it to a client component that
+ * re-reads the same function from the browser afterwards. Both halves matter:
+ * the prefetch is what makes the page useful before any JavaScript runs, and the
+ * client read is what makes it correct a second later.
  *
- * The three reads are settled independently. They fail independently: when the
- * RPC endpoint is unreachable the tally and the health check still succeed from
- * the index while only the chain-versus-index comparison cannot be made, and an
- * earlier `Promise.all` in a single try/catch threw both good results away — the
- * first paint then showed placeholders for data the server was holding, which is
- * the opposite of what prefetching here is for. Each failure is also attributed
- * to the read that produced it, so the banner does not blame the chain for a
- * comparison it could not run.
+ * The read is `getPolls()`, which goes to the CHAIN — the factory's `allPolls()`
+ * plus one summary per poll. That is the requirement "the app must never depend
+ * on MySQL to render" taken literally: this page has no index dependency to fall
+ * back from, because it never had one.
+ *
+ * The failure handling is per-poll, not per-page. `getPolls()` already omits
+ * nothing and returns what it could read, so this page distinguishes the two
+ * cases that matter and says which one happened:
+ *
+ *   * the factory itself could not be read — there is no list at all, and the
+ *     page says so rather than rendering "no polls exist", which would be a
+ *     confident answer to a question that was never answered (ADR-0012);
+ *   * a single poll's details could not be read — the poll is still listed, from
+ *     the address the factory returned, with its failed read named on the card.
  */
 export default async function Home() {
-  const [tally, results, health] = await Promise.allSettled([
-    getTally(),
-    getResults(),
-    getHealth(),
-  ]);
+  const configuredTarget = getConfiguredTarget();
 
-  const describe = (result: PromiseRejectedResult): string =>
-    result.reason instanceof Error ? result.reason.message : String(result.reason);
+  let polls: PollSummary[] | null = null;
+  let listError: string | null = null;
 
-  const failed: [string, PromiseRejectedResult][] = (
-    [
-      ["票数", tally],
-      ["链与索引的一致性比对", results],
-      ["健康状态", health],
-    ] as [string, PromiseSettledResult<unknown>][]
-  ).filter((entry): entry is [string, PromiseRejectedResult] => entry[1].status === "rejected");
+  try {
+    polls = await getPolls();
+  } catch (error) {
+    // Logged with the raw error and reported with the classified sentence: the
+    // raw one embeds the RPC endpoint and its apiKey (ADR-0020), and this string
+    // is server-rendered into a page anyone can load.
+    console.error("[page] the poll list could not be read", error);
+    listError = describeFailure(error);
+  }
 
-  const initialError =
-    failed.length === 0
-      ? null
-      : failed.map(([name, result]) => `${name}：${describe(result)}`).join("；");
+  const addresses = polls === null ? null : polls.map((poll) => poll.address);
 
   return (
-    <Ballot
-      initialTally={tally.status === "fulfilled" ? tally.value : null}
-      initialResults={results.status === "fulfilled" ? results.value : null}
-      initialHealth={health.status === "fulfilled" ? health.value : null}
-      initialError={initialError}
-    />
+    <PageShell
+      title="去中心化投票平台"
+      subtitle="任何人都可以发起投票；每个投票是独立合约，发起人管理它。你可以投票、改投、撤票并取回押金。选项元数据存放在 IPFS，链上只保存 CID；所有写入都由你自己的钱包签名。"
+      configuredTarget={configuredTarget}
+    >
+      {listError !== null && (
+        <section className="mt-6 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm leading-relaxed text-rose-700">
+          无法从链上读取投票列表：{listError}
+          <br />
+          请确认 <code className="font-mono">web/.env</code> 里的{" "}
+          <code className="font-mono">RPC_URL</code> 可达、
+          <code className="font-mono">CHAIN_ID</code> 上有已部署的工厂合约，并已执行过{" "}
+          <code className="font-mono">pnpm export-abi</code>。
+          连接钱包后，下面的列表会直接向你的钱包所在网络重新读取一次。
+        </section>
+      )}
+
+      <CreatePollForm configuredTarget={configuredTarget} />
+
+      <PollList
+        initialPolls={polls}
+        initialAddresses={addresses}
+        configuredTarget={configuredTarget}
+      />
+    </PageShell>
   );
 }

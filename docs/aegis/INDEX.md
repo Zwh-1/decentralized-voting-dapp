@@ -25,3 +25,25 @@ Entries are workspace records, not authoritative runtime decisions.
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0016-deploy-preflight-checks-usability-and-never-echoes-a-value.md    | ADR-0016 - 部署前检查的是"可用"而不只是"存在"，且绝不回显值                       |
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0017-the-consistency-check-compares-one-instant.md                    | ADR-0017 - 一致性检查必须比较同一个瞬间（封存快照、单一高度、不缓存的高度）       |
 | 2026-09-20 | adr      | docs/aegis/adr/ADR-0018-cache-and-retry-are-decided-per-result.md                        | ADR-0018 - 缓存与重试按结果区分，而不是按查询区分（本地结论 vs 网络结论）         |
+| 2026-09-21 | adr      | docs/aegis/adr/ADR-0019-the-browser-reads-the-chain-the-deployment-is-configured-for.md  | ADR-0019 - 浏览器端的链身份来自部署配置，而不是钱包的默认链                       |
+| 2026-09-21 | adr      | docs/aegis/adr/ADR-0020-failure-reports-give-the-shape-never-the-environment.md          | ADR-0020 - 失败报告只给形状，不回显配置；原始错误只写服务端日志                   |
+| 2026-09-21 | adr      | docs/aegis/adr/ADR-0021-a-cid-is-computed-from-the-document-it-names.md                  | ADR-0021 - CID 必须由它所命名的那份字节算出，绝不手写                             |
+| 2026-09-21 | adr      | docs/aegis/adr/ADR-0022-a-wallet-refusal-is-a-sentence-not-a-stack-trace.md              | ADR-0022 - 钱包的拒绝必须说成一句中文，且必须以"链上有没有变化"收尾               |
+| 2026-09-21 | adr      | docs/aegis/adr/ADR-0023-one-poll-per-contract-through-a-factory.md                       | ADR-0023 - 一人一票的约束必须留在链上：工厂 + 每投票一份合约，取代规格非目标 3    |
+| 2026-09-21 | adr      | docs/aegis/adr/ADR-0024-a-vote-change-is-its-own-event.md                                | ADR-0024 - 改投与撤票各自独立成事件，当前票只能由事件流推导                       |
+| 2026-09-21 | adr      | docs/aegis/adr/ADR-0025-admission-mode-is-fixed-at-initialize.md                         | ADR-0025 - 准入方式在 initialize 固定；canVote 与 whitelisted 必须是两个事实      |
+| 2026-09-21 | adr      | docs/aegis/adr/ADR-0026-every-exported-write-needs-a-caller-or-a-reason.md               | ADR-0026 - 每个已导出的写函数都必须有调用点，或一条刻意不调用的理由               |
+| 2026-09-21 | adr      | docs/aegis/adr/ADR-0027-eligibility-rules-live-in-pure-functions.md                      | ADR-0027 - 决定"能不能点"的规则住在纯函数里，组件只负责组装输入                   |
+| 2026-09-21 | plan     | docs/aegis/plans/2026-09-21-multi-tenant-voting-platform.md                              | 实施计划：从"一次性公投"改造为"用户自建投票平台"                                  |
+| 2026-09-21 | baseline | docs/aegis/baseline/2026-09-21-optimization-pass.md                                      | 基线记录：功能补齐与代码改进审计；7 个写函数零调用点的 Implementation Drift       |
+| 2026-09-22 | work     | docs/aegis/work/2026-09-22-close-known-gaps/10-intent.md                                 | 关闭已登记的未完成项（P0/P1/P2） intent                                           |
+| 2026-09-22 | work     | docs/aegis/work/2026-09-22-close-known-gaps/20-checkpoint.md                             | 关闭已登记的未完成项（P0/P1/P2） checkpoint                                       |
+| 2026-09-22 | work     | docs/aegis/work/2026-09-22-close-known-gaps/90-evidence.md                               | 关闭已登记的未完成项（P0/P1/P2） evidence                                         |
+| 2026-09-22 | work     | docs/aegis/work/2026-09-22-close-known-gaps/99-reflection.md                             | 关闭已登记的未完成项（P0/P1/P2） reflection                                       |
+| 2026-09-22 | artifact | docs/aegis/work/2026-09-22-close-known-gaps/task-intent-draft.json                       | 关闭已登记的未完成项（P0/P1/P2） task intent draft                                |
+| 2026-09-22 | artifact | docs/aegis/work/2026-09-22-close-known-gaps/baseline-read-set-hint.json                  | 关闭已登记的未完成项（P0/P1/P2） baseline read-set hint                           |
+| 2026-09-22 | artifact | docs/aegis/work/2026-09-22-close-known-gaps/baseline-usage-draft.json                    | 关闭已登记的未完成项（P0/P1/P2） baseline usage draft                             |
+| 2026-09-22 | artifact | docs/aegis/work/2026-09-22-close-known-gaps/impact-statement-draft.json                  | 关闭已登记的未完成项（P0/P1/P2） impact statement draft                           |
+| 2026-09-22 | artifact | docs/aegis/work/2026-09-22-close-known-gaps/todo-checkpoint-draft.json                   | 关闭已登记的未完成项（P0/P1/P2） todo checkpoint draft                            |
+| 2026-09-22 | artifact | docs/aegis/work/2026-09-22-close-known-gaps/drift-check-draft.json                       | 关闭已登记的未完成项（P0/P1/P2） drift check draft                                |
+| 2026-09-22 | artifact | docs/aegis/work/2026-09-22-close-known-gaps/resume-state-hint.json                       | 2026-09-22-close-known-gaps resume state hint                                     |

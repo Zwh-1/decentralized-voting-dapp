@@ -48,12 +48,24 @@ describe("startBlock", () => {
   it("is undefined for a chain with no recorded deployment", () => {
     const config = loadServerConfig(
       env({
-        CHAIN_ID: "11155111",
-        VOTING_ADDRESS: "0x0000000000000000000000000000000000000001",
+        // A chain this project has never deployed to. It used to be 11155111,
+        // which was true only while the Sepolia deployment did not exist; the
+        // moment one was recorded the fixture stopped testing what it claimed to.
+        CHAIN_ID: "5",
+        FACTORY_ADDRESS: "0x0000000000000000000000000000000000000001",
       }),
     );
 
+    assert.equal(getDeployment(5), undefined);
     // Nothing is known about where to start; the operator must say.
     assert.equal(config.startBlock, undefined);
+  });
+
+  it("uses the recorded deployment block for a chain that has one", () => {
+    const config = loadServerConfig(env({ CHAIN_ID: "11155111" }));
+
+    const recorded = getDeployment(11155111);
+    assert.notEqual(recorded, undefined);
+    assert.equal(config.startBlock, BigInt(recorded!.blockNumber!));
   });
 });

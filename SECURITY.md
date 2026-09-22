@@ -26,6 +26,7 @@
 - **`refund` 与 `sweepUnclaimed` 的守卫分支**：共 12 条测试（`refund` 5 条、`sweepUnclaimed` 7 条），覆盖宽限期前后、重复领取、非投票者、非 owner、零地址、无可领取金额、接收方拒收 ETH 等路径。
 - **不变量**：1000 轮确定性属性测试（固定 seed `0xC0FFEE`）+ 256 轮 fuzz，均经负向对照验证（注入变异后测试会失败）。
 - **索引幂等性**：游标归零强制重放，实测 404 行全部命中重复、插入 0 行。
+- **配置泄露到浏览器**：五条 Route Handler、`/api/health` 的 `indexError` 与 SSR 失败横幅共用 `web/src/lib/failure.ts` 的 `describeFailure()`，失败文案里不含 RPC 端点、apiKey、请求体或库版本（单测对真实 viem 错误断言了这一点），原始错误只写服务端日志。见 [ADR-0020](docs/aegis/adr/ADR-0020-failure-reports-give-the-shape-never-the-environment.md)。
 
 当前 `Voting.sol` 行覆盖率与语句覆盖率均为 100.00%。
 

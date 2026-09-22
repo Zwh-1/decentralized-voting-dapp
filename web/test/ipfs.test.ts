@@ -17,6 +17,7 @@ import { afterEach, describe, it } from "node:test";
 
 import {
   fetchCandidateMetadata,
+  gatewaysFor,
   isPlausibleCid,
   isRetryableMetadata,
   metadataStaleTime,
@@ -80,6 +81,49 @@ describe("isPlausibleCid", () => {
     ]) {
       assert.equal(isPlausibleCid(bad), false, `should reject ${JSON.stringify(bad)}`);
     }
+  });
+});
+
+/**
+ * Which gateways get asked, and in what order.
+ *
+ * `NEXT_PUBLIC_IPFS_GATEWAY` is the documented way to name a dedicated gateway,
+ * and the natural value is one that is already in the defaults: this project
+ * pins its metadata to Pinata, so the dedicated gateway *is* the third default.
+ * Appending the defaults after it would ask that host first and again last.
+ */
+describe("gatewaysFor", () => {
+  it("uses the public defaults when nothing is configured", () => {
+    assert.deepEqual(gatewaysFor(undefined), [
+      "https://dweb.link/ipfs/",
+      "https://ipfs.io/ipfs/",
+      "https://gateway.pinata.cloud/ipfs/",
+    ]);
+  });
+
+  it("reads a blank value as not configured", () => {
+    // `NEXT_PUBLIC_IPFS_GATEWAY=` in a `.env` file is a line someone believes is
+    // inert. Reading it as an instruction would fetch `/ipfs/<cid>` against the
+    // app's own origin and report the 404 as a gateway failure.
+    for (const blank of ["", "   "]) {
+      assert.equal(gatewaysFor(blank).length, 3);
+      assert.equal(gatewaysFor(blank)[0], "https://dweb.link/ipfs/");
+    }
+  });
+
+  it("asks the configured gateway first", () => {
+    const gateways = gatewaysFor("https://my-gateway.example/ipfs/");
+
+    assert.equal(gateways[0], "https://my-gateway.example/ipfs/");
+    assert.equal(gateways.length, 4, "the three defaults still get their turn");
+  });
+
+  it("does not ask the same host twice when it is also a default", () => {
+    const gateways = gatewaysFor("https://gateway.pinata.cloud/ipfs/");
+
+    assert.equal(gateways[0], "https://gateway.pinata.cloud/ipfs/");
+    assert.equal(gateways.length, 3, "the defaults must not repeat the configured one");
+    assert.equal(new Set(gateways).size, gateways.length);
   });
 });
 
