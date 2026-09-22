@@ -202,6 +202,12 @@ interface PageState {
   writeError: string | null;
   writeErrorKind: string | null;
   walletMethods: string[];
+  /** The 运行状态 panel's toggle is present at all. */
+  healthToggleFound: boolean;
+  /** The panel is expanded and rendering its rows. */
+  healthRowsFound: boolean;
+  /** How many rows it rendered, so "expanded but empty" cannot pass. */
+  healthRowCount: number;
 }
 
 /** The provider injected before any page script, so wagmi sees a wallet. */
@@ -402,6 +408,13 @@ const READ_PAGE = `(() => {
     writeError: writeErrorNode ? writeErrorNode.textContent.trim() : null,
     writeErrorKind: writeErrorNode ? writeErrorNode.getAttribute('data-write-error') : null,
     walletMethods: [...new Set(window.__walletCalls ?? [])],
+    // The 运行状态 panel. It is collapsed by default, so these are read after the
+    // drill opens it — see the health assertions below. Without this the panel
+    // could regress to rendering nothing and every other assertion would still
+    // pass, which is precisely how the health endpoint went unshown at first.
+    healthToggleFound: document.querySelector('[data-testid="health-toggle"]') !== null,
+    healthRowsFound: document.querySelector('[data-testid="health-rows"]') !== null,
+    healthRowCount: document.querySelectorAll('[data-testid="health-rows"] > div').length,
   };
 })()`;
 
@@ -794,6 +807,63 @@ async function main(): Promise<number> {
           /^网关可访问（\d+\/\d+ 个已作答）/.test(before.ipfsLabels[i]!),
       ),
       `retries=${JSON.stringify(before.ipfsRetries)} labels=${JSON.stringify(before.ipfsLabels)}`,
+    );
+
+    // ---------------------------------------------------------------------
+    // 运行状态 panel (P2-7)
+    //
+    // `/api/health` computed `lagBlocks`, `indexError`, `indexConfigured` and
+    // `indexerLoopEnabled` and no interface rendered any of them, so a
+    // deployment whose index was down looked exactly like a healthy one. These
+    // assertions are what stops that regressing: the panel must exist, must be
+    // opened by a real click, and must render a non-empty set of rows.
+    //
+    // It is collapsed by default, so a check that only read the page as loaded
+    // would pass on a panel that renders nothing at all. That is why the click
+    // is part of the assertion rather than setup.
+    // ---------------------------------------------------------------------
+    console.log("\nhealth panel");
+    check("the 运行状态 panel is on the page", before.healthToggleFound);
+    check(
+      "the 运行状态 panel is collapsed before it is opened",
+      !before.healthRowsFound,
+      `rowsFound=${before.healthRowsFound}`,
+    );
+
+    const toggled = await browser.evaluate<string>(
+      sessionId,
+      `(() => {
+        const b = document.querySelector('[data-testid="health-toggle"]');
+        if (!b) return 'no-toggle';
+        b.click();
+        return 'clicked';
+      })()`,
+    );
+    check("the 运行状态 toggle could be clicked", toggled === "clicked", toggled);
+
+    // The rows arrive from a fetch that only starts once the panel is open, so
+    // this waits for the row container rather than reading immediately.
+    let health: PageState | undefined;
+    const healthDeadline = Date.now() + 30_000;
+    while (Date.now() < healthDeadline) {
+      health = await browser.evaluate<PageState>(sessionId, READ_PAGE);
+      if (health.healthRowsFound) break;
+      await sleep(500);
+    }
+
+    check(
+      "opening the panel renders its rows",
+      health?.healthRowsFound === true,
+      `rowsFound=${health?.healthRowsFound} count=${health?.healthRowCount}`,
+    );
+    // A container with zero rows would satisfy "found" while showing nothing.
+    // Ten is the number `healthRows()` produces for a healthy response; the
+    // exact figure is asserted in `web/test/health-report.test.ts` against the
+    // pure function, so this only has to prove the panel is not empty.
+    check(
+      "the panel rendered every health row rather than an empty container",
+      (health?.healthRowCount ?? 0) >= 10,
+      `count=${health?.healthRowCount}`,
     );
 
     if (REJECT) {

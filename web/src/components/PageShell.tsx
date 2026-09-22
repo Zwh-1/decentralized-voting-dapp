@@ -2,6 +2,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { HealthPanel } from "@/components/HealthPanel";
 import { WalletSlot } from "@/components/WalletSlot";
 import type { ChainTarget } from "@/lib/voting";
 /**
@@ -57,6 +58,13 @@ export function PageShell({
       </nav>
 
       {children}
+
+      {/*
+        Collapsed by default, and mounted inside the shell rather than on one
+        page so the diagnostics are reachable wherever a reader is looking for a
+        vote that seems missing. It fetches only once opened.
+      */}
+      <HealthPanel />
 
       <footer className="mt-10 border-t border-slate-200 pt-5 text-xs leading-relaxed text-slate-400">
         <p>
