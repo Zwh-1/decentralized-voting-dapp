@@ -3,7 +3,7 @@
  * Publishes the compiled contract interfaces into the web app:
  *
  *   * `voting-abi.ts`   — the `VotingFactory` and `Poll` ABIs, plus the
- *                         `PollPhase` enum mirror
+ *                         PollPhase and PollOutcome enum mirrors
  *   * `deployments.ts`  — chain id -> deployed factory address, read from
  *                         ./deployments
  *   * `index.ts`        — a single entry point that re-exports both
@@ -81,19 +81,34 @@ async function readArtifact(source: string, name: string): Promise<Artifact> {
  * come from the contract SOURCE. Both are read here, which means an enum edit
  * cannot leave this mirror behind.
  */
-async function buildPhaseEnum(): Promise<string> {
-  const source = await readFile(path.join(contractsDir, "contracts", "Poll.sol"), "utf8");
+/**
+ * Mirrors one Solidity enum into TypeScript, read from the source.
+ *
+ * Every enum the web layer needs goes through here, and NONE of them is written
+ * by hand. That rule exists because the hand-written version already failed
+ * once: `PollPhase` was a literal string in this script, a value was inserted
+ * into the middle of the Solidity enum, and the mirror silently kept the old
+ * numbering. Nothing failed to compile — the app simply reported the wrong
+ * phase, which surfaced as a drill assertion about a refund.
+ *
+ * A second copy of the same mistake was later found in `web/src/lib/trust.ts`,
+ * where the phase was again a literal (`const ended = 2`). Two owners of one
+ * fact, both stale. Hence: derived here, and nowhere else.
+ */
+async function buildEnum(source: string, solidityName: string, tsName: string): Promise<string> {
+  const file = await readFile(path.join(contractsDir, "contracts", source), "utf8");
 
-  const match = /enum\s+Phase\s*\{([^}]*)\}/.exec(source);
+  const match = new RegExp(`enum\\s+${solidityName}\\s*\\{([^}]*)\\}`).exec(file);
   if (match === null) {
     throw new Error(
-      "Could not find `enum Phase` in contracts/Poll.sol. The generated PollPhase " +
-        "mirror is derived from it, so the contract's enum must stay findable.",
+      `Could not find \`enum ${solidityName}\` in contracts/${source}. The generated ` +
+        `${tsName} mirror is derived from it, so the contract's enum must stay findable.`,
     );
   }
 
   const members = match[1]
-    // Strip the doc comments an enum member may carry.
+    // Strip the doc comments an enum member may carry. Multi-line `///` blocks
+    // and `/** */` blocks both appear in `PollOutcome`, so both are handled.
     .replace(/\/\/[^\n]*/g, "")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .split(",")
@@ -101,16 +116,26 @@ async function buildPhaseEnum(): Promise<string> {
     .filter((member) => member.length > 0);
 
   if (members.length === 0) {
-    throw new Error("`enum Phase` in contracts/Poll.sol parsed to zero members.");
+    throw new Error(`\`enum ${solidityName}\` in contracts/${source} parsed to zero members.`);
   }
 
   const lines = members.map((member, index) => `  ${member} = ${index},`).join("\n");
 
-  return `/** Mirrors the on-chain \`Poll.Phase\` enum. Generated from contracts/Poll.sol. */
-export enum PollPhase {
+  return `/** Mirrors the on-chain \`Poll.${solidityName}\` enum. Generated from contracts/${source}. */
+export enum ${tsName} {
 ${lines}
 }
 `;
+}
+
+/** Every enum mirror the web layer uses, generated in one pass. */
+async function buildEnumMirrors(): Promise<string> {
+  const parts = await Promise.all([
+    buildEnum("Poll.sol", "Phase", "PollPhase"),
+    buildEnum("Poll.sol", "PollOutcome", "PollOutcome"),
+  ]);
+
+  return parts.join("\n");
 }
 
 async function readDeployments(): Promise<DeploymentRecord[]> {
@@ -158,7 +183,7 @@ await mkdir(generatedDir, { recursive: true });
 
 const factoryArtifact = await readArtifact("VotingFactory.sol", "VotingFactory");
 const pollArtifact = await readArtifact("Poll.sol", "Poll");
-const phaseEnum = await buildPhaseEnum();
+const enumMirrors = await buildEnumMirrors();
 
 const abiFile = `${BANNER}
 /** The deployed \`VotingFactory\` interface, as emitted by solc. */
@@ -167,7 +192,7 @@ export const factoryAbi = ${JSON.stringify(factoryArtifact.abi, null, 2)} as con
 /** The \`Poll\` interface, as emitted by solc. Every poll shares it. */
 export const pollAbi = ${JSON.stringify(pollArtifact.abi, null, 2)} as const;
 
-${phaseEnum}`;
+${enumMirrors}`;
 
 await writeFile(path.join(generatedDir, "voting-abi.ts"), abiFile, "utf8");
 

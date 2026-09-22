@@ -186,13 +186,19 @@ export function CreatePollForm({ configuredTarget }: CreatePollFormProps) {
       openToAll,
       maxSelections: BigInt(DEFAULT_CONFIG.maxSelections),
       revealWindowSeconds: BigInt(DEFAULT_CONFIG.revealWindowSeconds),
+      quorumBps: BigInt(DEFAULT_CONFIG.quorumBps),
+      timelockSeconds: BigInt(DEFAULT_CONFIG.timelockSeconds),
     };
 
     writeContract({
       address: target.factoryAddress,
       abi: factoryAbi,
       functionName: "createPoll",
-      args: [question.trim(), filled, endsAt, config],
+      // The fifth argument is the execution target list. Empty means the poll
+      // may only call itself, which is the safe default: a target list is what
+      // lets a passed vote reach anything else, and this form does not yet
+      // offer a way to choose those, so it must not invent one.
+      args: [question.trim(), filled, endsAt, config, []],
     });
   }
 

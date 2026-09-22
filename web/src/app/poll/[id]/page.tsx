@@ -2,6 +2,7 @@
 import Link from "next/link";
 
 import { PageShell } from "@/components/PageShell";
+import { ExecutionPanel } from "@/components/ExecutionPanel";
 import { PollActivity } from "@/components/PollActivity";
 import { PollAdmin } from "@/components/PollAdmin";
 import { PollBallot } from "@/components/PollBallot";
@@ -110,6 +111,32 @@ export default async function PollPage({ params }: { params: Promise<{ id: strin
         <RulesCheck address={address} configuredTarget={configuredTarget} />
         <StakeRisk address={address} configuredTarget={configuredTarget} />
       </div>
+
+      {/*
+        What the vote DECIDED, and what is queued because of it. Placed directly
+        under the ballot because it is the answer to the question the ballot asks,
+        and above the audit tooling because "did this pass, and did anything
+        happen" is what most readers came for.
+
+        The outcome is deliberately NOT passed down from `poll`: this page is a
+        server render, so its copy of the verdict is frozen at request time and a
+        reader who arrives before the poll closes and stays past the deadline
+        would be shown a stale verdict next to live queue state. The panel reads
+        `outcome()` from the chain in the browser instead, which is the same rule
+        every other control on this page follows (ADR-0009).
+
+        It draws nothing at all for a poll that has not passed and has nothing
+        queued, so a visitor sees no trace of governance machinery they cannot use.
+      */}
+      {poll !== null && ADDRESS_PATTERN.test(poll.creator) && (
+        <div className="mt-6">
+          <ExecutionPanel
+            address={address}
+            configuredTarget={configuredTarget}
+            creator={poll.creator as `0x${string}`}
+          />
+        </div>
+      )}
 
       {/*
         Both of these are about checking the result rather than casting one, so

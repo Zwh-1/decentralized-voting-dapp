@@ -40,6 +40,18 @@ export interface PollConfig {
   commitReveal: boolean;
   /** Seconds after the deadline during which commits may be revealed. */
   revealWindowSeconds: number;
+  /**
+   * The minimum share of eligible voting power that must take part for the
+   * result to count, in basis points. 0 means no quorum.
+   *
+   * Basis points on both sides of the boundary: the contract compares integers,
+   * and a percentage here would have to be converted back before the two could
+   * be checked against each other — which is the division the contract's own
+   * comment explains would truncate a poll sitting exactly on its threshold.
+   */
+  quorumBps: number;
+  /** Seconds between queueing an execution and being able to run it. 0 is immediate. */
+  timelockSeconds: number;
 }
 
 /** The configuration every poll created before mechanisms existed behaved like. */
@@ -51,6 +63,11 @@ export const DEFAULT_CONFIG: PollConfig = Object.freeze({
   delegable: false,
   commitReveal: false,
   revealWindowSeconds: 0,
+  // Governance off by default, matching `PollMechanisms.defaultConfig`. A poll
+  // with no quorum and no timelock decides on the count alone, which is what
+  // every poll did before these existed.
+  quorumBps: 0,
+  timelockSeconds: 0,
 });
 
 export interface ConfigVerdict {

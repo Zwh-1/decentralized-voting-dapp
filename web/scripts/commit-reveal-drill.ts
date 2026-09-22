@@ -204,7 +204,16 @@ try {
         delegable: false,
         commitReveal: true,
         revealWindowSeconds: REVEAL_WINDOW,
+        // Governance is not what this drill measures, so the thresholds are off.
+        // They are spelled out rather than omitted because the ABI struct has no
+        // optional fields, and a missing one encodes as `undefined` — which viem
+        // rejects at the call site with a message that names neither the field
+        // nor this file.
+        quorumBps: 0n,
+        timelockSeconds: 0n,
       },
+      // No execution targets: this drill creates a poll, not an executable one.
+      [],
     ],
   });
   const createReceipt = await publicClient.waitForTransactionReceipt({ hash: createHash });

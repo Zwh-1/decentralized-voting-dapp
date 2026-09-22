@@ -132,7 +132,6 @@ Related: `docs/aegis/adr/ADR-0029-rules-commitment-makes-edits-visible.md`（分
 
 因此测试改写成断言真正成立的那件事——**改动被允许，但不会移动分数线**。冻结的是分母，不是名单。中途加入的人可以投票，且 `frozenEligiblePower` 不变，所以"五成出席"这句话的含义在投票开始后就固定了。这两条断言（"改白名单被拒绝" vs "改白名单不影响分母"）看起来相近，实际只有第二条为真。
 
-
 ## Boundary
 
 This ADR is an advisory Aegis Method Pack record. It does not grant completion authority or replace project-authoritative architecture sources.

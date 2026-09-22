@@ -12,6 +12,17 @@ export const factoryAbi = [
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "caller",
+        "type": "address"
+      }
+    ],
+    "name": "CreatorNotAllowed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "endsAt",
         "type": "uint256"
@@ -60,6 +71,28 @@ export const factoryAbi = [
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnableInvalidOwner",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "account",
+        "type": "address"
+      }
+    ],
+    "name": "OwnableUnauthorizedAccount",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "minimum",
         "type": "uint256"
@@ -72,6 +105,57 @@ export const factoryAbi = [
     ],
     "name": "TooFewOptions",
     "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "creator",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "allowed",
+        "type": "bool"
+      }
+    ],
+    "name": "CreatorAllowedUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "enabled",
+        "type": "bool"
+      }
+    ],
+    "name": "CreatorAllowlistToggled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "previousOwner",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnershipTransferred",
+    "type": "event"
   },
   {
     "anonymous": false,
@@ -182,11 +266,26 @@ export const factoryAbi = [
             "internalType": "uint256",
             "name": "revealWindowSeconds",
             "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "quorumBps",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "timelockSeconds",
+            "type": "uint256"
           }
         ],
         "internalType": "struct PollMechanisms.PollConfig",
         "name": "config",
         "type": "tuple"
+      },
+      {
+        "internalType": "address[]",
+        "name": "executionTargets",
+        "type": "address[]"
       }
     ],
     "name": "createPoll",
@@ -202,7 +301,52 @@ export const factoryAbi = [
   },
   {
     "inputs": [],
+    "name": "creatorAllowlistEnabled",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "implementation",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "isCreatorAllowed",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "owner",
     "outputs": [
       {
         "internalType": "address",
@@ -263,6 +407,57 @@ export const factoryAbi = [
     ],
     "stateMutability": "view",
     "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "renounceOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address[]",
+        "name": "creators",
+        "type": "address[]"
+      },
+      {
+        "internalType": "bool",
+        "name": "allowed",
+        "type": "bool"
+      }
+    ],
+    "name": "setCreatorAllowlist",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bool",
+        "name": "enabled",
+        "type": "bool"
+      }
+    ],
+    "name": "setCreatorAllowlistEnabled",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "transferOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
   }
 ] as const;
 
@@ -303,6 +498,11 @@ export const pollAbi = [
   {
     "inputs": [],
     "name": "AlreadyInitialized",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "AlreadyQueued",
     "type": "error"
   },
   {
@@ -357,6 +557,28 @@ export const pollAbi = [
         "type": "address"
       }
     ],
+    "name": "DelegateCannotDelegate",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "delegate",
+        "type": "address"
+      }
+    ],
+    "name": "DelegateHasVoted",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "delegate",
+        "type": "address"
+      }
+    ],
     "name": "DelegateNotEligible",
     "type": "error"
   },
@@ -385,6 +607,22 @@ export const pollAbi = [
   {
     "inputs": [],
     "name": "EmptyQuestion",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ExecutionAlreadyDone",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "target",
+        "type": "address"
+      }
+    ],
+    "name": "ExecutionTargetNotAllowed",
     "type": "error"
   },
   {
@@ -530,12 +768,28 @@ export const pollAbi = [
   {
     "inputs": [
       {
+        "internalType": "enum Poll.PollOutcome",
+        "name": "outcome",
+        "type": "uint8"
+      }
+    ],
+    "name": "NotPassed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "voter",
         "type": "address"
       }
     ],
     "name": "NotWhitelisted",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NothingQueued",
     "type": "error"
   },
   {
@@ -634,6 +888,17 @@ export const pollAbi = [
       }
     ],
     "name": "SelfDelegation",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "readyAt",
+        "type": "uint256"
+      }
+    ],
+    "name": "TimelockNotElapsed",
     "type": "error"
   },
   {
@@ -767,6 +1032,94 @@ export const pollAbi = [
     "inputs": [
       {
         "indexed": true,
+        "internalType": "address",
+        "name": "target",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "value",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes",
+        "name": "data",
+        "type": "bytes"
+      }
+    ],
+    "name": "Executed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "target",
+        "type": "address"
+      }
+    ],
+    "name": "ExecutionCancelled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "target",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes",
+        "name": "reason",
+        "type": "bytes"
+      }
+    ],
+    "name": "ExecutionFailed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "target",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "value",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes",
+        "name": "data",
+        "type": "bytes"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "readyAt",
+        "type": "uint256"
+      }
+    ],
+    "name": "ExecutionQueued",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
         "internalType": "uint256",
         "name": "id",
         "type": "uint256"
@@ -811,6 +1164,19 @@ export const pollAbi = [
       }
     ],
     "name": "OptionUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "enum Poll.PollOutcome",
+        "name": "outcome",
+        "type": "uint8"
+      }
+    ],
+    "name": "OutcomeSettled",
     "type": "event"
   },
   {
@@ -1155,6 +1521,13 @@ export const pollAbi = [
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "cancelExecution",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256[]",
@@ -1280,6 +1653,16 @@ export const pollAbi = [
         "internalType": "uint256",
         "name": "revealWindowSeconds",
         "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "quorumBps",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "timelockSeconds",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -1402,6 +1785,77 @@ export const pollAbi = [
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "execute",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "execution",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "target",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "value",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes",
+        "name": "data",
+        "type": "bytes"
+      },
+      {
+        "internalType": "uint256",
+        "name": "readyAt",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes",
+        "name": "lastError",
+        "type": "bytes"
+      },
+      {
+        "internalType": "bool",
+        "name": "done",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "executionTargets",
+    "outputs": [
+      {
+        "internalType": "address[]",
+        "name": "",
+        "type": "address[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "frozenEligiblePower",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "address",
@@ -1459,16 +1913,50 @@ export const pollAbi = [
             "internalType": "uint256",
             "name": "revealWindowSeconds",
             "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "quorumBps",
+            "type": "uint256"
+          },
+          {
+            "internalType": "uint256",
+            "name": "timelockSeconds",
+            "type": "uint256"
           }
         ],
         "internalType": "struct PollMechanisms.PollConfig",
         "name": "config_",
         "type": "tuple"
+      },
+      {
+        "internalType": "address[]",
+        "name": "executionTargets",
+        "type": "address[]"
       }
     ],
     "name": "initialize",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "target",
+        "type": "address"
+      }
+    ],
+    "name": "isAllowedExecutionTarget",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -1537,6 +2025,32 @@ export const pollAbi = [
   },
   {
     "inputs": [],
+    "name": "outcome",
+    "outputs": [
+      {
+        "internalType": "enum Poll.PollOutcome",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "outcomeState",
+    "outputs": [
+      {
+        "internalType": "enum Poll.PollOutcome",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "owner",
     "outputs": [
       {
@@ -1572,6 +2086,29 @@ export const pollAbi = [
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "target",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "value",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes",
+        "name": "data",
+        "type": "bytes"
+      }
+    ],
+    "name": "queueExecution",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -1795,6 +2332,19 @@ export const pollAbi = [
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "turnoutBps",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -1997,6 +2547,19 @@ export const pollAbi = [
   },
   {
     "inputs": [],
+    "name": "winningOption",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "optionId",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "withdrawVote",
     "outputs": [],
     "stateMutability": "nonpayable",
@@ -2010,4 +2573,12 @@ export enum PollPhase {
   Voting = 1,
   Reveal = 2,
   Ended = 3,
+}
+
+/** Mirrors the on-chain `Poll.PollOutcome` enum. Generated from contracts/Poll.sol. */
+export enum PollOutcome {
+  Pending = 0,
+  Passed = 1,
+  Rejected = 2,
+  QuorumNotMet = 3,
 }

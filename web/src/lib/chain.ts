@@ -281,3 +281,99 @@ export async function readOnChainPoll(
     total: Number((results as readonly [unknown, bigint])[1]),
   };
 }
+
+/**
+ * The poll's governance state: what it decided, and what is queued because of it.
+ *
+ * Read as ONE call site rather than four separate hooks, because the four values
+ * are only meaningful together — a `readyAt` of zero means nothing without a
+ * target, and an `outcome` of `Passed` is what makes the queue panel appear at
+ * all. Reading them separately would let the UI render a queue for a poll that
+ * has not passed.
+ */
+export interface OnChainGovernance {
+  /** `PollOutcome`. 0 while the poll is still running. */
+  outcome: number;
+  /** The cached verdict, which is 0 until a transition settles the poll. */
+  outcomeState: number;
+  /** The frozen quorum denominator. 0 when there is no eligible set. */
+  frozenEligiblePower: bigint;
+  /** Share of eligible power that took part, in basis points. */
+  turnoutBps: bigint;
+  /** Quorum as a share of eligible power, in basis points. 0 means none. */
+  quorumBps: bigint;
+  /** Seconds between queueing an action and being able to run it. */
+  timelockSeconds: bigint;
+  queue: {
+    /** `0x000…0` means nothing is queued. */
+    target: `0x${string}`;
+    value: bigint;
+    data: `0x${string}`;
+    readyAt: bigint;
+    /** The last attempt's revert data, empty when it never failed. */
+    lastError: `0x${string}`;
+    done: boolean;
+  };
+}
+
+/** Reads a poll's verdict, quorum figures and queued action in one round trip. */
+export async function readOnChainGovernance(
+  client: PublicClient,
+  address: `0x${string}`,
+): Promise<OnChainGovernance> {
+  const [outcome, outcomeState, frozenEligiblePower, turnoutBps, config, execution] =
+    await Promise.all([
+      client.readContract({ address, abi: pollAbi, functionName: "outcome" }),
+      client.readContract({ address, abi: pollAbi, functionName: "outcomeState" }),
+      client.readContract({ address, abi: pollAbi, functionName: "frozenEligiblePower" }),
+      client.readContract({ address, abi: pollAbi, functionName: "turnoutBps" }),
+      client.readContract({ address, abi: pollAbi, functionName: "config" }),
+      client.readContract({ address, abi: pollAbi, functionName: "execution" }),
+    ]);
+
+  // `config()` is the struct getter, so it comes back as a tuple rather than a
+  // named object and the two governance fields have to be taken positionally.
+  // Destructuring the whole thing would couple this reader to every field the
+  // struct gains later; only the two that are read here are pulled out.
+  const configTuple = config as readonly unknown[];
+
+  const queue = execution as readonly [
+    `0x${string}`,
+    bigint,
+    `0x${string}`,
+    bigint,
+    `0x${string}`,
+    boolean,
+  ];
+
+  return {
+    outcome: Number(outcome as number),
+    outcomeState: Number(outcomeState as number),
+    frozenEligiblePower: frozenEligiblePower as bigint,
+    turnoutBps: turnoutBps as bigint,
+    quorumBps: BigInt(configTuple[7] as bigint),
+    timelockSeconds: BigInt(configTuple[8] as bigint),
+    queue: {
+      target: queue[0],
+      value: queue[1],
+      data: queue[2],
+      readyAt: queue[3],
+      lastError: queue[4],
+      done: queue[5],
+    },
+  };
+}
+
+/** The addresses a passed vote may call, besides the poll itself. */
+export async function readExecutionTargets(
+  client: PublicClient,
+  address: `0x${string}`,
+): Promise<readonly `0x${string}`[]> {
+  const targets = await client.readContract({
+    address,
+    abi: pollAbi,
+    functionName: "executionTargets",
+  });
+
+  return targets as readonly `0x${string}`[];
+}

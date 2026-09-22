@@ -6,15 +6,15 @@
 
 ## Progress
 
-| 批次 | 任务                          | 状态      | 证据                                                                   |
-| ---- | ----------------------------- | --------- | ---------------------------------------------------------------------- |
-| 一   | Task 1-2 多选 + 加权          | 完成      | `PollMultiSelect.t.sol`、`PollMechanisms.t.sol`；commit `02ef5a5`      |
-| 一   | Task 3 委托投票               | 完成      | `PollDelegation.t.sol`（21 测试）；ADR-0035；commit `367ef19`          |
-| 一   | Task 4 commit-reveal          | 完成      | `PollCommitReveal.t.sol`；`commit-reveal-drill` 21/21；commit `dcecef5` |
-| 一   | 机制矩阵属性测试              | 完成      | `PollMechanismMatrix.t.sol`（6 机制 × 200 轮，突变验证）               |
-| 二   | Task 5-7 quorum/timelock/execute + 创建准入 | 未开始 | —                                                          |
-| 三   | Task 8-10 数据与接口层        | 未开始    | —                                                                      |
-| 四   | Task 11-13 前端体验           | 未开始    | —                                                                      |
+| 批次 | 任务                                        | 状态   | 证据                                                                         |
+| ---- | ------------------------------------------- | ------ | ---------------------------------------------------------------------------- |
+| 一   | Task 1-2 多选 + 加权                        | 完成   | `PollMultiSelect.t.sol`、`PollMechanisms.t.sol`；commit `02ef5a5`            |
+| 一   | Task 3 委托投票                             | 完成   | `PollDelegation.t.sol`（21 测试）；ADR-0035；commit `367ef19`                |
+| 一   | Task 4 commit-reveal                        | 完成   | `PollCommitReveal.t.sol`；`commit-reveal-drill` 21/21；commit `dcecef5`      |
+| 一   | 机制矩阵属性测试                            | 完成   | `PollMechanismMatrix.t.sol`（6 机制 × 200 轮，突变验证）                     |
+| 二   | Task 5-7 quorum/timelock/execute + 创建准入 | 完成   | `PollExecutor.t.sol`（43 测试）；ADR-0032/0033；commit `79ed547` + `3767c59` |
+| 三   | Task 8-10 数据与接口层                      | 未开始 | —                                                                            |
+| 四   | Task 11-13 前端体验                         | 未开始 | —                                                                            |
 
 **批一验收结果**（2026-09-22）：
 

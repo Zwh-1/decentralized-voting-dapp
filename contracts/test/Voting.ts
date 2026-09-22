@@ -19,8 +19,17 @@ const DAY = 24n * 60n * 60n;
 ///
 /// @dev `createPoll` takes a `PollConfig` struct now, so every fixture needs one.
 ///      Written as a helper rather than inlined at each call site because the
-///      struct has six fields and a reader scanning a test should see *which
-///      mechanism differs from the default*, not re-read six values to find out.
+///      struct has nine fields and a reader scanning a test should see *which
+///      mechanism differs from the default*, not re-read nine values to find out.
+///
+///      This is a hand-written mirror of `PollMechanisms.PollConfig`, and that is
+///      a real hazard: when batch two added `quorumBps` and `timelockSeconds`,
+///      every test here still compiled and then failed at encoding time with
+///      "cannot convert undefined to a BigInt". The list below must therefore be
+///      kept in the same order as the struct. `PollMechanisms.defaultConfig` is
+///      the on-chain owner of this shape, and `Poll.t.sol` reads it through
+///      Solidity, where the compiler does check — so a field added to the struct
+///      fails there first and points back here.
 function config(openToAll: boolean) {
   return {
     openToAll,
@@ -30,8 +39,19 @@ function config(openToAll: boolean) {
     delegable: false,
     commitReveal: false,
     revealWindowSeconds: 0n,
+    quorumBps: 0n,
+    timelockSeconds: 0n,
   };
 }
+
+/// @notice The default execution target list: the poll and nothing else.
+///
+/// @dev `createPoll` gained this fifth parameter when results became executable
+///      (ADR-0032). An empty list is the honest default for these tests: none of
+///      them exercises execution, and passing addresses they never use would
+///      suggest otherwise. The execution path is covered in `PollExecutor.t.sol`,
+///      where a target exists to be called.
+const NO_EXECUTION_TARGETS: `0x${string}`[] = [];
 
 /// @notice Consumer-perspective tests: the same calls the frontend and the
 ///         indexer will make, in a full blockchain simulation rather than in
@@ -50,9 +70,12 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const latest = await (await viem.getPublicClient()).getBlock();
     const endsAt = latest.timestamp + 30n * DAY;
 
-    await factory.write.createPoll(["Which one?", [CID_A, CID_B], endsAt, config(false)], {
-      account: creator.account,
-    });
+    await factory.write.createPoll(
+      ["Which one?", [CID_A, CID_B], endsAt, config(false), NO_EXECUTION_TARGETS],
+      {
+        account: creator.account,
+      },
+    );
 
     const pollAddress = await factory.read.pollAt([0n]);
     const poll = await viem.getContractAt("Poll", pollAddress);
@@ -77,7 +100,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const endsAt = latest.timestamp + 30n * DAY;
 
     const hash = await factory.write.createPoll(
-      ["Which one?", [CID_A, CID_B], endsAt, config(false)],
+      ["Which one?", [CID_A, CID_B], endsAt, config(false), NO_EXECUTION_TARGETS],
       {
         account: creator.account,
       },
@@ -111,9 +134,12 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const latest = await (await viem.getPublicClient()).getBlock();
     const endsAt = latest.timestamp + 30n * DAY;
 
-    await factory.write.createPoll(["Second?", [CID_A, CID_B], endsAt, config(false)], {
-      account: creator.account,
-    });
+    await factory.write.createPoll(
+      ["Second?", [CID_A, CID_B], endsAt, config(false), NO_EXECUTION_TARGETS],
+      {
+        account: creator.account,
+      },
+    );
 
     const secondAddress = await factory.read.pollAt([1n]);
     const second = await viem.getContractAt("Poll", secondAddress);
@@ -148,7 +174,14 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
 
     await assert.rejects(
       poll.write.initialize(
-        [bob.account.address, "Hijacked", [CID_A, CID_B], latest.timestamp + DAY, config(false)],
+        [
+          bob.account.address,
+          "Hijacked",
+          [CID_A, CID_B],
+          latest.timestamp + DAY,
+          config(false),
+          NO_EXECUTION_TARGETS,
+        ],
         {
           account: bob.account,
         },
@@ -356,9 +389,12 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const latest = await (await viem.getPublicClient()).getBlock();
     const endsAt = latest.timestamp + 30n * DAY;
 
-    await factory.write.createPoll(["Anyone?", [CID_A, CID_B], endsAt, config(true)], {
-      account: creator.account,
-    });
+    await factory.write.createPoll(
+      ["Anyone?", [CID_A, CID_B], endsAt, config(true), NO_EXECUTION_TARGETS],
+      {
+        account: creator.account,
+      },
+    );
 
     const pollAddress = await factory.read.pollAt([0n]);
     const poll = await viem.getContractAt("Poll", pollAddress);
@@ -465,7 +501,7 @@ describe("VotingFactory + Poll (viem + node:test)", function () {
     const latest = await (await viem.getPublicClient()).getBlock();
 
     const hash = await factory.write.createPoll(
-      ["Pinned options?", cids, latest.timestamp + 30n * DAY, config(false)],
+      ["Pinned options?", cids, latest.timestamp + 30n * DAY, config(false), NO_EXECUTION_TARGETS],
       { account: creator.account },
     );
     await (await viem.getPublicClient()).waitForTransactionReceipt({ hash });
