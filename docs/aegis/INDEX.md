@@ -44,6 +44,7 @@ Entries are workspace records, not authoritative runtime decisions.
 | 2026-09-22 | adr      | docs/aegis/adr/ADR-0031-commit-reveal-replaces-public-ballots.md                         | ADR-0031 - 以 commit-reveal 取代"明票上链"（取代 ADR-0003）                              |
 | 2026-09-22 | adr      | docs/aegis/adr/ADR-0034-one-vote-one-person-is-redefined-per-mechanism.md                | ADR-0034 - "一人一票"重述为"每个合格主体的票权至多计一次"                                |
 | 2026-09-22 | adr      | docs/aegis/adr/ADR-0035-delegation-is-single-level-and-revocable.md                      | ADR-0035 - 委托是单层的、可撤回的、且不改变票权归属                                      |
+| 2026-09-22 | adr      | docs/aegis/adr/ADR-0032-results-only-count-when-they-have-consequences.md                | ADR-0032 - 投票结果只有在链上有后果时才算结果（quorum/时间锁/受限执行）                  |
 | 2026-09-22 | plan     | docs/aegis/plans/2026-09-22-voting-mechanisms-and-platform-depth.md                      | 实施计划：投票机制深化与平台能力补齐（多选/加权/委托/隐私 + 治理 + 数据接口 + 前端体验） |
 | 2026-09-22 | work     | docs/aegis/work/2026-09-22-close-known-gaps/10-intent.md                                 | 关闭已登记的未完成项（P0/P1/P2） intent                                                  |
 | 2026-09-22 | work     | docs/aegis/work/2026-09-22-close-known-gaps/20-checkpoint.md                             | 关闭已登记的未完成项（P0/P1/P2） checkpoint                                              |

@@ -53,6 +53,48 @@ contract Poll is Ownable, ReentrancyGuard {
         Ended
     }
 
+    /// @notice What the poll decided.
+    ///
+    /// @dev THREE VALUES, NOT A BOOLEAN, because "the vote did not pass" has two
+    ///      causes with opposite remedies. A poll that failed on the count can
+    ///      only be re-run with a different question; a poll that failed only
+    ///      because too few people turned out might pass unchanged with a better
+    ///      reminder. A boolean would report both as "rejected" and leave the
+    ///      creator to work out which by reading the numbers themselves.
+    enum PollOutcome {
+        /// @dev No verdict yet: still `Setup`, still `Voting`, or — importantly —
+        ///      in `Reveal`, where ballots may still be opened and the tally is
+        ///      still rising. Reporting `Rejected` here would tell voters to give
+        ///      up while they can still reveal (ADR-0032).
+        Pending,
+        /// @dev The vote met every bar it had to meet.
+        Passed,
+        /// @dev Voting is over, quorum was met, and the count did not win.
+        Rejected,
+        /// @dev Voting is over and too little eligible power took part. The
+        ///      count is irrelevant when this is the verdict, which is why it is
+        ///      reported INSTEAD of `Rejected` rather than alongside it.
+        QuorumNotMet
+    }
+
+    /// @notice A queued on-chain action, and how far it got.
+    struct Execution {
+        /// @dev The contract to call. `address(0)` means nothing is queued.
+        address target;
+        /// @dev Wei to send with the call.
+        uint256 value;
+        /// @dev The encoded call.
+        bytes data;
+        /// @dev When `execute()` first becomes callable.
+        uint256 readyAt;
+        /// @dev The most recent attempt's revert data, cleared on a fresh queue.
+        ///      Kept so a failed execution can say WHY, instead of leaving the
+        ///      caller with a bare "it failed".
+        bytes lastError;
+        /// @dev True once the call has succeeded. A poll executes once.
+        bool done;
+    }
+
     struct Option {
         uint256 id;
         string labelCID;
@@ -183,6 +225,15 @@ contract Poll is Ownable, ReentrancyGuard {
 
     /// @dev How the poll counts: the mechanism set, which cannot change after
     ///      `initialize` but is part of what makes this poll *this* poll.
+    /// @dev What the poll counts under.
+    ///
+    ///      `quorumBps`, `timelockSeconds` and the execution target list are
+    ///      included here because they decide what a result MEANS, which is the
+    ///      same kind of thing as whether the poll is weighted. Leaving them out
+    ///      would have been silent and wrong rather than loud and wrong: the
+    ///      hash is what the trust panel compares against the creation-time
+    ///      commitment (ADR-0029), so an omitted field means an edit to it is
+    ///      reported as "the rules are unchanged".
     function _mechanismHash() private view returns (bytes32) {
         PollMechanisms.PollConfig memory c = config;
 
@@ -194,7 +245,10 @@ contract Poll is Ownable, ReentrancyGuard {
                     c.weighted,
                     c.delegable,
                     c.commitReveal,
-                    c.revealWindowSeconds
+                    c.revealWindowSeconds,
+                    c.quorumBps,
+                    c.timelockSeconds,
+                    _executionTargets
                 )
             );
     }
@@ -309,6 +363,42 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      whole `PollConfig` minus `openToAll`, which is kept as its own
     ///      variable because it predates this struct and has its own getter.
     PollMechanisms.PollConfig public config;
+
+    /// @notice The total eligible voting power, frozen when the poll opened.
+    ///
+    /// @dev FROZEN, NOT COMPUTED ON READ. `outcome` measures the tally against
+    ///      this to decide whether quorum was met, so a value that moved during
+    ///      voting would let the creator change the pass mark after seeing how
+    ///      many people turned out: adding addresses raises the denominator and
+    ///      can sink a poll that was passing, removing them can rescue one that
+    ///      was failing. Both look like routine whitelist administration.
+    ///
+    ///      The whitelist genuinely REMAINS editable during voting — that is
+    ///      existing behaviour, and ADR-0029's rules hash exists to make such an
+    ///      edit visible rather than to forbid it. Freezing here is what keeps
+    ///      that visibility from also being a way to move the pass mark: a
+    ///      latecomer may vote, and does not change what "50% turnout" means.
+    ///
+    ///      It is also the single source the turnout figure reads (ADR-0032):
+    ///      "what share of eligible power took part" must not be computed two
+    ///      ways in two files.
+    uint256 public frozenEligiblePower;
+
+    /// @notice What the poll decided, as of the last transition that settled it.
+    /// @dev A CACHE, not the authority — `outcome()` recomputes from live state
+    ///      and is what every caller should read. This exists so an indexer gets
+    ///      an event at the instant the verdict becomes final, instead of having
+    ///      to poll a view to notice.
+    PollOutcome public outcomeState;
+
+    /// @notice The queued execution, if one is pending or has failed.
+    Execution public execution;
+
+    /// @notice Addresses `execute()` is permitted to call, besides this poll.
+    /// @dev Empty means "self-calls only". See ADR-0032 for why an unrestricted
+    ///      target list is not offered: `execute()` is triggered by a vote, and
+    ///      whoever controls who may vote controls the trigger.
+    address[] private _executionTargets;
 
     /// @notice Options the address currently backs, sorted ascending.
     ///
@@ -481,6 +571,36 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      ADR-0011 is about. The stake stays refundable.
     event CommitmentExpired(address indexed voter);
 
+    /// @notice The poll reached a final verdict.
+    ///
+    /// @dev Emitted at the two transitions that can settle a poll, so an indexer
+    ///      can record the outcome without polling `outcome()`. The view remains
+    ///      the authority; this is the notification (ADR-0032).
+    event OutcomeSettled(PollOutcome outcome);
+
+    /// @notice An action was queued for execution after the poll passed.
+    /// @dev `readyAt` rather than a duration: at the moment this is read, "how
+    ///      long until it can run" depends on when it is read, while "it can run
+    ///      from timestamp X" does not.
+    event ExecutionQueued(address indexed target, uint256 value, bytes data, uint256 readyAt);
+
+    /// @notice A queued action was carried out.
+    event Executed(address indexed target, uint256 value, bytes data);
+
+    /// @notice An execution attempt reverted. The poll's own state is unchanged
+    ///         and the action stays queued for a retry.
+    ///
+    /// @dev THIS EVENT IS THE ONLY FAILURE SIGNAL, because `execute()` does not
+    ///      revert on a failed execution — a revert would roll back the very
+    ///      record that makes a retry possible. A caller must therefore check
+    ///      this event (or `execution().lastError`) rather than the transaction
+    ///      status. That is a real cost of the retry design and is why the event
+    ///      carries the target's own reason.
+    event ExecutionFailed(address indexed target, bytes reason);
+
+    /// @notice A queued action was withdrawn before it ran.
+    event ExecutionCancelled(address indexed target);
+
     // ---------------------------------------------------------------------
     // Errors
     // ---------------------------------------------------------------------
@@ -525,6 +645,13 @@ contract Poll is Ownable, ReentrancyGuard {
     error RevealWindowOpen(uint256 revealEndsAt);
     error IncorrectCommitStake(uint256 expected, uint256 received);
 
+    error NotPassed(PollOutcome outcome);
+    error TimelockNotElapsed(uint256 readyAt);
+    error ExecutionTargetNotAllowed(address target);
+    error NothingQueued();
+    error AlreadyQueued();
+    error ExecutionAlreadyDone();
+
     // ---------------------------------------------------------------------
     // Construction
     // ---------------------------------------------------------------------
@@ -544,17 +671,25 @@ contract Poll is Ownable, ReentrancyGuard {
     /// @param optionCIDs Metadata CIDs, in display order; at least two.
     /// @param endsAt_ Unix timestamp after which voting is closed.
     /// @param config_ The counting mechanisms, including admission mode.
+    /// @param executionTargets Addresses a passed vote may call, besides this
+    ///        poll. Empty means "this poll only".
     ///
     /// @dev `config_` carries `openToAll` rather than taking it as a sixth
     ///      positional argument. Two booleans in a row at a call site is a
     ///      transposition the compiler cannot catch, and there are now six such
     ///      fields; named struct members make a swap visible.
+    ///
+    ///      `executionTargets` is a separate parameter rather than another
+    ///      `PollConfig` field because it is a LIST, and the rest of the struct
+    ///      is scalars. It is bounded at creation for the reason ADR-0032 gives:
+    ///      an `execute()` that can call anywhere is a backdoor, not a feature.
     function initialize(
         address creator_,
         string calldata question_,
         string[] calldata optionCIDs,
         uint256 endsAt_,
-        PollMechanisms.PollConfig calldata config_
+        PollMechanisms.PollConfig calldata config_,
+        address[] calldata executionTargets
     ) external {
         if (_initialized) revert AlreadyInitialized();
         if (creator_ == address(0)) revert ZeroAddress();
@@ -584,6 +719,27 @@ contract Poll is Ownable, ReentrancyGuard {
         endsAt = endsAt_;
         openToAll = config_.openToAll;
         config = config_;
+
+        // Stored BEFORE `rulesHash` is computed below, because the target list
+        // is part of the mechanism hash — writing it after would fingerprint the
+        // rules with an empty list and then change the list, so every poll would
+        // report its own rules as edited from the moment it was created.
+        //
+        // Zero addresses and duplicates are refused rather than filtered:
+        // silently dropping an entry would make the stored list disagree with
+        // the one the creator passed, and this list is a security boundary.
+        for (uint256 i = 0; i < executionTargets.length; ++i) {
+            address target = executionTargets[i];
+            if (target == address(0)) revert ZeroAddress();
+
+            for (uint256 j = 0; j < i; ++j) {
+                if (executionTargets[j] == target) {
+                    revert InvalidConfig("duplicate execution target");
+                }
+            }
+
+            _executionTargets.push(target);
+        }
 
         // The clone's owner is the creator, so option management and whitelist
         // management are theirs and no one else's.
@@ -849,7 +1005,41 @@ contract Poll is Ownable, ReentrancyGuard {
         if (optionCount < MIN_OPTIONS) revert TooFewOptions(MIN_OPTIONS, optionCount);
         if (block.timestamp >= endsAt) revert PollAlreadyEnded(endsAt);
 
+        // Freeze the quorum denominator HERE, at the last moment it can still be
+        // changed, so that nothing after this point can move the pass mark. See
+        // `frozenEligiblePower` for why this is stored rather than recomputed.
+        frozenEligiblePower = _computeEligiblePower();
+
         _setPhase(Phase.Voting);
+    }
+
+    /// @notice The eligible voting power as it stands right now.
+    ///
+    /// @dev Called only by `startPoll`, which stores the answer. It is a
+    ///      function rather than inlined for one reason: the definition of
+    ///      "eligible power" is the thing the quorum and the turnout figure must
+    ///      agree on, and a named function is a place to put that definition.
+    ///
+    ///      Equal-weight: the number of addresses that may vote. An open poll has
+    ///      no enumerable list, so it cannot have a denominator — which is why a
+    ///      quorum on an open poll is refused at creation rather than silently
+    ///      computed as zero. Weighted: the sum of assigned weights, which is
+    ///      the actual quantity a quorum is a fraction OF.
+    function _computeEligiblePower() private view returns (uint256 total) {
+        if (openToAll) {
+            // Unreachable when `quorumBps != 0`: `validateGovernance` refuses
+            // that combination. Left as a defined zero rather than a revert so
+            // that an open poll with no quorum — the default — costs nothing.
+            return 0;
+        }
+
+        uint256 length = _whitelistKeys.length;
+        for (uint256 i = 0; i < length; ++i) {
+            address voter = _whitelistKeys[i];
+            if (!isWhitelisted[voter]) continue;
+
+            total += config.weighted ? weightOf[voter] : 1;
+        }
     }
 
     /// @notice Close voting. On a commit-reveal poll this opens the reveal
@@ -893,6 +1083,7 @@ contract Poll is Ownable, ReentrancyGuard {
 
         votingEndedAt = block.timestamp;
         _setPhase(Phase.Ended);
+        _settleOutcome();
     }
 
     /// @dev The one place `Voting` is left, so the two callers cannot disagree
@@ -909,9 +1100,165 @@ contract Poll is Ownable, ReentrancyGuard {
         if (config.commitReveal) {
             revealEndsAt = block.timestamp + config.revealWindowSeconds;
             _setPhase(Phase.Reveal);
-        } else {
-            _setPhase(Phase.Ended);
+            // Deliberately NOT settled: `outcome()` still returns `Pending`, and
+            // caching anything else here would publish a verdict for a tally
+            // that is about to change (ADR-0032).
+            return;
         }
+
+        _setPhase(Phase.Ended);
+        _settleOutcome();
+    }
+
+    /// @dev Caches the computed verdict at the moment the poll becomes final.
+    ///
+    ///      `outcome()` stays the authority and recomputes on every read. This
+    ///      exists only so that an indexer receives a transition at the instant
+    ///      it happens, rather than having to poll a view to notice. If the two
+    ///      ever disagreed, `outcome()` would be right: it reads the state, and
+    ///      this reads the state at one earlier moment.
+    function _settleOutcome() private {
+        PollOutcome settled = outcome();
+
+        outcomeState = settled;
+
+        emit OutcomeSettled(settled);
+    }
+
+    // ---------------------------------------------------------------------
+    // Governance execution (ADR-0032)
+    // ---------------------------------------------------------------------
+
+    /// @notice Queue the action a passed vote authorises.
+    ///
+    /// @dev Permissionless once the poll has `Passed`. It is NOT creator-only,
+    ///      and that is the point: a queue step that only the creator can
+    ///      perform means a creator who dislikes the result can simply never
+    ///      queue it, and the vote has no consequence after all. Anyone may
+    ///      start the clock; the clock and the target list are what bound what
+    ///      can happen, not the caller's identity.
+    ///
+    ///      The timelock starts HERE rather than at the deadline, so the window
+    ///      is measured from the moment the action became known. Measuring from
+    ///      the deadline would let a creator queue at the last instant and leave
+    ///      voters no window at all (ADR-0032).
+    function queueExecution(address target, uint256 value, bytes calldata data) external {
+        if (phase != Phase.Ended) {
+            revert InvalidPhase(Phase.Ended, phase);
+        }
+        if (outcome() != PollOutcome.Passed) revert NotPassed(outcome());
+        if (execution.done) revert ExecutionAlreadyDone();
+        if (execution.target != address(0)) revert AlreadyQueued();
+        if (!_isAllowedTarget(target)) revert ExecutionTargetNotAllowed(target);
+
+        execution = Execution({
+            target: target,
+            value: value,
+            data: data,
+            readyAt: block.timestamp + config.timelockSeconds,
+            lastError: "",
+            done: false
+        });
+
+        emit ExecutionQueued(target, value, data, execution.readyAt);
+    }
+
+    /// @notice Carry out a queued action.
+    ///
+    /// @dev Permissionless, like `queueExecution`, and for the same reason: if
+    ///      only the creator could complete it, the queue step would be
+    ///      decorative.
+    ///
+    ///      A FAILED CALL DOES NOT REVERT AND DOES NOT ROLL THE POLL BACK. Two
+    ///      reasons, and the second is why this function has no `revert` on the
+    ///      failure path at all:
+    ///
+    ///        1. A target that reverts must not be able to destroy a vote that
+    ///           already passed. A third party who can make the target fail — by
+    ///           pausing it, or by consuming whatever resource the call needs —
+    ///           could otherwise void the result.
+    ///        2. A revert would roll back the very state this branch writes, so
+    ///           `lastError` would always come back empty and the failure would
+    ///           leave no trace on chain. The first version of this function did
+    ///           revert, and the test caught exactly that: the caller was told,
+    ///           and nobody afterwards could learn what went wrong.
+    ///
+    ///      The cost is that `execute()` returns normally on a failed
+    ///      execution, so a caller MUST read `ExecutionFailed` or
+    ///      `execution().lastError` rather than the transaction status.
+    function execute() external nonReentrant {
+        Execution memory queued = execution;
+
+        if (queued.target == address(0)) revert NothingQueued();
+        if (queued.done) revert ExecutionAlreadyDone();
+        if (block.timestamp < queued.readyAt) revert TimelockNotElapsed(queued.readyAt);
+
+        // Effects before interaction: a reentrant target finds `done` already
+        // set and cannot make this poll execute twice.
+        execution.done = true;
+        execution.lastError = "";
+
+        (bool ok, bytes memory reason) = queued.target.call{ value: queued.value }(queued.data);
+
+        if (!ok) {
+            // Put the queue back so a retry is possible. `done` is cleared
+            // because nothing was done — leaving it set would make the failure
+            // permanent, which is the outcome this path exists to avoid.
+            execution.done = false;
+            execution.lastError = reason;
+
+            emit ExecutionFailed(queued.target, reason);
+
+            return;
+        }
+
+        emit Executed(queued.target, queued.value, queued.data);
+    }
+
+    /// @notice Withdraw a queued action before it runs.
+    ///
+    /// @dev Creator-only, unlike the other two. Cancelling is the one step that
+    ///      can undo the vote's consequence, so it is the one step that must be
+    ///      attributable — a permissionless cancel would let any passer-by
+    ///      silently discard a result.
+    ///
+    ///      Cannot cancel after success: at that point the action has happened
+    ///      and there is nothing to withdraw.
+    function cancelExecution() external onlyOwner {
+        Execution memory queued = execution;
+
+        if (queued.target == address(0)) revert NothingQueued();
+        if (queued.done) revert ExecutionAlreadyDone();
+
+        delete execution;
+
+        emit ExecutionCancelled(queued.target);
+    }
+
+    /// @notice Whether `execute()` may call a given address.
+    function isAllowedExecutionTarget(address target) external view returns (bool) {
+        return _isAllowedTarget(target);
+    }
+
+    /// @notice The addresses `execute()` may call besides this poll.
+    function executionTargets() external view returns (address[] memory) {
+        return _executionTargets;
+    }
+
+    /// @dev This poll always, plus whatever was listed at creation. Self-calls
+    ///      are allowed unconditionally because a poll calling its own admin
+    ///      functions is the case this feature was built for, and because the
+    ///      alternative — requiring the creator to list the poll's own address —
+    ///      is a step that is easy to forget and impossible to fix afterwards.
+    function _isAllowedTarget(address target) private view returns (bool) {
+        if (target == address(this)) return true;
+
+        uint256 length = _executionTargets.length;
+        for (uint256 i = 0; i < length; ++i) {
+            if (_executionTargets[i] == target) return true;
+        }
+
+        return false;
     }
 
     // ---------------------------------------------------------------------
@@ -1449,7 +1796,12 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      the total counts <em>selections</em>, not voters. This is the
     ///      definition the indexer must reproduce, and the reason
     ///      `voteCount` per option — not the total — is what a quorum reads.
-    function results() external view returns (Option[] memory list, uint256 total) {
+    /// @dev `public` rather than `external` since ADR-0032: `outcome()` and
+    ///      `turnoutBps()` both need the tally, and calling an `external`
+    ///      function from inside the contract would mean `this.results()` — an
+    ///      actual `CALL` that also changes `msg.sender`. Reading it directly
+    ///      keeps those three views consistent with each other for free.
+    function results() public view returns (Option[] memory list, uint256 total) {
         uint256 count = optionCount;
         list = new Option[](count);
 
@@ -1465,6 +1817,90 @@ contract Poll is Ownable, ReentrancyGuard {
         if (optionId == 0 || optionId > optionCount) revert UnknownOption(optionId);
 
         return _options[optionId].labelCID;
+    }
+
+    /// @notice What this poll decided, as of now.
+    ///
+    /// @dev The verdict is computed, never stored. A stored verdict would need
+    ///      writing at a moment when the tally is final, and on a commit-reveal
+    ///      poll there is no single such moment: reveals trickle in throughout
+    ///      the window, so any write would freeze an answer that later ballots
+    ///      contradict. Computing it means asking the current state, which is
+    ///      always the truthful answer.
+    ///
+    ///      `outcomeState` exists beside this as a cache of the last computed
+    ///      answer, updated on the two transitions that can settle it. It is
+    ///      there so an indexer gets an event rather than having to poll;
+    ///      `outcome()` remains the authority.
+    function outcome() public view returns (PollOutcome) {
+        // Still running: the tally may change, so any verdict would be premature.
+        // `Reveal` is included deliberately — see `PollOutcome.Pending`.
+        if (phase == Phase.Setup || phase == Phase.Voting || phase == Phase.Reveal) {
+            return PollOutcome.Pending;
+        }
+
+        (, uint256 tally) = results();
+
+        if (!_quorumMet(tally)) {
+            return PollOutcome.QuorumNotMet;
+        }
+
+        return tally > 0 ? PollOutcome.Passed : PollOutcome.Rejected;
+    }
+
+    /// @notice Whether a given tally clears this poll's quorum.
+    /// @dev An integer cross-multiplication rather than `tally * MAX_BPS /
+    ///      total >= quorumBps`, because the division truncates: a tally of 2 out
+    ///      of 4 with a 50% quorum would compute 5000 and compare against 5000,
+    ///      or 4999 and fail, depending on which way the rounding fell. Comparing
+    ///      products has no such edge, and the boundary tests pin it.
+    ///
+    ///      A quorum of 0 passes trivially, which is what "no quorum required"
+    ///      must mean — and is the default for every poll that predates this.
+    function _quorumMet(uint256 tally) private view returns (bool) {
+        uint256 required = config.quorumBps;
+        if (required == 0) return true;
+
+        // `frozenEligiblePower` is zero only on an open poll, which cannot carry
+        // a quorum (refused at creation). Defensive rather than expected.
+        if (frozenEligiblePower == 0) return false;
+
+        return tally * PollMechanisms.MAX_BPS >= frozenEligiblePower * required;
+    }
+
+    /// @notice Which option did best, or 0 when nothing was backed.
+    ///
+    /// @dev Deliberately just the vote count. A weighted poll's `voteCount` is
+    ///      already the sum of the weights that backed the option, so "most
+    ///      votes" and "most weight" are the same comparison and do not need two
+    ///      functions.
+    function winningOption() external view returns (uint256 optionId) {
+        uint256 count = optionCount;
+        uint256 best;
+
+        for (uint256 i = 1; i <= count; ++i) {
+            uint256 votes = _options[i].voteCount;
+            if (votes > best) {
+                best = votes;
+                optionId = i;
+            }
+        }
+    }
+
+    /// @notice How much of the eligible power actually took part, in basis
+    ///         points. 0 when there is no eligible set to measure against.
+    ///
+    /// @dev Reads `frozenEligiblePower` rather than recomputing, so the turnout
+    ///      figure and the quorum check are guaranteed to be fractions of the
+    ///      SAME number. Computing it separately would let the two disagree —
+    ///      the interface reporting a poll as having cleared its quorum while
+    ///      showing a turnout below the quorum threshold (ADR-0032).
+    function turnoutBps() external view returns (uint256) {
+        if (frozenEligiblePower == 0) return 0;
+
+        (, uint256 tally) = results();
+
+        return (tally * PollMechanisms.MAX_BPS) / frozenEligiblePower;
     }
 
     /// @notice Everything the UI needs about one address, in one round trip.

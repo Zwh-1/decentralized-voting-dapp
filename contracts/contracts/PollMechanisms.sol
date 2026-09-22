@@ -63,6 +63,22 @@ library PollMechanisms {
         /// @notice Seconds after the deadline during which commits may be
         ///         revealed. Ignored unless `commitReveal` is true.
         uint256 revealWindowSeconds;
+        /// @notice The minimum share of the eligible voting power that must take
+        ///         part for the result to count, in basis points. 0 means no
+        ///         quorum is required.
+        /// @dev Basis points rather than a fraction so the comparison in
+        ///      `Poll.outcome` is an integer one. A percentage would need either
+        ///      floating point (unavailable) or a division, and a division
+        ///      truncates: a poll sitting exactly on its threshold could be
+        ///      reported as having missed it.
+        uint256 quorumBps;
+        /// @notice Seconds between queueing an execution and being able to run
+        ///         it. 0 means execution is immediate once queued.
+        /// @dev Belongs to the creation-time configuration and not to
+        ///      `queueExecution` because a delay chosen at queue time is not a
+        ///      delay: whoever queues would simply pass 0. Its whole purpose is
+        ///      to be a window the VOTERS know about in advance (ADR-0032).
+        uint256 timelockSeconds;
     }
 
     /// @notice The default configuration: single-select, equal weight, no
@@ -80,7 +96,9 @@ library PollMechanisms {
                 weighted: false,
                 delegable: false,
                 commitReveal: false,
-                revealWindowSeconds: 0
+                revealWindowSeconds: 0,
+                quorumBps: 0,
+                timelockSeconds: 0
             });
     }
 
@@ -139,6 +157,45 @@ library PollMechanisms {
             if (config.delegable) {
                 return (false, "commit-reveal cannot be combined with delegation yet");
             }
+        }
+
+        // --- governance -----------------------------------------------------
+        // Checked LAST so the existing mechanism refusals keep their current
+        // precedence. The order is part of this function's interface (see the
+        // header), and reordering it would change which sentence a caller sees
+        // for a config that violates two rules at once.
+        return validateGovernance(config);
+    }
+
+    /// @notice The largest legal `quorumBps`: 100% of the eligible power.
+    /// @dev Named rather than written as a literal at each comparison, so the
+    ///      bound and the check that enforces it cannot disagree.
+    uint256 internal constant MAX_BPS = 10_000;
+
+    /// @dev Split out from `validate` because it is checked on a different path:
+    ///      `validate` runs once at creation inside the factory, while this is
+    ///      also consulted by the TypeScript mirror and by tests that build a
+    ///      config directly. Keeping it a separate pure function means the two
+    ///      callers share one implementation.
+    function validateGovernance(
+        PollConfig memory config
+    ) internal pure returns (bool ok, string memory reason) {
+        // Above 100% no tally can ever qualify, so the poll would be created,
+        // voted in, and then be incapable of passing — a configuration that is
+        // broken at creation but only fails at the end, when every vote has
+        // already been cast. Refused up front.
+        if (config.quorumBps > MAX_BPS) {
+            return (false, "quorumBps cannot exceed 10000");
+        }
+
+        // A quorum is a fraction OF the eligible set, and an open poll has no
+        // eligible set to take a fraction of — "everyone" is not a countable
+        // denominator. Accepting this would create a poll whose quorum check
+        // compares the tally against a number the contract cannot compute, and
+        // the only two available answers are both wrong: treat it as 0% (the
+        // quorum silently does nothing) or as 100% (no poll ever passes).
+        if (config.quorumBps != 0 && config.openToAll) {
+            return (false, "quorum requires whitelist admission");
         }
 
         return (true, "");

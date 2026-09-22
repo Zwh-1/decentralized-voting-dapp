@@ -55,6 +55,13 @@ contract PollPropertiesTest is Test {
 
     address[] internal voters;
 
+    /// @dev No execution targets, which is what every suite except the
+    ///      governance one wants: a poll that can only call itself. Named rather
+    ///      than inlined as `new address[](0)` at each call site so that adding
+    ///      a parameter to `initialize` again means touching one line per file.
+    function _noExecutionTargets() internal pure returns (address[] memory) {
+        return new address[](0);
+    }
     function setUp() public {
         string[] memory cids = new string[](OPTION_COUNT);
         for (uint256 i = 0; i < OPTION_COUNT; ++i) {
@@ -62,7 +69,7 @@ contract PollPropertiesTest is Test {
         }
 
         poll = new Poll();
-        poll.initialize(creator, "Property poll", cids, FAR_FUTURE, _config());
+        poll.initialize(creator, "Property poll", cids, FAR_FUTURE, _config(), _noExecutionTargets());
 
         for (uint256 i = 0; i < VOTER_COUNT; ++i) {
             voters.push(makeAddr(string.concat("propertyVoter", vm.toString(i))));
@@ -186,7 +193,7 @@ contract PollPropertiesTest is Test {
         cids[1] = "cid-b";
 
         Poll fresh = new Poll();
-        fresh.initialize(creator, "Fuzz poll", cids, FAR_FUTURE, _config());
+        fresh.initialize(creator, "Fuzz poll", cids, FAR_FUTURE, _config(), _noExecutionTargets());
 
         address[] memory freshVoters = new address[](voterCount);
         for (uint256 i = 0; i < voterCount; ++i) {

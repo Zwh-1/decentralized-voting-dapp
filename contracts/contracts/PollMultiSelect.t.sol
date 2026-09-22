@@ -34,6 +34,13 @@ contract PollMechanismsTest is Test {
     // Fixtures
     // ---------------------------------------------------------------------
 
+    /// @dev No execution targets, which is what every suite except the
+    ///      governance one wants: a poll that can only call itself. Named rather
+    ///      than inlined as `new address[](0)` at each call site so that adding
+    ///      a parameter to `initialize` again means touching one line per file.
+    function _noExecutionTargets() internal pure returns (address[] memory) {
+        return new address[](0);
+    }
     function _cids(uint256 count) internal pure returns (string[] memory cids) {
         cids = new string[](count);
         for (uint256 i = 0; i < count; ++i) {
@@ -48,7 +55,7 @@ contract PollMechanismsTest is Test {
         uint256 count
     ) internal returns (Poll created) {
         created = new Poll();
-        created.initialize(creator, "Which ones?", _cids(count), FAR_FUTURE, config);
+        created.initialize(creator, "Which ones?", _cids(count), FAR_FUTURE, config, _noExecutionTargets());
 
         address[] memory voters = new address[](3);
         voters[0] = alice;
@@ -336,7 +343,7 @@ contract PollMechanismsTest is Test {
     ///      and change nothing, which is worse than a revert that names it.
     function test_Weighted_RequiresAnAssignedWeightToVote() public {
         Poll weighted = new Poll();
-        weighted.initialize(creator, "Weighted?", _cids(3), FAR_FUTURE, _weightedConfig());
+        weighted.initialize(creator, "Weighted?", _cids(3), FAR_FUTURE, _weightedConfig(), _noExecutionTargets());
 
         address[] memory voters = new address[](2);
         voters[0] = alice;
@@ -536,7 +543,7 @@ contract PollMechanismsTest is Test {
                 "weighted voting requires whitelist admission"
             )
         );
-        fresh.initialize(creator, "Q", _cids(3), FAR_FUTURE, config);
+        fresh.initialize(creator, "Q", _cids(3), FAR_FUTURE, config, _noExecutionTargets());
     }
 
     // ---------------------------------------------------------------------
@@ -549,13 +556,13 @@ contract PollMechanismsTest is Test {
     ///      which counting rules they are looking at.
     function test_RulesHash_CoversTheMechanismSet() public {
         Poll plain = new Poll();
-        plain.initialize(creator, "Q", _cids(3), FAR_FUTURE, PollMechanisms.defaultConfig(0));
+        plain.initialize(creator, "Q", _cids(3), FAR_FUTURE, PollMechanisms.defaultConfig(0), _noExecutionTargets());
 
         Poll weighted = new Poll();
-        weighted.initialize(creator, "Q", _cids(3), FAR_FUTURE, _weightedConfig());
+        weighted.initialize(creator, "Q", _cids(3), FAR_FUTURE, _weightedConfig(), _noExecutionTargets());
 
         Poll multi = new Poll();
-        multi.initialize(creator, "Q", _cids(3), FAR_FUTURE, _multiSelectConfig(2));
+        multi.initialize(creator, "Q", _cids(3), FAR_FUTURE, _multiSelectConfig(2), _noExecutionTargets());
 
         assertTrue(
             plain.rulesHash() != weighted.rulesHash(),
@@ -577,7 +584,7 @@ contract PollMechanismsTest is Test {
     ///      opens the poll cannot also be the one a weight test assigns on.
     function _setupWeightedPoll() internal returns (Poll created) {
         created = new Poll();
-        created.initialize(creator, "Weighted?", _cids(3), FAR_FUTURE, _weightedConfig());
+        created.initialize(creator, "Weighted?", _cids(3), FAR_FUTURE, _weightedConfig(), _noExecutionTargets());
 
         address[] memory voters = new address[](3);
         voters[0] = alice;
@@ -594,7 +601,7 @@ contract PollMechanismsTest is Test {
     ///      this one.
     function _newWeightedPoll() internal returns (Poll created) {
         created = new Poll();
-        created.initialize(creator, "Weighted?", _cids(3), FAR_FUTURE, _weightedConfig());
+        created.initialize(creator, "Weighted?", _cids(3), FAR_FUTURE, _weightedConfig(), _noExecutionTargets());
 
         address[] memory voters = new address[](3);
         voters[0] = alice;

@@ -2,6 +2,7 @@
 pragma solidity 0.8.37;
 
 import { Clones } from "@openzeppelin/contracts/proxy/Clones.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 import { Poll } from "./Poll.sol";
 import { PollMechanisms } from "./PollMechanisms.sol";
@@ -29,7 +30,7 @@ import { PollMechanisms } from "./PollMechanisms.sol";
 ///      `Poll` therefore uses `initialize` rather than a constructor, and the
 ///      one-time guard in `initialize` is what stops a second caller from
 ///      claiming an existing poll.
-contract VotingFactory {
+contract VotingFactory is Ownable {
     // ---------------------------------------------------------------------
     // State
     // ---------------------------------------------------------------------
@@ -45,6 +46,22 @@ contract VotingFactory {
     /// @notice Creator of each poll, for "polls I started" queries.
     mapping(address => address[]) private _pollsByCreator;
 
+    /// @notice Whether `createPoll` is restricted to an allowlist.
+    ///
+    /// @dev DEFAULTS TO FALSE, and that default is load-bearing rather than
+    ///      conservative: every existing test, deployment and drill in this
+    ///      repository assumes anyone may create a poll, and flipping the default
+    ///      would break them all as a side effect of adding a feature. Leaving it
+    ///      off also makes the change falsifiable — "the old behaviour is
+    ///      unchanged" is only a claim if something checks it (ADR-0033).
+    bool public creatorAllowlistEnabled;
+
+    /// @notice Addresses permitted to create polls while the switch is on.
+    /// @dev Additive, like `Poll.setWhitelist`: one call grants or revokes, and
+    ///      each change emits. A setter that replaced the whole list would let a
+    ///      single call silently drop everyone.
+    mapping(address => bool) public isCreatorAllowed;
+
     // ---------------------------------------------------------------------
     // Events
     // ---------------------------------------------------------------------
@@ -57,6 +74,14 @@ contract VotingFactory {
         uint256 optionCount,
         bool openToAll
     );
+
+    /// @notice The creation switch changed.
+    event CreatorAllowlistToggled(bool enabled);
+
+    /// @notice One address's permission to create changed.
+    /// @dev The address is indexed so a client can ask "was this address ever
+    ///      authorised" without scanning the whole log.
+    event CreatorAllowedUpdated(address indexed creator, bool allowed);
     // ---------------------------------------------------------------------
     // Errors
     // ---------------------------------------------------------------------
@@ -65,13 +90,45 @@ contract VotingFactory {
     error DeadlineNotInFuture(uint256 endsAt);
     error EmptyQuestion();
     error InvalidConfig(string reason);
+    /// @dev Names the caller, so the front end can show "your address is not on
+    ///      the list" with the address in it rather than a bare selector.
+    error CreatorNotAllowed(address caller);
 
     // ---------------------------------------------------------------------
     // Construction
     // ---------------------------------------------------------------------
 
-    constructor() {
+    constructor() Ownable(msg.sender) {
         implementation = address(new Poll());
+    }
+
+    /// @notice Turn the creation allowlist on or off.
+    /// @dev Owner-only. Recorded as its own event rather than inferred from
+    ///      `setCreatorAllowlist` calls, because "the switch moved" and "the
+    ///      list changed" are separate facts and a reader auditing why a
+    ///      creation was refused needs to see both.
+    function setCreatorAllowlistEnabled(bool enabled) external onlyOwner {
+        creatorAllowlistEnabled = enabled;
+
+        emit CreatorAllowlistToggled(enabled);
+    }
+
+    /// @notice Grant or revoke one address's permission to create polls.
+    /// @dev Callable whether or not the switch is on, so a list can be built
+    ///      BEFORE being enforced. A list that could only be edited while live
+    ///      would mean enabling enforcement with an empty list, locking out
+    ///      everyone including the addresses about to be added.
+    function setCreatorAllowlist(address[] calldata creators, bool allowed) external onlyOwner {
+        uint256 length = creators.length;
+
+        for (uint256 i = 0; i < length; ++i) {
+            address creator = creators[i];
+            if (creator == address(0)) revert InvalidConfig("zero address in creator allowlist");
+
+            isCreatorAllowed[creator] = allowed;
+
+            emit CreatorAllowedUpdated(creator, allowed);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -83,13 +140,24 @@ contract VotingFactory {
     /// @param optionCIDs Metadata CIDs for the options, in display order.
     /// @param endsAt Unix timestamp after which voting closes.
     /// @param config The counting mechanisms, including admission mode.
+    /// @param executionTargets Addresses a passed vote may call, besides the
+    ///        poll itself. Empty means "the poll only".
     /// @return poll The address of the new poll.
     function createPoll(
         string calldata question,
         string[] calldata optionCIDs,
         uint256 endsAt,
-        PollMechanisms.PollConfig calldata config
+        PollMechanisms.PollConfig calldata config,
+        address[] calldata executionTargets
     ) external returns (address poll) {
+        // The creation allowlist, checked FIRST so that an unauthorised caller
+        // learns that before anything else — the reason is about them, not about
+        // their inputs. Skipped entirely while the switch is off, which is what
+        // makes the default behaviour byte-for-byte the old one (ADR-0033).
+        if (creatorAllowlistEnabled && !isCreatorAllowed[msg.sender]) {
+            revert CreatorNotAllowed(msg.sender);
+        }
+
         // Validated here as well as in `initialize`, so a caller pays for the
         // cheap check before a clone is deployed. The check in `initialize` is
         // the one that actually protects the poll; this one only saves gas.
@@ -106,7 +174,7 @@ contract VotingFactory {
 
         poll = Clones.clone(implementation);
 
-        Poll(poll).initialize(msg.sender, question, optionCIDs, endsAt, config);
+        Poll(poll).initialize(msg.sender, question, optionCIDs, endsAt, config, executionTargets);
 
         _polls.push(poll);
         _pollsByCreator[msg.sender].push(poll);

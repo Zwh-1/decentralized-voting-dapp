@@ -76,6 +76,13 @@ contract PollMechanismMatrixTest is Test {
     ///      property test that knows which mechanism it is running stops being a
     ///      property test. The mechanisms it CAN combine with are covered by
     ///      `PollCommitReveal.t.sol` and `PollMechanisms.t.sol`.
+    /// @dev No execution targets, which is what every suite except the
+    ///      governance one wants: a poll that can only call itself. Named rather
+    ///      than inlined as `new address[](0)` at each call site so that adding
+    ///      a parameter to `initialize` again means touching one line per file.
+    function _noExecutionTargets() internal pure returns (address[] memory) {
+        return new address[](0);
+    }
     function _matrix() internal pure returns (Mechanism[] memory list) {
         list = new Mechanism[](6);
         list[0] = Mechanism("plain", false, false, false, false);
@@ -254,11 +261,13 @@ contract PollMechanismMatrixTest is Test {
             weighted: mechanism.weighted,
             delegable: mechanism.delegable,
             commitReveal: mechanism.commitReveal,
-            revealWindowSeconds: mechanism.commitReveal ? REVEAL_WINDOW : 0
+            revealWindowSeconds: mechanism.commitReveal ? REVEAL_WINDOW : 0,
+            quorumBps: 0,
+            timelockSeconds: 0
         });
 
         poll = new Poll();
-        poll.initialize(creator, mechanism.name, cids, FAR_FUTURE, config);
+        poll.initialize(creator, mechanism.name, cids, FAR_FUTURE, config, _noExecutionTargets());
 
         delete voters;
         for (uint256 i = 0; i < VOTER_COUNT; ++i) {

@@ -36,6 +36,13 @@ contract PollDelegationTest is Test {
     // Fixtures
     // ---------------------------------------------------------------------
 
+    /// @dev No execution targets, which is what every suite except the
+    ///      governance one wants: a poll that can only call itself. Named rather
+    ///      than inlined as `new address[](0)` at each call site so that adding
+    ///      a parameter to `initialize` again means touching one line per file.
+    function _noExecutionTargets() internal pure returns (address[] memory) {
+        return new address[](0);
+    }
     function _cids(uint256 count) internal pure returns (string[] memory cids) {
         cids = new string[](count);
         for (uint256 i = 0; i < count; ++i) {
@@ -64,7 +71,7 @@ contract PollDelegationTest is Test {
     /// @dev A delegable poll with all four addresses whitelisted and open.
     function _openPoll() internal returns (Poll created) {
         created = new Poll();
-        created.initialize(creator, "Delegable?", _cids(3), FAR_FUTURE, _delegableConfig());
+        created.initialize(creator, "Delegable?", _cids(3), FAR_FUTURE, _delegableConfig(), _noExecutionTargets());
 
         address[] memory voters = new address[](4);
         voters[0] = alice;
@@ -330,7 +337,7 @@ contract PollDelegationTest is Test {
     ///      with different weights must sum, not be treated as three heads.
     function test_WeightedDelegate_SumsTheAssignedWeights() public {
         Poll weighted = new Poll();
-        weighted.initialize(creator, "Weighted?", _cids(3), FAR_FUTURE, _weightedDelegableConfig());
+        weighted.initialize(creator, "Weighted?", _cids(3), FAR_FUTURE, _weightedDelegableConfig(), _noExecutionTargets());
 
         address[] memory voters = new address[](3);
         voters[0] = alice;
@@ -391,7 +398,7 @@ contract PollDelegationTest is Test {
 
     function test_Delegate_RefusedWhenTheMechanismIsOff() public {
         Poll plain = new Poll();
-        plain.initialize(creator, "Q", _cids(3), FAR_FUTURE, PollMechanisms.defaultConfig(0));
+        plain.initialize(creator, "Q", _cids(3), FAR_FUTURE, PollMechanisms.defaultConfig(0), _noExecutionTargets());
 
         address[] memory voters = new address[](2);
         voters[0] = alice;
@@ -413,7 +420,7 @@ contract PollDelegationTest is Test {
     ///      delegation cannot precede the roster it depends on.
     function test_Delegate_RefusedBeforeVotingOpens() public {
         Poll fresh = new Poll();
-        fresh.initialize(creator, "Q", _cids(3), FAR_FUTURE, _delegableConfig());
+        fresh.initialize(creator, "Q", _cids(3), FAR_FUTURE, _delegableConfig(), _noExecutionTargets());
 
         address[] memory voters = new address[](2);
         voters[0] = alice;
@@ -446,7 +453,7 @@ contract PollDelegationTest is Test {
                 "commit-reveal cannot be combined with delegation yet"
             )
         );
-        fresh.initialize(creator, "Q", _cids(3), FAR_FUTURE, config);
+        fresh.initialize(creator, "Q", _cids(3), FAR_FUTURE, config, _noExecutionTargets());
     }
 
     // ---------------------------------------------------------------------

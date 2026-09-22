@@ -34,6 +34,13 @@ contract PollTest is Test {
     ///      accident; tests that care about the deadline warp explicitly.
     uint256 internal constant FAR_FUTURE = 4_000_000_000;
 
+    /// @dev No execution targets, which is what every suite except the
+    ///      governance one wants: a poll that can only call itself. Named rather
+    ///      than inlined as `new address[](0)` at each call site so that adding
+    ///      a parameter to `initialize` again means touching one line per file.
+    function _noExecutionTargets() internal pure returns (address[] memory) {
+        return new address[](0);
+    }
     function setUp() public {
         poll = _newPoll(creator, FAR_FUTURE);
     }
@@ -63,7 +70,7 @@ contract PollTest is Test {
         cids[1] = CID_B;
 
         created = new Poll();
-        created.initialize(creator_, "Which one?", cids, endsAt_, _config(openToAll_));
+        created.initialize(creator_, "Which one?", cids, endsAt_, _config(openToAll_), _noExecutionTargets());
     }
 
     /// @dev The default mechanism set with admission chosen, which is what most
@@ -144,7 +151,7 @@ contract PollTest is Test {
         cids[1] = CID_B;
 
         vm.expectRevert(Poll.AlreadyInitialized.selector);
-        poll.initialize(alice, "Hijacked", cids, FAR_FUTURE, _config(false));
+        poll.initialize(alice, "Hijacked", cids, FAR_FUTURE, _config(false), _noExecutionTargets());
     }
 
     function test_Initialize_RevertsWithTooFewOptions() public {
@@ -154,7 +161,7 @@ contract PollTest is Test {
         Poll fresh = new Poll();
 
         vm.expectRevert(abi.encodeWithSelector(Poll.TooFewOptions.selector, 2, 1));
-        fresh.initialize(creator, "Q", cids, FAR_FUTURE, _config(false));
+        fresh.initialize(creator, "Q", cids, FAR_FUTURE, _config(false), _noExecutionTargets());
     }
 
     function test_Initialize_RevertsOnPastDeadline() public {
@@ -166,7 +173,7 @@ contract PollTest is Test {
 
         vm.warp(1_800_000_000);
         vm.expectRevert(abi.encodeWithSelector(Poll.DeadlineNotInFuture.selector, 1_700_000_000));
-        fresh.initialize(creator, "Q", cids, 1_700_000_000, _config(false));
+        fresh.initialize(creator, "Q", cids, 1_700_000_000, _config(false), _noExecutionTargets());
     }
 
     function test_Initialize_RevertsOnEmptyQuestion() public {
@@ -177,7 +184,7 @@ contract PollTest is Test {
         Poll fresh = new Poll();
 
         vm.expectRevert(Poll.EmptyQuestion.selector);
-        fresh.initialize(creator, "", cids, FAR_FUTURE, _config(false));
+        fresh.initialize(creator, "", cids, FAR_FUTURE, _config(false), _noExecutionTargets());
     }
 
     // ---------------------------------------------------------------------
@@ -1616,7 +1623,7 @@ contract PollTest is Test {
         cids[1] = CID_B;
 
         Poll other = new Poll();
-        other.initialize(creator, "a different question", cids, FAR_FUTURE, _config(false));
+        other.initialize(creator, "a different question", cids, FAR_FUTURE, _config(false), _noExecutionTargets());
 
         assertTrue(poll.rulesHash() != other.rulesHash(), "the question must be covered");
     }

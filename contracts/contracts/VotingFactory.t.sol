@@ -29,6 +29,12 @@ contract VotingFactoryTest is Test {
         cids[1] = "bafkreieq5jui4j25lacwomsqgvn7mq3z4g4hq7xw774wevxfrfrura3jqq";
     }
 
+    /// @dev No execution targets, which is what every test in this suite wants:
+    ///      the governance execution tests live in `PollExecutor.t.sol`.
+    function _noExecutionTargets() internal pure returns (address[] memory) {
+        return new address[](0);
+    }
+
     /// @dev The default mechanism set with admission chosen, which is what this
     ///      suite is about. Mechanism-specific factory tests build their own.
     function _config(bool openToAll_) internal pure returns (PollMechanisms.PollConfig memory) {
@@ -46,13 +52,13 @@ contract VotingFactoryTest is Test {
 
     function _create(address creator, string memory question) internal returns (Poll poll) {
         vm.prank(creator);
-        poll = Poll(factory.createPoll(question, _cids(), FAR_FUTURE, _config(false)));
+        poll = Poll(factory.createPoll(question, _cids(), FAR_FUTURE, _config(false), _noExecutionTargets()));
     }
 
     /// @dev An open poll: no whitelist needed to vote.
     function _createOpen(address creator, string memory question) internal returns (Poll poll) {
         vm.prank(creator);
-        poll = Poll(factory.createPoll(question, _cids(), FAR_FUTURE, _config(true)));
+        poll = Poll(factory.createPoll(question, _cids(), FAR_FUTURE, _config(true), _noExecutionTargets()));
     }
 
     // ---------------------------------------------------------------------
@@ -79,7 +85,7 @@ contract VotingFactoryTest is Test {
         emit VotingFactory.PollCreated(address(0), alice, "Lunch?", FAR_FUTURE, 2, false);
 
         vm.prank(alice);
-        factory.createPoll("Lunch?", _cids(), FAR_FUTURE, _config(false));
+        factory.createPoll("Lunch?", _cids(), FAR_FUTURE, _config(false), _noExecutionTargets());
     }
 
     function test_CreatePoll_CarriesTheAdmissionModeToThePoll() public {
@@ -98,7 +104,7 @@ contract VotingFactoryTest is Test {
         emit VotingFactory.PollCreated(address(0), alice, "Anyone?", FAR_FUTURE, 2, true);
 
         vm.prank(alice);
-        factory.createPoll("Anyone?", _cids(), FAR_FUTURE, _config(true));
+        factory.createPoll("Anyone?", _cids(), FAR_FUTURE, _config(true), _noExecutionTargets());
     }
 
     function test_CreatePoll_AnyoneMayCreate() public {
@@ -117,21 +123,21 @@ contract VotingFactoryTest is Test {
         vm.expectRevert(abi.encodeWithSelector(VotingFactory.TooFewOptions.selector, 2, 1));
 
         vm.prank(alice);
-        factory.createPoll("Q", one, FAR_FUTURE, _config(false));
+        factory.createPoll("Q", one, FAR_FUTURE, _config(false), _noExecutionTargets());
     }
 
     function test_CreatePoll_RevertsOnPastDeadline() public {
         vm.expectRevert(abi.encodeWithSelector(VotingFactory.DeadlineNotInFuture.selector, 1));
 
         vm.prank(alice);
-        factory.createPoll("Q", _cids(), 1, _config(false));
+        factory.createPoll("Q", _cids(), 1, _config(false), _noExecutionTargets());
     }
 
     function test_CreatePoll_RevertsOnEmptyQuestion() public {
         vm.expectRevert(VotingFactory.EmptyQuestion.selector);
 
         vm.prank(alice);
-        factory.createPoll("", _cids(), FAR_FUTURE, _config(false));
+        factory.createPoll("", _cids(), FAR_FUTURE, _config(false), _noExecutionTargets());
     }
 
     // ---------------------------------------------------------------------
@@ -205,7 +211,7 @@ contract VotingFactoryTest is Test {
 
         vm.expectRevert(Poll.AlreadyInitialized.selector);
         vm.prank(bob);
-        poll.initialize(bob, "Hijacked", _cids(), FAR_FUTURE, _config(false));
+        poll.initialize(bob, "Hijacked", _cids(), FAR_FUTURE, _config(false), _noExecutionTargets());
 
         assertEq(poll.creator(), alice, "still alice's poll");
         assertEq(poll.owner(), alice, "and bob did not become the owner");
@@ -224,7 +230,7 @@ contract VotingFactoryTest is Test {
         // which is exactly why the factory never exposes it as a poll and the
         // indexer only follows `PollCreated`. Record the behaviour so a future
         // change to that assumption fails here rather than silently.
-        impl.initialize(alice, "Direct", _cids(), FAR_FUTURE, _config(false));
+        impl.initialize(alice, "Direct", _cids(), FAR_FUTURE, _config(false), _noExecutionTargets());
         assertEq(impl.creator(), alice, "only an explicit call on the raw address does this");
 
         assertEq(factory.pollCount(), 0, "but the factory never recorded it as a poll");
@@ -278,5 +284,148 @@ contract VotingFactoryTest is Test {
         // None of that touched the implementation.
         assertEq(impl.optionCount(), 0, "the implementation still has no options");
         assertEq(impl.totalStaked(), 0, "and still holds nothing");
+    }
+
+    // ---------------------------------------------------------------------
+    // Creation admission (ADR-0033)
+    // ---------------------------------------------------------------------
+
+    /// @dev The compatibility evidence for this whole feature, stated as a test
+    ///      rather than as a claim: with the switch OFF — which is how it ships
+    ///      — every address may still create, exactly as before. Everything else
+    ///      in this file already relies on that being true.
+    function test_Admission_IsOffByDefault() public {
+        assertFalse(factory.creatorAllowlistEnabled(), "the switch ships off");
+
+        vm.prank(bob);
+        Poll created = Poll(factory.createPoll("Anyone?", _cids(), FAR_FUTURE, _config(false), _noExecutionTargets()));
+
+        assertEq(created.creator(), bob, "an unlisted address created a poll");
+    }
+
+    function test_Admission_RefusesAnUnlistedCreatorWhenOn() public {
+        vm.prank(address(this));
+        factory.setCreatorAllowlistEnabled(true);
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(VotingFactory.CreatorNotAllowed.selector, bob));
+        factory.createPoll("Nope?", _cids(), FAR_FUTURE, _config(false), _noExecutionTargets());
+    }
+
+    function test_Admission_AllowsAListedCreatorWhenOn() public {
+        address[] memory allowed = new address[](1);
+        allowed[0] = bob;
+
+        factory.setCreatorAllowlist(allowed, true);
+        factory.setCreatorAllowlistEnabled(true);
+
+        vm.prank(bob);
+        Poll created = Poll(factory.createPoll("Yes?", _cids(), FAR_FUTURE, _config(false), _noExecutionTargets()));
+
+        assertEq(created.creator(), bob);
+    }
+
+    function test_Admission_ListCanBeBuiltBeforeEnforcing() public {
+        // A list that could only be edited while live would mean enabling
+        // enforcement with an empty list, locking out everyone — including the
+        // addresses that were about to be added.
+        address[] memory allowed = new address[](1);
+        allowed[0] = bob;
+
+        factory.setCreatorAllowlist(allowed, true);
+        assertTrue(factory.isCreatorAllowed(bob), "granted while the switch is off");
+
+        factory.setCreatorAllowlistEnabled(true);
+
+        vm.prank(bob);
+        factory.createPoll("Yes?", _cids(), FAR_FUTURE, _config(false), _noExecutionTargets());
+    }
+
+    function test_Admission_CanBeTurnedBackOff() public {
+        factory.setCreatorAllowlistEnabled(true);
+        factory.setCreatorAllowlistEnabled(false);
+
+        vm.prank(bob);
+        Poll created = Poll(factory.createPoll("Back on?", _cids(), FAR_FUTURE, _config(false), _noExecutionTargets()));
+
+        assertEq(created.creator(), bob);
+    }
+
+    function test_Admission_RevocationTakesEffectImmediately() public {
+        address[] memory allowed = new address[](1);
+        allowed[0] = bob;
+
+        factory.setCreatorAllowlist(allowed, true);
+        factory.setCreatorAllowlistEnabled(true);
+
+        factory.setCreatorAllowlist(allowed, false);
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(VotingFactory.CreatorNotAllowed.selector, bob));
+        factory.createPoll("Revoked?", _cids(), FAR_FUTURE, _config(false), _noExecutionTargets());
+    }
+
+    function test_Admission_DoesNotRetroactivelyInvalidateExistingPolls() public {
+        // A poll already created has its own whitelist, its own stakes and its
+        // own results. Letting a later management action invalidate it would
+        // mean one transaction destroying other people's assets (ADR-0033).
+        address[] memory allowed = new address[](1);
+        allowed[0] = bob;
+
+        vm.prank(bob);
+        Poll created = Poll(factory.createPoll("Before?", _cids(), FAR_FUTURE, _config(false), _noExecutionTargets()));
+
+        factory.setCreatorAllowlistEnabled(true);
+        factory.setCreatorAllowlist(allowed, false);
+
+        assertEq(created.creator(), bob, "the poll still exists and is still bob's");
+        assertEq(factory.pollCount(), 1, "and is still counted");
+    }
+
+    function test_Admission_OnlyTheOwnerMayToggleTheSwitch() public {
+        vm.prank(bob);
+        vm.expectRevert();
+        factory.setCreatorAllowlistEnabled(true);
+    }
+
+    function test_Admission_OnlyTheOwnerMayEditTheList() public {
+        address[] memory allowed = new address[](1);
+        allowed[0] = bob;
+
+        vm.prank(bob);
+        vm.expectRevert();
+        factory.setCreatorAllowlist(allowed, true);
+    }
+
+    function test_Admission_RefusesAZeroAddressInTheList() public {
+        address[] memory withZero = new address[](1);
+        withZero[0] = address(0);
+
+        vm.expectRevert();
+        factory.setCreatorAllowlist(withZero, true);
+    }
+
+    function test_Admission_TogglingEmits() public {
+        vm.expectEmit(false, false, false, true);
+        emit VotingFactory.CreatorAllowlistToggled(true);
+
+        factory.setCreatorAllowlistEnabled(true);
+    }
+
+    function test_Admission_GrantingEmits() public {
+        address[] memory allowed = new address[](1);
+        allowed[0] = bob;
+
+        vm.expectEmit(true, false, false, true);
+        emit VotingFactory.CreatorAllowedUpdated(bob, true);
+
+        factory.setCreatorAllowlist(allowed, true);
+    }
+
+    function test_Admission_DeployerIsTheOwner() public {
+        // Stated explicitly because it is the one thing this feature adds that a
+        // reader has to trust: someone decides who may create. The ADR records
+        // that this is a centralisation point; this test records who holds it.
+        assertEq(factory.owner(), address(this), "the deployer owns the factory");
     }
 }
