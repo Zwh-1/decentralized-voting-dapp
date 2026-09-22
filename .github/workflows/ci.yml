@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Additive only: release.yml calls this workflow as its gate, so that "the
+  # tests passed before we published" is a fact rather than a convention. The
+  # three triggers above keep their existing meaning, and no job changed.
+  workflow_call:
 
 env:
   # Hardhat 3 requires Node >= 22.13.0; this project was developed and verified
@@ -258,3 +262,81 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm run format:check
+
+  # Shell scripts are not covered by `pnpm format:check` -- Prettier has no parser
+  # for .sh, so it skips them silently rather than failing. That left the deploy
+  # scripts unverified by anything but their own self-test, which cannot notice a
+  # quoting bug it does not exercise. shellcheck is the missing check, and it runs
+  # here because it was not available on the development machine when those
+  # scripts were written.
+  shellcheck:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: |
+          shellcheck --version
+          # -x follows sourced files, so lib.sh is checked in the context of each
+          # script that sources it rather than standing alone.
+          shellcheck -x ops/deploy/*.sh ops/indexer/*.sh ops/alertmanager/*.sh
+
+  # The provenance check for alert rules and dashboards. It answers a question
+  # promtool does not: whether the series a rule or panel names is one that
+  # anything actually exports. A rule built on a missing series never fires, and a
+  # panel on one renders empty -- both look like "nothing is wrong".
+  observability-config:
+    name: Observability config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install pyyaml
+
+      - name: Every series has an owner
+        run: python ops/prometheus/check-rules.py
+
+      - name: Validate Prometheus configuration
+        run: |
+          docker run --rm -v "$PWD/ops/prometheus:/p:ro" \
+            --entrypoint promtool prom/prometheus:v3.1.0 \
+            check config /p/prometheus.yml
+          docker run --rm -v "$PWD/ops/prometheus:/p:ro" \
+            --entrypoint promtool prom/prometheus:v3.1.0 \
+            check rules /p/rules/voting.yml
+
+      - name: Validate Alertmanager configuration
+        run: |
+          docker run --rm -v "$PWD/ops/alertmanager:/p:ro" \
+            --entrypoint amtool prom/alertmanager:v0.28.0 \
+            check-config /p/alertmanager.yml.tmpl
+
+  # Repository-specific workflow invariants: no ssh-keyscan, no
+  # pull_request_target, no mutable tag as a deploy input, and the deploy lock
+  # shared between release and rollback. actionlint validates the schema and
+  # cannot know about any of these -- each is valid YAML and a valid workflow, and
+  # still wrong here.
+  workflow-invariants:
+    name: Workflow invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install pyyaml
+
+      - name: Check the invariants
+        run: python ops/ci/check-workflows.py
+
+      # Runs the checker against deliberately broken copies. A checker that
+      # cannot fail is not evidence, so it is made to fail on purpose here.
+      - name: Prove the checker can fail
+        run: python ops/ci/selftest.py

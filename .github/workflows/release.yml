@@ -1,0 +1,249 @@
+name: Release
+
+# Gate -> build -> scan -> deploy.
+#
+# The deploy input is always an immutable tag. Everything else in this file
+# exists to make that one property true and checkable.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Never cancel a release that is already running. A half-finished deploy is worse
+# than a queued one: the build may have pushed an image, or the deploy may have
+# swapped a slot, and cancelling in the middle leaves neither state recorded.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+  IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/voting-web
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Reuses CI rather than restating it. If this job is skipped or fails, nothing
+  # downstream runs -- "we tested it before publishing" is enforced here, not
+  # asserted in a README.
+  # ---------------------------------------------------------------------------
+  gate:
+    name: Quality gate
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  build:
+    name: Build and push
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      # The tag deploy consumes. Deliberately a digest-pinned immutable value,
+      # never a branch or `latest`.
+      image: ${{ steps.meta.outputs.tags }}
+      digest: ${{ steps.build.outputs.digest }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute the version
+        id: version
+        # The short commit SHA. This is the only identifier that is stable enough
+        # to deploy by: a branch name moves, and `latest` moves for everyone at
+        # once, so a rollback to either is not a rollback to anything in
+        # particular.
+        run: echo "version=sha-$(git rev-parse --short=12 HEAD)" >>"$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: .
+          file: web/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # -----------------------------------------------------------------
+          # NEXT_PUBLIC_* values are inlined into the client bundle at build
+          # time, so they are not secret -- whatever goes here is downloadable by
+          # anyone who loads the site. A keyed RPC endpoint must never be used:
+          # use the public endpoint, or a proxy that is not part of the bundle.
+          # web/.env.example warns about this too; it is repeated here because
+          # this file is where the mistake would actually be made.
+          #
+          # These are build args and not runtime environment variables for the
+          # same reason: setting them in compose would have no effect on an
+          # already-built bundle, which is a confusing way to fail.
+          # -----------------------------------------------------------------
+          build-args: |
+            NEXT_PUBLIC_SEPOLIA_RPC_URL=${{ vars.NEXT_PUBLIC_SEPOLIA_RPC_URL }}
+            NEXT_PUBLIC_LOCAL_RPC_URL=${{ vars.NEXT_PUBLIC_LOCAL_RPC_URL }}
+            NEXT_PUBLIC_IPFS_GATEWAY=${{ vars.NEXT_PUBLIC_IPFS_GATEWAY }}
+
+      # Recorded so that the deployed artifact can be traced back to this run,
+      # and so that two runs producing the same tag can be told apart.
+      - name: Summary
+        run: |
+          {
+            echo "### Build"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| version | \`${{ steps.version.outputs.version }}\` |"
+            echo "| digest | \`${{ steps.build.outputs.digest }}\` |"
+            echo "| platforms | linux/amd64 |"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  scan:
+    name: Scan and attest
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Trivy (fails the release on HIGH or CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ needs.build.outputs.digest }}
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+          # A finding that does not stop the release is a report, not a gate.
+          exit-code: "1"
+
+      # Runs even though Trivy failed, so the findings are visible in the
+      # Security tab rather than only in a failed job's log.
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
+      - name: SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}@${{ needs.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          artifact-name: sbom-${{ needs.build.outputs.version }}.spdx.json
+
+      - name: Attest provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ needs.build.outputs.digest }}
+          push-to-registry: true
+
+  deploy:
+    name: Deploy to production
+    needs: [build, scan]
+    runs-on: ubuntu-latest
+    # The approval gate. Configured in repository settings as a required
+    # reviewer on this environment; without it the job would run unattended on
+    # every push to main.
+    environment: production
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    # Shares a lock with rollback.yml. The workflow-level group above is keyed on
+    # the ref, which does not stop a release and a rollback from running at the
+    # same time -- and both mutate the same slot on the same host, so whichever
+    # finishes second silently wins. This group is what makes them exclusive.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the SSH key
+        run: |
+          mkdir -p ~/.ssh
+          install -m 600 /dev/null ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.SSH_KEY }}" >~/.ssh/id_ed25519
+          # The host key is pinned from a secret on purpose. `ssh-keyscan` would
+          # fetch it from the same network an attacker would be sitting on, which
+          # makes it a formality rather than a check -- it verifies nothing about
+          # who answered.
+          printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" >~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      # Only ops/ is copied. The application lives in an image, so nothing else
+      # needs to be on the host -- and the deploy user therefore needs no git
+      # credentials, no checkout, and no ability to run arbitrary code from the
+      # repository.
+      - name: Sync the deploy scripts
+        run: |
+          rsync -az --delete \
+            -e "ssh -o StrictHostKeyChecking=yes" \
+            ops/ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/srv/voting/ops/"
+
+      - name: Deploy
+        id: deploy
+        run: |
+          ssh -o StrictHostKeyChecking=yes \
+              "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+              "cd /srv/voting && WEB_IMAGE='${{ env.IMAGE }}' WEB_IMAGE_TAG='${{ needs.build.outputs.version }}' ./ops/deploy/deploy.sh '${{ needs.build.outputs.version }}'"
+
+      # A failed health gate leaves the previous release serving, so recovery is
+      # a rollback rather than an emergency. The job still fails -- an automatic
+      # recovery that reports success would hide how often deploys break.
+      - name: Roll back after a failed deploy
+        if: failure() && steps.deploy.outcome == 'failure'
+        run: |
+          ssh -o StrictHostKeyChecking=yes \
+              "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+              "cd /srv/voting && ./ops/deploy/rollback.sh"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| version | \`${{ needs.build.outputs.version }}\` |"
+            echo "| digest | \`${{ needs.build.outputs.digest }}\` |"
+            echo "| outcome | ${{ steps.deploy.outcome }} |"
+            echo ""
+            echo "No secret values appear above, and none are printed by the"
+            echo "deploy scripts: lib.sh reports the *names* of unset variables,"
+            echo "never their contents."
+          } >>"$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,79 @@
+name: Rollback
+
+# The recovery path, kept as operable as the release path.
+#
+# This workflow is only an entry point: the actual capability is
+# ops/deploy/rollback.sh, which runs on the host with no pipeline involved. That
+# matters, because the moment a rollback is needed is exactly the moment the
+# pipeline is most likely to be the thing that is broken.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to roll back to (empty uses the recorded previous tag)"
+        required: false
+        type: string
+      reason:
+        description: "Why this rollback is happening (recorded in the run summary)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    name: Roll back production
+    runs-on: ubuntu-latest
+    # Approval is required here too. A rollback moves production, and an
+    # accidental rollback to a much older release is a real outage -- the input
+    # being a free-text tag is exactly the kind of thing that gets mistyped.
+    environment: production
+    # Declared on the job, not on the workflow, to mirror release.yml exactly.
+    # The two must contend for the same lock, or a rollback can run while a
+    # deploy is mid-swap and whichever finishes second silently wins. Identical
+    # placement in both files is also what makes that property checkable by
+    # reading them side by side.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the SSH key
+        run: |
+          mkdir -p ~/.ssh
+          install -m 600 /dev/null ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.SSH_KEY }}" >~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.SSH_KNOWN_HOSTS }}" >~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Sync the deploy scripts
+        run: |
+          rsync -az --delete \
+            -e "ssh -o StrictHostKeyChecking=yes" \
+            ops/ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/srv/voting/ops/"
+
+      - name: Roll back
+        id: rollback
+        run: |
+          ssh -o StrictHostKeyChecking=yes \
+              "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+              "cd /srv/voting && ./ops/deploy/rollback.sh '${{ inputs.tag }}'"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Rollback"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| requested tag | \`${{ inputs.tag }}\` (empty means the recorded previous tag) |"
+            echo "| reason | ${{ inputs.reason }} |"
+            echo "| outcome | ${{ steps.rollback.outcome }} |"
+            echo ""
+            echo "The schema was not rolled back. Migrations are written to be"
+            echo "backward compatible, so the previous release runs against the"
+            echo "current schema -- see ops/runbook/migrations.md."
+          } >>"$GITHUB_STEP_SUMMARY"
