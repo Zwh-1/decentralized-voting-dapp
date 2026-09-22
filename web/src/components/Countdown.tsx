@@ -41,7 +41,8 @@ export function Countdown({ endsAt }: { endsAt: bigint }) {
 
   if (nowSeconds === null) {
     return (
-      <span className="text-xs text-slate-500">
+      <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs text-slate-500">
+        <ClockMark />
         截止 <span className="tabular-nums">{absolute}</span>
       </span>
     );
@@ -49,17 +50,57 @@ export function Countdown({ endsAt }: { endsAt: bigint }) {
 
   if (isPastDeadline({ endsAt, nowSeconds })) {
     return (
-      <span className="text-xs text-slate-500">
+      <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs text-slate-600">
+        <ClockMark />
         已于 <span className="tabular-nums">{absolute}</span> 截止（已关闭）
       </span>
     );
   }
 
+  /*
+    Urgency, shown only in the last day.
+    A deadline three weeks away and one nine minutes away are not the same
+    situation, and a reader deciding whether to vote now is asking exactly which
+    one this is. The threshold is one day rather than a raw "soon" because a day
+    is a unit the reader already reasons in — the countdown itself switches to
+    hours below that, so the colour and the text change together.
+  */
+  const soon = endsAt - nowSeconds < DAY;
+
   return (
-    <span className="text-xs text-slate-500">
-      还剩 <span className="tabular-nums">{remaining(endsAt - nowSeconds)}</span>
-      <span className="text-slate-400">（截止 {absolute}）</span>
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs ${
+        soon ? "bg-amber-50 text-amber-800" : "bg-slate-50 text-slate-500"
+      }`}
+    >
+      <ClockMark />
+      还剩 <span className="tabular-nums font-medium">{remaining(endsAt - nowSeconds)}</span>
+      <span className={soon ? "text-amber-700" : "text-slate-400"}>（截止 {absolute}）</span>
     </span>
+  );
+}
+
+/**
+ * A small clock, drawn inline.
+ *
+ * `aria-hidden` for the same reason the shield is: the text beside it already
+ * says everything it depicts, so announcing it would only add noise.
+ */
+function ClockMark() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-3.5 w-3.5 shrink-0 opacity-70"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
   );
 }
 

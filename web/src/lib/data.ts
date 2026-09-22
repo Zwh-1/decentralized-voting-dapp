@@ -45,6 +45,7 @@ import { describeFailure } from "./failure";
 import { lagBlocks } from "./indexer/plan";
 import { readCursor, startSyncLoop, syncOnce, type Logger, type SyncOutcome } from "./indexer/sync";
 import { checkConsistency, readIndexedTally } from "./report";
+import { orderActivity, withoutChangeEcho, type ActivityEntry } from "./poll-report";
 import type {
   HealthResponse,
   PollSummary,
@@ -652,6 +653,137 @@ export async function getVotedPolls(voter: `0x${string}`): Promise<VotedPollsRes
 
     return null;
   }
+}
+
+// ===========================================================================
+// The poll-wide activity feed
+// ===========================================================================
+
+/**
+ * Everything that ever happened to one poll, newest first.
+ *
+ * Returns `null` when there is no index, for the same reason `getVotedPolls`
+ * does: this is the read the chain cannot serve. There is no contract function
+ * that returns "the events of this poll" — a log query would need an archive
+ * node and a range, and the result would be unbounded. So this is genuinely
+ * index-only, and `null` means "not available here" rather than "nothing
+ * happened". The UI says exactly that instead of rendering an empty timeline,
+ * which would read as "nobody has done anything".
+ *
+ * The four sources are UNION ALL-ed rather than joined, because they are four
+ * unrelated shapes that share only "this poll, and a block". A join would need a
+ * common key they do not have.
+ *
+ * `option_id = 0` is the withdrawal sentinel (ids are 1-indexed on chain), and it
+ * is mapped back to `null` here so the caller never has to know that convention —
+ * a UI that rendered "option 0" would be showing a row that does not exist.
+ */
+export async function getPollActivity(address: `0x${string}`): Promise<ActivityEntry[] | null> {
+  const state = getServerState();
+  await ready(state);
+
+  const pool = state.pool;
+
+  if (pool === null) {
+    return null;
+  }
+
+  try {
+    const [rows] = await pool.query<
+      ({
+        kind: ActivityEntry["kind"];
+        actor: string | null;
+        option_id: number | null;
+        allowed: number | null;
+        from_phase: number | null;
+        to_phase: number | null;
+        amount_wei: string | null;
+        block_number: string;
+        tx_hash: string;
+      } & import("mysql2/promise").RowDataPacket)[]
+    >(
+      `SELECT 'cast' AS kind, voter AS actor, option_id, NULL AS allowed,
+              NULL AS from_phase, NULL AS to_phase, NULL AS amount_wei,
+              block_number, tx_hash
+         FROM votes WHERE poll_address = ? AND event_type = 'cast'
+        UNION ALL
+       SELECT 'changed', voter, option_id, NULL, NULL, NULL, NULL, block_number, tx_hash
+         FROM votes WHERE poll_address = ? AND event_type = 'changed'
+        UNION ALL
+       SELECT 'withdrawn', voter, NULL, NULL, NULL, NULL, NULL, block_number, tx_hash
+         FROM votes WHERE poll_address = ? AND event_type = 'withdrawn'
+        UNION ALL
+       SELECT 'refunded', voter, NULL, NULL, NULL, NULL, amount_wei, block_number, tx_hash
+         FROM refunds WHERE poll_address = ?
+        UNION ALL
+       SELECT 'whitelist', voter, NULL, allowed, NULL, NULL, NULL, block_number, tx_hash
+         FROM whitelist_events WHERE poll_address = ?
+        UNION ALL
+       SELECT 'phase', NULL, NULL, NULL, from_phase, to_phase, NULL, block_number, tx_hash
+         FROM phase_events WHERE poll_address = ?`,
+      [address, address, address, address, address, address],
+    );
+
+    recordIndexSuccess(state);
+
+    /*
+      The `VoteCast` that `changeVote` emits beside `VoteChanged` is dropped here,
+      by the same rule `getVoter` applies to a voter's own history. The two views
+      read one event stream, so a reader comparing them must not find the feed
+      claiming an extra action that never happened.
+    */
+    return orderActivity(
+      withoutChangeEcho(
+        rows.map((row) => ({
+          kind: row.kind,
+          blockNumber: row.block_number,
+          txHash: row.tx_hash,
+          actor: row.actor ?? undefined,
+          optionId: row.option_id === null || row.option_id === 0 ? null : Number(row.option_id),
+          detail: activityDetail(row),
+        })),
+      ),
+    );
+  } catch (error) {
+    recordIndexFailure(state, error);
+
+    return null;
+  }
+}
+
+/**
+ * The extra column a row shows, per kind.
+ *
+ * Built here rather than in the component so the "0 means withdrawn" and
+ * "which phase did it move to" rules live beside the query that produced them,
+ * instead of being re-derived from raw columns in the view layer.
+ */
+function activityDetail(row: {
+  kind: ActivityEntry["kind"];
+  allowed: number | null;
+  from_phase: number | null;
+  to_phase: number | null;
+  amount_wei: string | null;
+}): string | undefined {
+  switch (row.kind) {
+    case "whitelist":
+      return row.allowed === 1 ? "加入白名单" : "移出白名单";
+    case "phase":
+      return `阶段 ${row.from_phase} → ${row.to_phase}`;
+    case "refunded":
+      return row.amount_wei === null ? undefined : `退回 ${formatWei(row.amount_wei)} ETH`;
+    default:
+      return undefined;
+  }
+}
+
+/** Wei, as a decimal string, shown as ETH without losing precision. */
+function formatWei(wei: string): string {
+  const padded = wei.padStart(19, "0");
+  const whole = padded.slice(0, -18);
+  const fraction = padded.slice(-18).replace(/0+$/, "");
+
+  return fraction === "" ? whole : `${whole}.${fraction}`;
 }
 
 // ===========================================================================

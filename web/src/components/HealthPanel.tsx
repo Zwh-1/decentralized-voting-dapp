@@ -37,16 +37,21 @@ export function HealthPanel() {
   const rows = data === undefined ? [] : healthRows(data);
 
   return (
-    <section className="mt-8 rounded-lg border border-slate-200 bg-white">
+    <section className="mt-10 rounded-xl border border-slate-200 bg-white shadow-sm">
       <button
         type="button"
         onClick={() => setOpen((previous) => !previous)}
         aria-expanded={open}
         data-testid="health-toggle"
-        className="flex w-full items-center justify-between px-4 py-3 text-left text-sm text-slate-600 transition hover:text-slate-900"
+        className="flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left text-sm text-slate-600 transition hover:bg-slate-50 hover:text-slate-900"
       >
-        <span>运行状态（索引高度 / 落后区块 / 错误）</span>
-        <span className="text-xs text-slate-400">{open ? "收起" : "展开"}</span>
+        <span className="flex items-center gap-2">
+          <GaugeMark />
+          运行状态（索引高度 / 落后区块 / 错误）
+        </span>
+        <span className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-500">
+          {open ? "收起" : "展开"}
+        </span>
       </button>
 
       {open ? (
@@ -97,5 +102,25 @@ export function HealthPanel() {
         </div>
       ) : null}
     </section>
+  );
+}
+
+/** A gauge, drawn inline. Decorative; the label beside it says what this is. */
+function GaugeMark() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-4 w-4 shrink-0 text-slate-400"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
+      <path d="m13.4 12.6 4.1-4.1" />
+      <path d="M3 20a9 9 0 1 1 18 0" />
+    </svg>
   );
 }

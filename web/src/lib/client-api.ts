@@ -9,6 +9,7 @@ import type {
   TallyResponse,
   VoterResponse,
 } from "./types";
+import type { ActivityEntry } from "./poll-report";
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, { signal });
@@ -83,6 +84,41 @@ export async function fetchResults(
 
 export function fetchHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return getJson<HealthResponse>("/api/health", signal);
+}
+
+/** One poll's event history. `entries` is every event the index holds. */
+export interface ActivityResponse {
+  address: string;
+  source: "index";
+  entries: ActivityEntry[];
+}
+
+/**
+ * A poll's history, with "no index" distinguished from "no events".
+ *
+ * The route answers 404 when there is no usable index. That is different from an
+ * empty feed, and the caller has to be able to tell them apart — a timeline that
+ * renders nothing because the index is missing would tell a reader that nothing
+ * has ever happened in a poll that may have hundreds of events. So the 404 is
+ * turned into `null` here, meaning "unavailable", while an empty array means
+ * "there genuinely are no events".
+ */
+export async function fetchActivity(
+  address: string,
+  signal?: AbortSignal,
+): Promise<ActivityResponse | null> {
+  const path = `/api/polls/${address}/activity`;
+  const response = await fetch(path, { signal });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(`${path} responded ${response.status}`);
+  }
+
+  return (await response.json()) as ActivityResponse;
 }
 
 export function fetchVoter(

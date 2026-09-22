@@ -13,6 +13,7 @@ import {
 } from "wagmi";
 
 import { OptionRow } from "@/components/OptionRow";
+import { Badge, Stat } from "@/components/ui";
 import { useMounted } from "@/hooks/useMounted";
 import { describeWriteFailure, phaseText, readStatus, type ReadState } from "@/lib/ballot-labels";
 import {
@@ -23,6 +24,7 @@ import {
   withdrawReason,
   type BallotInputs,
 } from "@/lib/ballot-reasons";
+import { accentClass, badgeClass, phaseTone } from "@/lib/presentation";
 import {
   chainName,
   isPastDeadline,
@@ -280,40 +282,62 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
   // need an address, and they say 未连接 on their own.
   const loading = !mounted || reads.isPending;
 
+  // Which of the four chain states this poll is in, decided in one place so the
+  // header badge and the list card cannot disagree. `phase` is `undefined` until
+  // the read lands, which `phaseTone` already renders as 读取中.
+  const phaseInfo = phaseTone(phaseState === "ready" ? phase : undefined, deadlinePassed);
+
   return (
-    <div className="mt-6 space-y-6">
+    <div className="space-y-6">
       {initialError !== null && (
-        <section className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-          服务端读取这个投票时失败了（下面能读到的数据仍会显示）：
-          {initialError}
+        <section className="rounded-xl border border-rose-200 bg-rose-50 p-5">
+          <h2 className="text-sm font-medium text-rose-800">服务端读取这个投票时失败了</h2>
+          <p className="mt-1.5 text-xs leading-relaxed text-rose-700">
+            下面能读到的数据仍会显示：{initialError}
+          </p>
         </section>
       )}
 
       {/* ---- the poll's own facts ---- */}
-      <section className="rounded-xl border border-slate-200 bg-white p-5">
-        <h1 className="text-xl font-semibold leading-snug tracking-tight text-slate-900">
-          {initial?.question ?? (readFailed ? "读取问题失败" : "正在读取投票…")}
-        </h1>
+      <section
+        className={`rounded-xl border border-slate-200 bg-white p-5 shadow-sm ${accentClass(phaseInfo.tone)}`}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h1 className="min-w-0 text-xl font-semibold leading-snug tracking-tight text-slate-900 sm:text-2xl">
+            {initial?.question ?? (readFailed ? "读取问题失败" : "正在读取投票…")}
+          </h1>
+          <Badge className={badgeClass(phaseInfo.tone)}>
+            <span data-phase-label>{phaseInfo.label}</span>
+          </Badge>
+        </div>
 
-        <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-4">
-          <Fact label="阶段">{phaseText({ contractKnown, status: phaseState, phase })}</Fact>
-          <Fact label="选项数">
-            {initial === null ? (readFailed ? "读取失败" : "读取中…") : String(initial.optionCount)}
-          </Fact>
-          <Fact label="票数合计">{results === undefined ? "读取中…" : String(results[1])}</Fact>
-          <Fact label="押金">
-            {myStake === undefined ? "读取中…" : `${formatEth(myStake)} ETH`}
-          </Fact>
+        <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <Stat label="阶段" value={phaseText({ contractKnown, status: phaseState, phase })} />
+          <Stat
+            label="选项数"
+            value={
+              initial === null ? (readFailed ? "读取失败" : "读取中…") : String(initial.optionCount)
+            }
+          />
+          <Stat label="票数合计" value={results === undefined ? "读取中…" : String(results[1])} />
+          <Stat
+            label="押金"
+            value={myStake === undefined ? "读取中…" : `${formatEth(myStake)} ETH`}
+          />
         </dl>
 
-        <p className="mt-3 text-xs text-slate-500">
-          发起人{" "}
-          <span className="font-mono" title={creator ?? undefined}>
-            {creator === undefined ? (initial?.creator ?? "读取中…") : shortenAddress(creator)}
+        <p className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400">
+          <span>
+            发起人{" "}
+            <span className="font-mono text-slate-500" title={creator ?? undefined}>
+              {creator === undefined ? (initial?.creator ?? "读取中…") : shortenAddress(creator)}
+            </span>
           </span>
-          <span className="mx-2 text-slate-300">·</span>
-          <span>合约 {shortenAddress(address)}</span>
-          <span className="mx-2 text-slate-300">·</span>
+          <Dot />
+          <span>
+            合约 <span className="font-mono text-slate-500">{shortenAddress(address)}</span>
+          </span>
+          <Dot />
           <span>
             {endsAtState !== "ready"
               ? endsAtState === "failed"
@@ -363,10 +387,10 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
       </section>
 
       {/* ---- my state ---- */}
-      <section className="rounded-xl border border-slate-200 bg-white p-5">
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">我的状态</h2>
 
-        <dl className="mt-2 space-y-1.5 text-sm">
+        <dl className="mt-3 divide-y divide-slate-100 text-sm">
           <Row label="可投票">
             {!mounted
               ? "—"
@@ -460,12 +484,12 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
           </Row>
         </dl>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+        <div className="mt-5 flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => send({ kind: "withdraw" })}
             disabled={withdrawReason(reasons) !== undefined}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+            className="rounded-lg border border-slate-300 px-3.5 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300"
           >
             {writing?.kind === "withdraw" && txBusy ? "提交中…" : "撤票（退回押金）"}
           </button>
@@ -479,7 +503,7 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
             type="button"
             onClick={() => send({ kind: "refund" })}
             disabled={refundReason(reasons) !== undefined}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+            className="rounded-lg border border-slate-300 px-3.5 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300"
           >
             {writing?.kind === "refund" && txBusy ? "提交中…" : "取回押金"}
           </button>
@@ -561,20 +585,26 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
   );
 }
 
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg bg-slate-50 px-3 py-2">
-      <dt className="text-xs text-slate-400">{label}</dt>
-      <dd className="mt-0.5 font-medium text-slate-800">{children}</dd>
+    <div className="flex items-baseline justify-between gap-3 py-0.5">
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="text-right font-medium text-slate-800">{children}</dd>
     </div>
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * The separator between the header's inline facts.
+ *
+ * `aria-hidden` because it carries no meaning — a screen reader announcing a
+ * bullet between "发起人" and "合约" is noise, and the surrounding text already
+ * reads as a list of facts.
+ */
+function Dot() {
   return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-slate-400">{label}</dt>
-      <dd className="text-right font-medium text-slate-800">{children}</dd>
-    </div>
+    <span aria-hidden="true" className="text-slate-300">
+      ·
+    </span>
   );
 }

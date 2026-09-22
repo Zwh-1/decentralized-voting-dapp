@@ -208,6 +208,34 @@ interface PageState {
   healthRowsFound: boolean;
   /** How many rows it rendered, so "expanded but empty" cannot pass. */
   healthRowCount: number;
+  /** The 活动记录 panel's toggle is on the page. */
+  activityToggleFound: boolean;
+  /** The panel is expanded and rendering its list container. */
+  activityPanelFound: boolean;
+  /** How many event rows it rendered. */
+  activityRowCount: number;
+  /** The skeleton is showing: the query has not settled. */
+  activityLoadingFound: boolean;
+  /** The query settled and the poll genuinely has no events. */
+  activityEmptyFound: boolean;
+  /** The query settled and this deployment has no index. */
+  activityUnavailableFound: boolean;
+  /** The query settled with a failure. */
+  activityErrorFound: boolean;
+  /** The total the panel states, to check the list against. */
+  activityStated: number | null;
+  /** The CSV download link's href, or null when the control is missing. */
+  exportCsvHref: string | null;
+  /** The JSON download link's href. */
+  exportJsonHref: string | null;
+  /** The rules verdict the panel reached: unchanged / changed / unknown / pending. */
+  rulesVerdict: string | null;
+  /** The creation-time fingerprint as displayed. */
+  rulesCommitted: string | null;
+  /** The live recomputation as displayed. */
+  rulesCurrent: string | null;
+  /** The stake-risk panel is rendered. */
+  stakeRiskFound: boolean;
 }
 
 /** The provider injected before any page script, so wagmi sees a wallet. */
@@ -404,7 +432,10 @@ const READ_PAGE = `(() => {
     pending: text.includes('读取中…'),
     connected: buttons.some((b) => b.text === '断开'),
     hasProvider: typeof window.ethereum !== 'undefined',
-    connectError: document.querySelector('.text-rose-600')?.textContent?.trim() ?? null,
+    // Read by its own hook rather than by a colour class. The previous selector
+    // matched any red text, so it silently picked up the whitelist row showing
+    // "否" and reported that as the wallet connect error.
+    connectError: document.querySelector('[data-connect-error]')?.textContent?.trim() ?? null,
     writeError: writeErrorNode ? writeErrorNode.textContent.trim() : null,
     writeErrorKind: writeErrorNode ? writeErrorNode.getAttribute('data-write-error') : null,
     walletMethods: [...new Set(window.__walletCalls ?? [])],
@@ -415,6 +446,41 @@ const READ_PAGE = `(() => {
     healthToggleFound: document.querySelector('[data-testid="health-toggle"]') !== null,
     healthRowsFound: document.querySelector('[data-testid="health-rows"]') !== null,
     healthRowCount: document.querySelectorAll('[data-testid="health-rows"] > div').length,
+    // The 活动记录 panel and the export controls. Both are on the poll page and
+    // both are collapsed or inert until used, so reading the page as loaded would
+    // pass even if they rendered nothing — the same trap the health panel note
+    // above describes.
+    activityToggleFound: document.querySelector('[data-testid="activity-toggle"]') !== null,
+    activityPanelFound: document.querySelector('[data-testid="activity-panel"]') !== null,
+    activityRowCount: document.querySelectorAll('[data-activity-kind]').length,
+    // The settled states. These exist because a row count of zero cannot
+    // distinguish "still fetching" from "answered, with nothing to show", and
+    // the drill has to tell them apart to avoid reading mid-load.
+    activityLoadingFound: document.querySelector('[data-testid="activity-loading"]') !== null,
+    activityEmptyFound: document.querySelector('[data-testid="activity-empty"]') !== null,
+    activityUnavailableFound:
+      document.querySelector('[data-testid="activity-unavailable"]') !== null,
+    activityErrorFound: document.querySelector('[data-testid="activity-error"]') !== null,
+    // The panel's own reported total, which is what the row count is checked
+    // against: a list that silently truncates would otherwise pass a "> 0" test.
+    activityStated: (() => {
+      const panel = document.querySelector('[data-testid="activity-panel"]');
+      if (!panel) return null;
+      const m = (panel.textContent || '').match(/共 (\\d+) 条记录/);
+      return m ? Number(m[1]) : null;
+    })(),
+    exportCsvHref: document.querySelector('[data-export="csv"]')?.getAttribute('href') ?? null,
+    exportJsonHref: document.querySelector('[data-export="json"]')?.getAttribute('href') ?? null,
+    // The 规则指纹 panel and the verdict it reached. Read as the attribute
+    // rather than the sentence, so a wrong verdict cannot pass by being worded
+    // correctly.
+    rulesVerdict:
+      document.querySelector('[data-rules-verdict]')?.getAttribute('data-rules-verdict') ?? null,
+    rulesCommitted:
+      document.querySelector('[data-fingerprint="创建时的承诺"]')?.textContent?.trim() ?? null,
+    rulesCurrent:
+      document.querySelector('[data-fingerprint="当前状态重算"]')?.textContent?.trim() ?? null,
+    stakeRiskFound: document.querySelector('[data-testid="stake-risk"]') !== null,
   };
 })()`;
 
@@ -864,6 +930,204 @@ async function main(): Promise<number> {
       "the panel rendered every health row rather than an empty container",
       (health?.healthRowCount ?? 0) >= 10,
       `count=${health?.healthRowCount}`,
+    );
+
+    // ---------------------------------------------------------------------
+    // 活动记录 panel and 导出结果 controls
+    //
+    // These are the "check the result without trusting the page" features, and
+    // they are easy to get wrong in ways that compile and look fine: a panel
+    // that renders an empty list because the index 404 was folded into "no
+    // events", or an export link pointing at a route that does not exist.
+    //
+    // So the panel is opened by a real click and its rendered row count is
+    // compared against the total it states — a truncated list would otherwise
+    // pass a "more than zero" check.
+    // ---------------------------------------------------------------------
+    console.log("\nactivity panel and export");
+    check("the 活动记录 panel is on the page", before.activityToggleFound);
+    check(
+      "the 活动记录 panel is collapsed before it is opened",
+      !before.activityPanelFound,
+      `panelFound=${before.activityPanelFound}`,
+    );
+
+    const openedActivity = await browser.evaluate<string>(
+      sessionId,
+      `(() => {
+        const b = document.querySelector('[data-testid="activity-toggle"]');
+        if (!b) return 'no-toggle';
+        b.click();
+        return 'clicked';
+      })()`,
+    );
+    check("the 活动记录 toggle could be clicked", openedActivity === "clicked", openedActivity);
+
+    // The list arrives from a fetch that starts only once the panel is open.
+    //
+    // The break condition waits for the query to SETTLE, which is not the same as
+    // waiting for rows: while the request is in flight the panel shows a skeleton,
+    // so `rows === 0`. An earlier version broke out as soon as the container
+    // existed and `stated` was null, which is exactly the in-flight state — it
+    // therefore read the panel mid-load and reported "renders nothing" for a feed
+    // that was about to render 409 rows.
+    let activity: PageState | undefined;
+    const activityDeadline = Date.now() + 30_000;
+    while (Date.now() < activityDeadline) {
+      activity = await browser.evaluate<PageState>(sessionId, READ_PAGE);
+      const settled =
+        activity.activityRowCount > 0 ||
+        activity.activityEmptyFound ||
+        activity.activityUnavailableFound ||
+        activity.activityErrorFound;
+      if (activity.activityPanelFound && settled) {
+        break;
+      }
+      await sleep(500);
+    }
+
+    check("opening the panel renders its container", activity?.activityPanelFound === true);
+
+    /*
+      The local chain has an index and both seeded polls have history, so the
+      feed must be non-empty here. An empty render would mean the 404-for-no-index
+      path and the empty-feed path had been collapsed into one — the exact
+      confusion this panel's three states exist to prevent.
+    */
+    check(
+      "the feed lists the poll's events rather than rendering nothing",
+      (activity?.activityRowCount ?? 0) > 0,
+      `rows=${activity?.activityRowCount} stated=${activity?.activityStated}`,
+    );
+    check(
+      "the rendered row count matches the total the panel states",
+      activity?.activityStated !== null &&
+        activity?.activityStated !== undefined &&
+        activity.activityRowCount === activity.activityStated,
+      `rows=${activity?.activityRowCount} stated=${activity?.activityStated}`,
+    );
+
+    // The export links must point at this poll's own route. A link copied from
+    // another page would still render and still be titled 下载 CSV.
+    check(
+      "the CSV export links to this poll's own route",
+      activity?.exportCsvHref === `/api/polls/${pollAddress}/export?format=csv`,
+      `href=${activity?.exportCsvHref}`,
+    );
+    check(
+      "the JSON export links to this poll's own route",
+      activity?.exportJsonHref === `/api/polls/${pollAddress}/export?format=json`,
+      `href=${activity?.exportJsonHref}`,
+    );
+
+    /*
+      And the export must actually answer. Fetching it in the page proves the
+      route resolves end to end — the panel could render a correct href to a
+      route that 503s, which no amount of DOM inspection would catch.
+
+      The whole body is returned rather than a prefix: the tally header sits
+      below the five metadata rows, so a short slice reports "no header" for a
+      perfectly good file. Only the assertions decide what matters in it.
+    */
+    const exportProbe = await browser.evaluate<string>(
+      sessionId,
+      `fetch('/api/polls/${pollAddress}/export?format=csv')
+         .then(async (r) => r.status + '|' + (await r.text()))
+         .catch((e) => 'ERR|' + e.message)`,
+    );
+    check(
+      "the CSV export route answers with a CSV document",
+      exportProbe.startsWith("200|"),
+      exportProbe.slice(0, 80),
+    );
+    check(
+      "the exported CSV carries the tally header",
+      exportProbe.includes("选项 ID"),
+      `length=${exportProbe.length}`,
+    );
+    /*
+      Line count is compared against the option rows the summary reports, not a
+      hardcoded figure: this drill runs against whichever poll it was pointed at,
+      and the two polls have different option counts. A CRLF count of at least
+      7 proves the document carries the metadata block, the blank line, the
+      header and at least one option row — i.e. it is a table, not a header.
+    */
+    const crlfCount = (exportProbe.match(/\r\n/g) ?? []).length;
+    check(
+      "the exported CSV is a real table rather than just a header",
+      crlfCount >= 7,
+      `crlf=${crlfCount} length=${exportProbe.length}`,
+    );
+
+    // ---------------------------------------------------------------------
+    // 规则指纹 panel
+    //
+    // The point of this panel is that a reader need not trust the page, so the
+    // drill applies the same standard: it reads the two fingerprints from the
+    // chain ITSELF and computes the verdict independently, then requires the page
+    // to have reached the same one.
+    //
+    // Checking the page's sentence against the page's own attribute would prove
+    // nothing — a component that rendered "unchanged" for everything would pass.
+    // ---------------------------------------------------------------------
+    console.log("\nrules fingerprint");
+    const chainCommitted = await client.readContract({
+      address: pollAddress,
+      abi: pollAbi,
+      functionName: "rulesHash",
+    });
+    const chainCurrent = await client.readContract({
+      address: pollAddress,
+      abi: pollAbi,
+      functionName: "currentRulesHash",
+    });
+    const chainVerdict = chainCommitted === chainCurrent ? "unchanged" : "changed";
+
+    console.log(`chain            committed=${chainCommitted}`);
+    console.log(`chain            current  =${chainCurrent}`);
+    console.log(`chain            verdict  =${chainVerdict}`);
+
+    // The panel reads from the browser's chain, and the verdict only appears
+    // after mount plus two batched reads, so this waits for it to settle.
+    let rules: PageState | undefined;
+    const rulesDeadline = Date.now() + 30_000;
+    while (Date.now() < rulesDeadline) {
+      rules = await browser.evaluate<PageState>(sessionId, READ_PAGE);
+      if (rules.rulesVerdict !== null && rules.rulesVerdict !== "pending") break;
+      await sleep(500);
+    }
+
+    check(
+      "the rules panel reached a definite verdict",
+      rules?.rulesVerdict === "unchanged" || rules?.rulesVerdict === "changed",
+      `verdict=${rules?.rulesVerdict}`,
+    );
+    check(
+      "the page's verdict matches the one computed from the chain",
+      rules?.rulesVerdict === chainVerdict,
+      `page=${rules?.rulesVerdict} chain=${chainVerdict}`,
+    );
+    check(
+      "the page shows the creation-time commitment exactly as the chain reports it",
+      rules?.rulesCommitted?.toLowerCase() === chainCommitted.toLowerCase(),
+      `page=${rules?.rulesCommitted} chain=${chainCommitted}`,
+    );
+    check(
+      "the page shows the recomputed fingerprint exactly as the chain reports it",
+      rules?.rulesCurrent?.toLowerCase() === chainCurrent.toLowerCase(),
+      `page=${rules?.rulesCurrent} chain=${chainCurrent}`,
+    );
+
+    /*
+      The stake-risk panel is conditional — it renders nothing when nothing is
+      staked, because a warning about a risk of zero is noise. This poll is seeded
+      with stakes, so it must be present; if it ever silently stops rendering, the
+      only place a voter could learn their deposit has a deadline would be gone.
+    */
+    check(
+      "the stake-risk panel is shown on a poll that holds stake",
+      rules?.stakeRiskFound === true,
+      `found=${rules?.stakeRiskFound}`,
     );
 
     if (REJECT) {

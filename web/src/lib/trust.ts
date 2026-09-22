@@ -1,0 +1,167 @@
+// SPDX-License-Identifier: MIT
+/**
+ * Whether a poll's rules still match the promise made when it was created.
+ *
+ * ---------------------------------------------------------------------------
+ * What question this answers
+ * ---------------------------------------------------------------------------
+ *
+ * A reader looking at a poll is being asked to trust several things they cannot
+ * see: that the question is the one it was created with, that the options are the
+ * ones it was created with, that whoever may vote is who was always meant to, and
+ * that the deadline has not moved. Several of those are immutable on chain, but
+ * the OPTIONS and the WHITELIST can legitimately be edited by the creator while
+ * the poll is in `Phase.Setup` — so "the rules you are reading are the rules this
+ * poll started with" is not something the contract enforces.
+ *
+ * What the contract does provide is a fingerprint of the rules as created
+ * (`rulesHash`, written once in `initialize`) and a recomputation of that
+ * fingerprint from live state (`currentRulesHash()`). Comparing them answers the
+ * question exactly.
+ *
+ * ---------------------------------------------------------------------------
+ * The three states, and why "unknown" is one of them
+ * ---------------------------------------------------------------------------
+ *
+ * `unchanged` and `changed` are the answers. `unknown` is not a failure to be
+ * hidden — it is the honest state when the recomputation could not be performed,
+ * and it must never be rendered as `unchanged`. Claiming a poll's rules are
+ * intact because a read failed is precisely the false assurance this whole
+ * feature exists to remove.
+ *
+ * A `changed` result is NOT an accusation. Editing options and the whitelist
+ * before opening is the intended workflow, and a poll that was reshaped during
+ * Setup is completely legitimate. What the reader is owed is the ability to TELL,
+ * not a verdict — so the wording states the fact and explains what it means,
+ * rather than implying wrongdoing.
+ */
+
+/** How a poll's current rules compare to its creation-time commitment. */
+export type RulesVerdict = "unchanged" | "changed" | "unknown";
+
+export interface RulesCheck {
+  verdict: RulesVerdict;
+  /** The commitment written at creation, or null when unread. */
+  committed: string | null;
+  /** The fingerprint recomputed from live state, or null when unread. */
+  current: string | null;
+}
+
+/**
+ * Compare the two fingerprints.
+ *
+ * Comparison is case-insensitive because the two values arrive through different
+ * paths — one from a contract read, one from a hash — and a difference in hex
+ * casing is not a difference in rules. Treating `0xAB` and `0xab` as a mismatch
+ * would make every poll report `changed` on some providers and `unchanged` on
+ * others, which is worse than not checking at all.
+ *
+ * A `null` on either side yields `unknown`, never `unchanged`.
+ */
+export function rulesCheck(input: {
+  committed: string | null | undefined;
+  current: string | null | undefined;
+}): RulesCheck {
+  const committed = normalise(input.committed);
+  const current = normalise(input.current);
+
+  if (committed === null || current === null) {
+    return { verdict: "unknown", committed, current };
+  }
+
+  return { verdict: committed === current ? "unchanged" : "changed", committed, current };
+}
+
+/** A hex value as a comparable form, or null when it is not present. */
+function normalise(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+
+  // A zero hash means the poll was never initialized through `initialize`, or the
+  // read returned an empty value. Either way it is not a fingerprint to compare
+  // against — and `0x000…0 === 0x000…0` would otherwise report a confident
+  // "unchanged" for a poll whose commitment does not exist.
+  if (trimmed === "" || /^0x0*$/.test(trimmed)) {
+    return null;
+  }
+
+  return trimmed.toLowerCase();
+}
+
+/**
+ * What the reader is told, given a verdict.
+ *
+ * Kept here rather than in the component for the same reason as the rest of this
+ * module: the wording is the feature. A `changed` verdict rendered as a warning
+ * about foul play would be wrong — the edit may be entirely legitimate — and an
+ * `unknown` rendered as reassurance would be the exact false assurance the check
+ * exists to prevent. Both are text, and text is testable.
+ */
+export function rulesSummary(check: RulesCheck): {
+  title: string;
+  detail: string;
+  tone: "ok" | "warn" | "neutral";
+} {
+  switch (check.verdict) {
+    case "unchanged":
+      return {
+        title: "规则与创建时一致",
+        detail:
+          "把当前链上的问题、选项、截止时间、准入方式与白名单重新做了一次指纹计算，结果与创建时写入的承诺相同：这些内容自创建以来没有被改动过。任何人都可以独立重算并得到相同结果。",
+        tone: "ok",
+      };
+
+    case "changed":
+      return {
+        title: "规则在创建后有过改动",
+        detail:
+          "当前链上状态的指纹与创建时写入的承诺不同，说明问题、选项、截止时间、准入方式或白名单在创建之后被改过至少一次。这不一定有问题——发起人在投票开始前增删选项、维护白名单本来就是正常流程——但你应该知道这件事，而不是只能相信页面。改动只可能发生在投票开始之前，因为选项在开始后会被冻结。",
+        tone: "warn",
+      };
+
+    case "unknown":
+      return {
+        title: "无法比对规则指纹",
+        detail:
+          "没能同时读到创建时的承诺与当前状态，所以无法判断规则是否被改动过。这不代表规则没问题，也不代表有问题——只是这一次没有验证成功。可以重试，或直接在区块浏览器上调用 rulesHash() 与 currentRulesHash() 自行比对。",
+        tone: "neutral",
+      };
+  }
+}
+
+/**
+ * The time a voter has left before the creator may take their stake.
+ *
+ * `refund()` opens when the poll reaches `Phase.Ended`; `sweepUnclaimed()` opens
+ * `REFUND_GRACE_PERIOD` later. Between those two moments a voter can still get
+ * their stake back, and after the second they cannot — which is the single most
+ * consequential deadline in this project and was, before this, nowhere on screen.
+ *
+ * `null` when the poll is not yet in `Ended`: the grace period is measured from
+ * the moment of closing, so it has not started and cannot be counted down.
+ */
+export function sweepDeadline(input: {
+  phase: number | undefined;
+  votingEndedAt: bigint | null | undefined;
+  gracePeriodSeconds: bigint;
+}): { at: bigint; remaining: bigint } | null {
+  const ended = 2;
+
+  if (input.phase !== ended) {
+    return null;
+  }
+
+  const closedAt = input.votingEndedAt;
+
+  // A poll in `Ended` always has a close time on chain, so this is defensive
+  // rather than expected — but returning a deadline computed from 0 would show
+  // every voter that the grace period expired in 1970.
+  if (closedAt === null || closedAt === undefined || closedAt === 0n) {
+    return null;
+  }
+
+  return { at: closedAt + input.gracePeriodSeconds, remaining: input.gracePeriodSeconds };
+}

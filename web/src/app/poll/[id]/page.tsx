@@ -2,8 +2,11 @@
 import Link from "next/link";
 
 import { PageShell } from "@/components/PageShell";
+import { PollActivity } from "@/components/PollActivity";
 import { PollAdmin } from "@/components/PollAdmin";
 import { PollBallot } from "@/components/PollBallot";
+import { ResultExport } from "@/components/ResultExport";
+import { RulesCheck, StakeRisk } from "@/components/TrustPanel";
 import { getConfiguredTarget, getPoll } from "@/lib/data";
 import { describeFailure } from "@/lib/failure";
 import type { PollSummary } from "@/lib/types";
@@ -96,6 +99,27 @@ export default async function PollPage({ params }: { params: Promise<{ id: strin
         configuredTarget={configuredTarget}
         initialError={pollError}
       />
+
+      {/*
+        The two checks a reader can perform without trusting this deployment: did
+        the rules change since creation, and what happens to the stake. Both read
+        the chain directly from the browser, so neither depends on this server
+        being honest about the answer.
+      */}
+      <div className="mt-6 space-y-6">
+        <RulesCheck address={address} configuredTarget={configuredTarget} />
+        <StakeRisk address={address} configuredTarget={configuredTarget} />
+      </div>
+
+      {/*
+        Both of these are about checking the result rather than casting one, so
+        they sit below the ballot: a reader who came to vote should not have to
+        scroll past audit tooling to find the buttons.
+      */}
+      <div className="mt-6 space-y-6">
+        <ResultExport address={address} />
+        <PollActivity address={address} />
+      </div>
 
       {/*
         The creator-only panel, rendered after the ballot. It draws nothing unless

@@ -72,16 +72,30 @@ function Badge({
   children: ReactNode;
 }) {
   const tones = {
-    ok: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    warn: "bg-amber-50 text-amber-700 border-amber-200",
-    bad: "bg-rose-50 text-rose-700 border-rose-200",
-    neutral: "bg-slate-50 text-slate-600 border-slate-200",
+    ok: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+    warn: "bg-amber-50 text-amber-700 ring-amber-200",
+    bad: "bg-rose-50 text-rose-700 ring-rose-200",
+    neutral: "bg-slate-50 text-slate-600 ring-slate-200",
+  } as const;
+
+  const dots = {
+    ok: "bg-emerald-500",
+    warn: "bg-amber-500",
+    bad: "bg-rose-500",
+    neutral: "bg-slate-400",
   } as const;
 
   return (
     <span
-      className={`inline-block rounded-full border px-3 py-1 text-xs font-medium ${tones[tone]}`}
+      className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ring-1 ${tones[tone]}`}
     >
+      {/*
+        The dot repeats what the colour already says, for readers who cannot use
+        the colour — and it is the only part of this badge that survives being
+        read by someone with a red/green deficiency, since 一致 and 不一致 are the
+        same shape and differ only in hue.
+      */}
+      <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${dots[tone]}`} />
       {children}
     </span>
   );

@@ -2,7 +2,8 @@
 
 import { useAccount, useChainId, useConfig, useReadContract } from "wagmi";
 
-import { PollCard } from "@/components/PollCard";
+import { PollCard, PollCardSkeleton } from "@/components/PollCard";
+import { EmptyState } from "@/components/ui";
 import { useMounted } from "@/hooks/useMounted";
 import { chainName, factoryAbi, resolveChainTarget, type ChainTarget } from "@/lib/voting";
 import type { PollSummary } from "@/lib/types";
@@ -100,7 +101,7 @@ export function PollList({ initialPolls, initialAddresses, configuredTarget }: P
           : null;
 
   return (
-    <section className="mt-6">
+    <section className="mt-8">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-semibold text-slate-900">
           全部投票{mounted && chainAddresses !== null ? `（${chainAddresses.length}）` : ""}
@@ -114,17 +115,39 @@ export function PollList({ initialPolls, initialAddresses, configuredTarget }: P
         )}
       </div>
 
-      {notListing !== null && <p className="mt-4 text-sm text-slate-500">{notListing}</p>}
-
-      {notListing === null && addresses.length === 0 && (
-        <p className="mt-4 text-sm text-slate-500">
-          工厂还没有创建过任何投票。用上面的「发起新投票」表单建第一个。
-        </p>
+      {/*
+        Three distinct situations, three distinct surfaces. They were previously
+        all one line of grey text, which made "still loading", "the read failed"
+        and "there are genuinely no polls" look identical — and the first of
+        those is not a state a reader should ever be shown as a conclusion.
+      */}
+      {notListing !== null && !factory.isPending && (
+        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50/60 p-5">
+          <p className="text-sm font-medium text-rose-800">无法列出投票</p>
+          <p className="mt-1.5 text-xs leading-relaxed text-rose-700">{notListing}</p>
+        </div>
       )}
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {notListing === null &&
-          addresses.map((address) => (
+      {notListing !== null && factory.isPending && (
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <PollCardSkeleton />
+          <PollCardSkeleton />
+          <PollCardSkeleton />
+        </div>
+      )}
+
+      {notListing === null && addresses.length === 0 && (
+        <div className="mt-4">
+          <EmptyState
+            title="还没有任何投票"
+            description="工厂合约还没有创建过投票。用页面顶部的「发起新投票」建第一个——创建者可以在开始前调整选项与白名单。"
+          />
+        </div>
+      )}
+
+      {addresses.length > 0 && (
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {addresses.map((address) => (
             <PollCard
               key={address}
               address={address}
@@ -132,7 +155,8 @@ export function PollList({ initialPolls, initialAddresses, configuredTarget }: P
               chainId={factoryKnown ? subjectChainId : undefined}
             />
           ))}
-      </div>
+        </div>
+      )}
     </section>
   );
 }

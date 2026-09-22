@@ -1,8 +1,10 @@
 "use client";
 
 import { useCandidateMetadata } from "@/hooks/useCandidateMetadata";
+import { ShareBar } from "@/components/ui";
 import { isRetryableMetadata } from "@/lib/ipfs";
 import { isMetadataCid, optionMetadataLabel, optionName } from "@/lib/ballot-labels";
+import { sharePercent } from "@/lib/presentation";
 import { STAKE, formatEth } from "@/lib/voting";
 
 /**
@@ -36,7 +38,7 @@ export interface OptionRowProps {
 }
 
 function share(count: number, total: number): number {
-  return total === 0 ? 0 : Math.round((count / total) * 100);
+  return sharePercent(count, total);
 }
 
 export function OptionRow({
@@ -79,11 +81,8 @@ export function OptionRow({
           <span className="text-2xl font-semibold tabular-nums text-slate-900">{voteCount}</span>
           <span className="text-xs tabular-nums text-slate-500">{percent}%</span>
         </div>
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-          <div
-            className="h-full rounded-full bg-slate-900 transition-all"
-            style={{ width: `${percent}%` }}
-          />
+        <div className="mt-2">
+          <ShareBar percent={percent} tone={isMine ? "mine" : "live"} />
         </div>
       </div>
 

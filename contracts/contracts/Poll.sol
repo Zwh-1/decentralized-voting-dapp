@@ -63,6 +63,135 @@ contract Poll is Ownable, ReentrancyGuard {
     uint256 public constant MIN_OPTIONS = 2;
 
     // ---------------------------------------------------------------------
+    // The rules commitment
+    // ---------------------------------------------------------------------
+
+    /// @notice A hash of the rules this poll was created with.
+    ///
+    /// @dev WHAT THIS IS FOR. Everything a reader needs in order to judge a poll
+    ///      — the question, the options, the deadline, who may vote, and who
+    ///      administers it — is decided once, in `initialize`, and several of
+    ///      those things are then immutable by construction while others (the
+    ///      OPTIONS and the WHITELIST) can still be changed by the creator while
+    ///      the poll is in Setup. A reader arriving later has no way to tell
+    ///      whether the rules they are looking at are the rules the poll was
+    ///      created with, or whether the creator quietly swapped an option before
+    ///      opening it.
+    ///
+    ///      This value is written once and never changes. Anyone can recompute the
+    ///      hash from the current on-chain state and compare it against the
+    ///      ORIGINAL — which is recoverable from this poll's own creation event —
+    ///      and thereby distinguish two situations that otherwise look identical:
+    ///
+    ///        * the rules were edited after creation, so the hash still in the
+    ///          event no longer matches the current state; or
+    ///        * the rules are exactly as created, so the hash matches.
+    ///
+    ///      The point is NOT that editing is forbidden. A creator is *supposed*
+    ///      to be able to add options and build a whitelist before opening — that
+    ///      is what `Phase.Setup` is for. The point is that the edit is VISIBLE:
+    ///      a reader can tell a poll that was opened as created from one that was
+    ///      reshaped first, instead of having to take the page's word for it.
+    ///
+    ///      It is a hash rather than the values themselves because the values are
+    ///      already readable on chain; duplicating them would be redundant storage
+    ///      that could itself drift. The hash only has to be a fingerprint.
+    bytes32 public rulesHash;
+
+    /// @notice The rules commitment, recomputed from CURRENT state.
+    ///
+    /// @dev Deliberately a view rather than a stored value. If this were written
+    ///      at creation and never refreshed, comparing it to itself would prove
+    ///      nothing. Computing it live is what makes the comparison meaningful:
+    ///      `rulesHash` is the promise, this is the reality, and a third party
+    ///      checks the two agree.
+    ///
+    ///      Everything hashed here is either immutable or part of what a reader
+    ///      is being asked to trust, so the comparison answers exactly the
+    ///      question "has anything I was shown changed since creation".
+    ///
+    ///      The option labels and the whitelist ARE included, and that is the
+    ///      substance of the guarantee: those are the two things a creator can
+    ///      still change in Setup, so they are precisely what a reader needs a way
+    ///      to detect edits to.
+    function currentRulesHash() external view returns (bytes32) {
+        return _rulesHash();
+    }
+
+    /// @dev `abi.encode` of the rule-bearing state, hashed.
+    ///
+    ///      `abi.encode` rather than `abi.encodePacked`: packed encoding makes
+    ///      adjacent dynamic values ambiguous — ("ab", "c") and ("a", "bc")
+    ///      produce identical bytes — so two genuinely different rule sets could
+    ///      share a hash and the guarantee would be worthless.
+    function _rulesHash() private view returns (bytes32) {
+        bytes32[] memory optionHashes = new bytes32[](optionCount);
+        for (uint256 i = 0; i < optionCount; ++i) {
+            uint256 id = i + 1;
+            optionHashes[i] = keccak256(abi.encode(id, _options[id].labelCID));
+        }
+
+        return
+            keccak256(
+                abi.encode(
+                    creator,
+                    question,
+                    endsAt,
+                    openToAll,
+                    block.chainid,
+                    address(this),
+                    optionHashes,
+                    _whitelistHashes()
+                )
+            );
+    }
+
+    /// @dev The whitelist as a sorted array of `(address, allowed)` hashes.
+    ///
+    ///      Sorted because the hash must not depend on the ORDER entries were
+    ///      added. A creator who removes an address and adds it back would
+    ///      otherwise change the hash without changing who may vote, and a reader
+    ///      would see a "the rules changed" warning for a no-op — noise that
+    ///      trains people to ignore the very signal this exists to provide.
+    function _whitelistHashes() private view returns (bytes32[] memory) {
+        uint256 allowedCount;
+        for (uint256 i = 0; i < _whitelistKeys.length; ++i) {
+            if (isWhitelisted[_whitelistKeys[i]]) {
+                ++allowedCount;
+            }
+        }
+
+        bytes32[] memory hashes = new bytes32[](allowedCount);
+        uint256 next;
+        for (uint256 i = 0; i < _whitelistKeys.length; ++i) {
+            address voter = _whitelistKeys[i];
+            if (!isWhitelisted[voter]) {
+                continue;
+            }
+            hashes[next] = keccak256(abi.encode(voter));
+            ++next;
+        }
+
+        _sort(hashes);
+        return hashes;
+    }
+
+    /// @dev Insertion sort. The whitelist is bounded by what a creator can add in
+    ///      Setup, and this runs in a view function rather than in a transaction,
+    ///      so the quadratic worst case is not a gas concern — clarity wins.
+    function _sort(bytes32[] memory values) private pure {
+        for (uint256 i = 1; i < values.length; ++i) {
+            bytes32 key = values[i];
+            uint256 j = i;
+            while (j > 0 && values[j - 1] > key) {
+                values[j] = values[j - 1];
+                --j;
+            }
+            values[j] = key;
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // Immutable-ish state (set once, by `initialize`)
     // ---------------------------------------------------------------------
 
@@ -89,6 +218,26 @@ contract Poll is Ownable, ReentrancyGuard {
     ///      than being cleared in the open case: flipping the flag back would
     ///      otherwise silently discard rights the creator had already granted.
     mapping(address => bool) public isWhitelisted;
+
+    /// @dev Every address this mapping has ever been given, in insertion order.
+    ///
+    ///      A `mapping` cannot be enumerated, and `currentRulesHash` has to hash
+    ///      the whitelist to make edits to it detectable. This array is what makes
+    ///      that possible.
+    ///
+    ///      It grows on first write and is NEVER pruned — removing an address from
+    ///      the whitelist sets `isWhitelisted[voter] = false` and leaves the key
+    ///      here. Removing it would mean a swap-and-pop, which reorders the array,
+    ///      and `_whitelistHashes` sorts its output precisely so that order cannot
+    ///      affect the hash. Keeping every key ever written also means the array is
+    ///      a truthful log of who was ever considered, at the cost of storage that
+    ///      only grows by one slot per distinct address.
+    address[] private _whitelistKeys;
+
+    /// @dev Position of each key in `_whitelistKeys`, 1-based; 0 means absent.
+    ///      Exists so `setWhitelist` can tell a first write from a repeat without
+    ///      scanning the array, which would make adding N addresses O(N^2).
+    mapping(address => uint256) private _whitelistKeyIndex;
 
     /// @notice When true, anyone may vote and `isWhitelisted` is not consulted.
     /// @dev Fixed at `initialize` and deliberately not settable afterwards. A
@@ -204,6 +353,14 @@ contract Poll is Ownable, ReentrancyGuard {
             emit OptionAdded(id, optionCIDs[i]);
         }
 
+        // The creation-time rules fingerprint. Written ONCE, here, and never
+        // again: the whitelist is necessarily empty at this point (no creator can
+        // have touched it yet), so this is the hash of the rules AS CREATED.
+        // `currentRulesHash()` recomputes from live state, and comparing the two
+        // is what tells a reader whether the options or the whitelist were edited
+        // after creation.
+        rulesHash = _rulesHash();
+
         emit PhaseChanged(Phase.Setup, Phase.Setup);
     }
 
@@ -273,6 +430,16 @@ contract Poll is Ownable, ReentrancyGuard {
             if (voter == address(0)) revert ZeroAddress();
 
             isWhitelisted[voter] = allowed;
+
+            // Remember the key the first time this address is ever mentioned, so
+            // `currentRulesHash` can enumerate the list. A repeat write must not
+            // append again, or the array would grow without bound and the hash
+            // would depend on how many times an address was re-added.
+            if (_whitelistKeyIndex[voter] == 0) {
+                _whitelistKeys.push(voter);
+                _whitelistKeyIndex[voter] = _whitelistKeys.length;
+            }
+
             emit WhitelistUpdated(voter, allowed);
         }
     }

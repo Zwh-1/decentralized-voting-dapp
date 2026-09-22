@@ -57,17 +57,26 @@ export default async function Home() {
       configuredTarget={configuredTarget}
     >
       {listError !== null && (
-        <section className="mt-6 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm leading-relaxed text-rose-700">
-          无法从链上读取投票列表：{listError}
-          <br />
-          请确认 <code className="font-mono">web/.env</code> 里的{" "}
-          <code className="font-mono">RPC_URL</code> 可达、
-          <code className="font-mono">CHAIN_ID</code> 上有已部署的工厂合约，并已执行过{" "}
-          <code className="font-mono">pnpm export-abi</code>。
-          连接钱包后，下面的列表会直接向你的钱包所在网络重新读取一次。
+        <section className="mb-6 rounded-xl border border-rose-200 bg-rose-50 p-5">
+          <h2 className="text-sm font-medium text-rose-800">无法从链上读取投票列表</h2>
+          <p className="mt-1.5 text-sm leading-relaxed text-rose-700">{listError}</p>
+          <p className="mt-2 text-xs leading-relaxed text-rose-700">
+            请确认 <code className="font-mono">web/.env</code> 里的{" "}
+            <code className="font-mono">RPC_URL</code> 可达、
+            <code className="font-mono">CHAIN_ID</code> 上有已部署的工厂合约，并已执行过{" "}
+            <code className="font-mono">pnpm export-abi</code>。
+            连接钱包后，下面的列表会直接向你的钱包所在网络重新读取一次。
+          </p>
         </section>
       )}
 
+      {/*
+        The create form is collapsed by default. It is the tallest thing on the
+        page and most readers arriving at a voting site are looking for a poll to
+        vote in, not to start one — so the list gets the space and creating is one
+        click away. It is still rendered on this page rather than moved behind a
+        route, because creating a poll and seeing the list are the same task.
+      */}
       <CreatePollForm configuredTarget={configuredTarget} />
 
       <PollList

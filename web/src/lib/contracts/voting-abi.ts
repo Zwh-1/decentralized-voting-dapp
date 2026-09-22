@@ -726,6 +726,19 @@ export const pollAbi = [
   },
   {
     "inputs": [],
+    "name": "currentRulesHash",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "endPoll",
     "outputs": [],
     "stateMutability": "nonpayable",
@@ -937,6 +950,19 @@ export const pollAbi = [
         "internalType": "uint256",
         "name": "total",
         "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "rulesHash",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
       }
     ],
     "stateMutability": "view",

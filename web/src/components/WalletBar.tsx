@@ -15,6 +15,20 @@ import { CHAIN_NAMES, chainName, shortenAddress, type ChainTarget } from "../lib
  * configured one, not only when it is on a chain this project has a name for. A
  * wallet on Sepolia against a Sepolia deployment needs nothing, but a wallet on
  * the local chain against a Sepolia deployment needs to be told exactly that.
+ *
+ * ---------------------------------------------------------------------------
+ * Why the colours here are not the shared tone tokens
+ * ---------------------------------------------------------------------------
+ *
+ * This control sits in the dark masthead, on `slate-900`, where the light-theme
+ * tokens are the wrong way round: `bg-emerald-50 text-emerald-700` is a pale
+ * surface with dark text, which on a dark band reads as a hole rather than a
+ * badge. So this file uses the translucent variants that are meant for dark
+ * surfaces — `bg-emerald-500/15 text-emerald-300` and its amber counterpart.
+ *
+ * The states still mean the same thing, and they are the same two states: "the
+ * wallet is on the chain this app is about" and "it is not". Only the rendering
+ * differs, because only the surface differs.
  */
 export function WalletBar({ configuredTarget }: { configuredTarget: ChainTarget | null }) {
   const { address, isConnected } = useAccount();
@@ -30,7 +44,7 @@ export function WalletBar({ configuredTarget }: { configuredTarget: ChainTarget 
       <div className="flex flex-col items-end gap-1">
         <div className="flex items-center gap-2">
           {configuredTarget !== null && (
-            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+            <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-slate-300">
               本应用指向 {chainName(configuredTarget.chainId)}
             </span>
           )}
@@ -38,13 +52,23 @@ export function WalletBar({ configuredTarget }: { configuredTarget: ChainTarget 
             type="button"
             onClick={() => injected !== undefined && connect({ connector: injected })}
             disabled={isPending || injected === undefined}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 disabled:bg-slate-300"
+            className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:bg-slate-600 disabled:text-slate-400"
           >
             {isPending ? "连接中…" : "连接钱包"}
           </button>
         </div>
         {error !== null && (
-          <p className="max-w-xs text-right text-xs text-rose-600">{error.message}</p>
+          /*
+            `data-connect-error` is the stable hook the browser drill reads. It
+            used to be found by its colour class (`.text-rose-600`), which broke
+            the moment an unrelated element legitimately rendered in the same
+            red — and the drill then reported the connect error as the text "否"
+            from the whitelist row while blaming the wallet. A hook that names
+            what it is cannot be matched by accident.
+          */
+          <p data-connect-error className="max-w-xs text-right text-xs text-rose-300">
+            {error.message}
+          </p>
         )}
       </div>
     );
@@ -66,19 +90,19 @@ export function WalletBar({ configuredTarget }: { configuredTarget: ChainTarget 
         <span
           className={`rounded-full px-2.5 py-1 text-xs font-medium ${
             wrongChain || !walletChainNamed
-              ? "bg-amber-50 text-amber-700"
-              : "bg-emerald-50 text-emerald-700"
+              ? "bg-amber-500/15 text-amber-300"
+              : "bg-emerald-500/15 text-emerald-300"
           }`}
         >
           {chainName(chainId)}
         </span>
-        <span className="rounded-lg bg-slate-100 px-3 py-1.5 font-mono text-xs text-slate-700">
+        <span className="rounded-lg bg-white/10 px-3 py-1.5 font-mono text-xs text-slate-200">
           {address === undefined ? "—" : shortenAddress(address)}
         </span>
         <button
           type="button"
           onClick={() => disconnect()}
-          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50"
+          className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-slate-300 transition hover:bg-white/10"
         >
           断开
         </button>
@@ -86,12 +110,12 @@ export function WalletBar({ configuredTarget }: { configuredTarget: ChainTarget 
 
       {wrongChain && switchTarget !== undefined && (
         <div className="flex items-center gap-2">
-          <span className="text-xs text-amber-700">本应用指向 {named}</span>
+          <span className="text-xs text-amber-300">本应用指向 {named}</span>
           <button
             type="button"
             onClick={() => switchChain({ chainId: switchTarget.id })}
             disabled={isSwitching}
-            className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1 text-xs text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed"
+            className="rounded-lg border border-amber-400/40 bg-amber-500/15 px-3 py-1 text-xs text-amber-200 transition hover:bg-amber-500/25 disabled:cursor-not-allowed"
           >
             切到{named}
           </button>

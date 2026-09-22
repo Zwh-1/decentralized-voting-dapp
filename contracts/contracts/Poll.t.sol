@@ -1375,4 +1375,268 @@ contract PollTest is Test {
         assertEq(total, voterCount, "the total never grew");
         assertEq(poll.totalStaked(), voterCount * STAKE, "and the stake never grew either");
     }
+
+    // ---------------------------------------------------------------------
+    // The rules commitment
+    //
+    // These tests are the contract half of the "anyone can check this" claim the
+    // interface makes. The property under test is NOT "the rules cannot change" —
+    // a creator is meant to be able to add options and build a whitelist during
+    // Setup. It is that an edit is DETECTABLE: a third party must be able to tell
+    // a poll opened as created from one that was reshaped first.
+    //
+    // So the important cases are the ones asserting the hash MOVES when something
+    // a reader was shown changes, and STAYS when it does not.
+    // ---------------------------------------------------------------------
+
+    function test_RulesHash_IsStableWhileNothingChanges() public {
+        bytes32 atCreation = poll.rulesHash();
+
+        assertEq(
+            poll.currentRulesHash(),
+            atCreation,
+            "a poll nobody has touched must hash to the promise made at creation"
+        );
+    }
+
+    function test_RulesHash_ChangesWhenAnOptionIsAdded() public {
+        bytes32 before = poll.currentRulesHash();
+
+        vm.prank(creator);
+        poll.addOption(CID_A);
+
+        assertTrue(
+            poll.currentRulesHash() != before,
+            "adding an option changes what a voter is choosing between, so it must be visible"
+        );
+        assertEq(poll.rulesHash(), before, "the creation-time promise itself never changes");
+    }
+
+    function test_RulesHash_ChangesWhenAnOptionLabelIsEdited() public {
+        bytes32 before = poll.currentRulesHash();
+
+        vm.prank(creator);
+        poll.updateOption(1, CID_B);
+
+        assertTrue(
+            poll.currentRulesHash() != before,
+            "swapping an option's label is exactly the edit a late reader cannot see"
+        );
+    }
+
+    function test_RulesHash_ChangesWhenAnOptionIsRemoved() public {
+        // Needs a third option first: this fixture opens with exactly two, and
+        // `removeOption` refuses to go below `MIN_OPTIONS`.
+        vm.startPrank(creator);
+        poll.addOption(CID_A);
+        bytes32 withThree = poll.currentRulesHash();
+        poll.removeOption(3);
+        vm.stopPrank();
+
+        assertTrue(poll.currentRulesHash() != withThree, "removing an option must be visible");
+        assertEq(
+            poll.currentRulesHash(),
+            poll.rulesHash(),
+            "and undoing the addition returns the poll to its creation state"
+        );
+    }
+
+    function test_RulesHash_ChangesWhenTheWhitelistGrows() public {
+        bytes32 before = poll.currentRulesHash();
+
+        vm.prank(creator);
+        poll.setWhitelist(_one(alice), true);
+
+        assertTrue(
+            poll.currentRulesHash() != before,
+            "who may vote is part of what a reader is trusting"
+        );
+    }
+
+    function test_RulesHash_ChangesWhenSomeoneIsRemovedFromTheWhitelist() public {
+        vm.startPrank(creator);
+        poll.setWhitelist(_one(alice), true);
+        bytes32 withAlice = poll.currentRulesHash();
+        poll.setWhitelist(_one(alice), false);
+        vm.stopPrank();
+
+        assertTrue(
+            poll.currentRulesHash() != withAlice,
+            "a removal must be as visible as an addition"
+        );
+        assertEq(
+            poll.currentRulesHash(),
+            poll.rulesHash(),
+            "and removing the only entry returns the poll to its creation state"
+        );
+    }
+
+    /// @dev The order entries were added must not affect the hash.
+    ///
+    /// Without the sort in `_whitelistHashes`, adding the same three addresses in
+    /// a different order would produce a different hash — so a reader comparing a
+    /// poll against its creation state would see "the rules changed" for a set
+    /// that is identical. Noise like that is what trains people to ignore the
+    /// very signal this exists to provide.
+    ///
+    /// This is necessarily done with ONE poll across two states, not two polls:
+    /// the poll's own address is part of the preimage (so that a commitment
+    /// cannot be copied between polls), which means two different polls can never
+    /// hash the same regardless of their rules.
+    function test_RulesHash_DoesNotDependOnWhitelistInsertionOrder() public {
+        address[] memory forwards = new address[](3);
+        forwards[0] = alice;
+        forwards[1] = bob;
+        forwards[2] = carol;
+
+        vm.prank(creator);
+        poll.setWhitelist(forwards, true);
+        bytes32 ascending = poll.currentRulesHash();
+
+        // Take the whole list away, then put the same set back in reverse order.
+        // Emptying first matters: re-adding already-admitted addresses is a no-op
+        // and would leave the array untouched, proving nothing about order.
+        vm.startPrank(creator);
+        poll.setWhitelist(forwards, false);
+        assertEq(
+            poll.currentRulesHash(),
+            poll.rulesHash(),
+            "an emptied whitelist is the creation state"
+        );
+
+        address[] memory backwards = new address[](3);
+        backwards[0] = carol;
+        backwards[1] = bob;
+        backwards[2] = alice;
+        poll.setWhitelist(backwards, true);
+        vm.stopPrank();
+
+        assertEq(
+            poll.currentRulesHash(),
+            ascending,
+            "the same set of admitted addresses must hash the same however it was built"
+        );
+    }
+
+    /// @dev Re-adding an address that is already admitted is a no-op, so the hash
+    /// must not move. This is what `_whitelistKeyIndex` exists to guarantee.
+    function test_RulesHash_IsUnchangedByReAddingAnAdmittedAddress() public {
+        vm.startPrank(creator);
+        poll.setWhitelist(_one(alice), true);
+        bytes32 once = poll.currentRulesHash();
+        poll.setWhitelist(_one(alice), true);
+        vm.stopPrank();
+
+        assertEq(poll.currentRulesHash(), once, "a repeat write is not a change");
+    }
+
+    /// @dev The hash covers the poll's identity, so two polls created with
+    /// identical rules do not share a fingerprint.
+    ///
+    /// Without `address(this)` in the preimage, a reviewer could copy one poll's
+    /// commitment into another and the comparison would still pass — which would
+    /// make the guarantee forgeable by the party it is meant to check.
+    function test_RulesHash_DiffersBetweenPollsWithIdenticalRules() public {
+        Poll other = _newPoll(creator, FAR_FUTURE);
+
+        assertTrue(
+            poll.rulesHash() != other.rulesHash(),
+            "two distinct polls must not share a rules fingerprint"
+        );
+    }
+
+    function test_RulesHash_DiffersWhenOnlyTheAdmissionModeDiffers() public {
+        Poll open = _newPoll(creator, FAR_FUTURE, true);
+
+        assertTrue(
+            poll.rulesHash() != open.rulesHash(),
+            "who may vote is the first thing a reader checks, so it must be covered"
+        );
+    }
+
+    function test_RulesHash_DiffersWhenOnlyTheDeadlineDiffers() public {
+        Poll later = _newPoll(creator, FAR_FUTURE + 1);
+
+        assertTrue(poll.rulesHash() != later.rulesHash(), "the deadline must be covered");
+    }
+
+    function test_RulesHash_DiffersWhenOnlyTheQuestionDiffers() public {
+        string[] memory cids = new string[](2);
+        cids[0] = CID_A;
+        cids[1] = CID_B;
+
+        Poll other = new Poll();
+        other.initialize(creator, "a different question", cids, FAR_FUTURE, false);
+
+        assertTrue(poll.rulesHash() != other.rulesHash(), "the question must be covered");
+    }
+
+    function test_RulesHash_DiffersWhenOnlyTheCreatorDiffers() public {
+        Poll other = _newPoll(bob, FAR_FUTURE);
+
+        assertTrue(
+            poll.rulesHash() != other.rulesHash(),
+            "who administers the poll is part of what is being trusted"
+        );
+    }
+
+    /// @dev The commitment must survive the poll being opened and voted in.
+    ///
+    /// `startPoll` freezes the options, and voting changes the tally — but the
+    /// tally is deliberately NOT part of the hash. A reader checking the rules
+    /// after the ballot must get a match; if votes were hashed in, every check on
+    /// a live poll would report a mismatch and the signal would be useless.
+    function test_RulesHash_IsUnchangedByVoting() public {
+        vm.startPrank(creator);
+        poll.setWhitelist(_three(alice, bob, carol), true);
+        poll.startPoll();
+        vm.stopPrank();
+
+        bytes32 whenOpened = poll.currentRulesHash();
+
+        _vote(alice, 1);
+        _vote(bob, 2);
+
+        assertEq(
+            poll.currentRulesHash(),
+            whenOpened,
+            "votes are not rules: counting them would make every live poll look tampered with"
+        );
+    }
+
+    /// @dev An edit made after opening is still visible, even though options are
+    /// frozen then. The whitelist is the mutable surface at that point.
+    function test_RulesHash_DetectsAWhitelistEditAfterOpening() public {
+        vm.startPrank(creator);
+        poll.setWhitelist(_one(alice), true);
+        poll.startPoll();
+        bytes32 whenOpened = poll.currentRulesHash();
+        poll.setWhitelist(_one(bob), true);
+        vm.stopPrank();
+
+        assertTrue(
+            poll.currentRulesHash() != whenOpened,
+            "the whitelist can still move after opening, so the signal must still fire"
+        );
+    }
+
+    function test_RulesHash_IsNeverZero() public view {
+        assertTrue(poll.rulesHash() != bytes32(0), "a zero commitment would make the check vacuous");
+    }
+
+    function _one(address a) internal pure returns (address[] memory voters) {
+        voters = new address[](1);
+        voters[0] = a;
+    }
+
+    function _three(
+        address a,
+        address b,
+        address c
+    ) internal pure returns (address[] memory voters) {
+        voters = new address[](3);
+        voters[0] = a;
+        voters[1] = b;
+        voters[2] = c;
+    }
 }

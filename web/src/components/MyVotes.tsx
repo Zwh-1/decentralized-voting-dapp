@@ -6,6 +6,7 @@ import { useMemo } from "react";
 import { useAccount, useChainId, useConfig, useReadContract, useReadContracts } from "wagmi";
 
 import { Countdown } from "@/components/Countdown";
+import { EmptyState } from "@/components/ui";
 import { useMounted } from "@/hooks/useMounted";
 import {
   chainName,
@@ -173,32 +174,37 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
   const createdAddresses: `0x${string}`[] = created.data === undefined ? [] : [...created.data];
 
   return (
-    <div className="mt-6 space-y-8">
-      <section>
+    <div className="space-y-8">
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-900">我发起的投票</h2>
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">
           来自工厂的 <code className="font-mono">pollsByCreator(你)</code>
           ，因此这份列表是完整的：链上记录了谁创建了哪个投票。
         </p>
 
-        {!mounted && <p className="mt-3 text-sm text-slate-500">正在读取…</p>}
-        {mounted && !isConnected && <p className="mt-3 text-sm text-slate-500">请先连接钱包。</p>}
+        {!mounted && <Notice>正在读取…</Notice>}
+        {mounted && !isConnected && <Notice>请先连接钱包。</Notice>}
         {mounted && isConnected && !factoryKnown && (
-          <p className="mt-3 text-sm text-slate-500">
+          <Notice>
             当前链（{subjectChainId}，{chainName(subjectChainId)}
             ）没有已登记的工厂合约，无法列出你发起的投票。
-          </p>
+          </Notice>
         )}
         {ready && created.isError && (
-          <p className="mt-3 text-sm text-rose-600">
+          <Notice tone="danger">
             读取 pollsByCreator 失败：链上调用没有成功。请检查 RPC 后重试。
-          </p>
+          </Notice>
         )}
         {ready && !created.isError && created.isSuccess && createdAddresses.length === 0 && (
-          <p className="mt-3 text-sm text-slate-500">你还没有发起过投票。</p>
+          <div className="mt-4">
+            <EmptyState
+              title="你还没有发起过投票"
+              description="在「全部投票」页可以发起新投票；创建者会成为该投票的合约所有者，负责它的白名单与结束。"
+            />
+          </div>
         )}
 
-        <div className="mt-3 space-y-2">
+        <div className="mt-4 space-y-2">
           {ready &&
             createdAddresses
               .slice()
@@ -207,17 +213,17 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
         </div>
       </section>
 
-      <section>
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-900">我投过的投票</h2>
         {indexedUsable ? (
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs leading-relaxed text-slate-500">
             来自本应用的只读索引（<code className="font-mono">current_votes</code>{" "}
             视图，由链上事件推导）。链上没有「某人投过哪些投票」的反查接口，
             所以这个问题只有索引能在一次查询里答完；只有当前确实持有一票的投票会出现，
             已经撤票的不会。
           </p>
         ) : (
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 text-xs leading-relaxed text-slate-500">
             没有可用的索引，所以这份列表是逐个投票读{" "}
             <code className="font-mono">voterState(你)</code>{" "}
             得到的：只有当前确实持有一票的投票会出现， 已经撤票的不会。
@@ -225,11 +231,11 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
           </p>
         )}
 
-        {!mounted && <p className="mt-3 text-sm text-slate-500">正在读取…</p>}
-        {mounted && !isConnected && <p className="mt-3 text-sm text-slate-500">请先连接钱包。</p>}
+        {!mounted && <Notice>正在读取…</Notice>}
+        {mounted && !isConnected && <Notice>请先连接钱包。</Notice>}
 
         {ready && !indexedUsable && all.length > SCAN_LIMIT && (
-          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
+          <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
             链上共有 {all.length} 个投票，本页只扫描了最新的 {SCAN_LIMIT} 个
             （逐票读取的代价随投票数线性增长，全部扫描会让页面变慢）。
             更早的投票可能里也有你投过的，本页不会显示；可以直接在
@@ -241,31 +247,28 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
         )}
 
         {ready && all.length === 0 && (
-          <p className="mt-3 text-sm text-slate-500">工厂还没有创建过任何投票。</p>
+          <div className="mt-4">
+            <EmptyState
+              title="工厂还没有创建过任何投票"
+              description="链上一个投票都没有，所以这里没有什么可以列举。"
+            />
+          </div>
         )}
 
-        {ready && indexed.isPending && (
-          <p className="mt-3 text-sm text-slate-500">正在向索引查询你持有的票…</p>
-        )}
+        {ready && indexed.isPending && <Notice>正在向索引查询你持有的票…</Notice>}
 
-        {ready && indexed.isError && (
-          <p className="mt-3 text-sm text-slate-500">索引查询失败，改为逐个读取链上状态。</p>
-        )}
+        {ready && indexed.isError && <Notice>索引查询失败，改为逐个读取链上状态。</Notice>}
 
         {ready && !indexedUsable && voterStates.isPending && all.length > 0 && (
-          <p className="mt-3 text-sm text-slate-500">
-            正在逐个读取 {scanned.length} 个投票…（读到的第一个结果就会出现在这里）
-          </p>
+          <Notice>正在逐个读取 {scanned.length} 个投票…（读到的第一个结果就会出现在这里）</Notice>
         )}
 
         {ready && !indexedUsable && voterStates.isError && (
-          <p className="mt-3 text-sm text-rose-600">
-            逐个读取投票状态时链上调用失败。请检查 RPC 后重试。
-          </p>
+          <Notice tone="danger">逐个读取投票状态时链上调用失败。请检查 RPC 后重试。</Notice>
         )}
 
         {ready && !indexed.isPending && !indexed.isError && markedAddresses.length === 0 && (
-          <p className="mt-3 text-sm text-slate-500">
+          <p className="mt-4 text-sm text-slate-500">
             {indexedUsable
               ? "你目前没有在任何投票里持有一票。"
               : scanned.length === 0
@@ -274,7 +277,7 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
           </p>
         )}
 
-        <div className="mt-3 space-y-2">
+        <div className="mt-4 space-y-2">
           {markedAddresses.map((poll, index) => {
             // The three calls were queued three at a time per poll, so the offsets
             // are positional. Each result is narrowed rather than cast: a failed
@@ -312,6 +315,21 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
   );
 }
 
+/** A short status line under a section heading. */
+function Notice({
+  children,
+  tone = "muted",
+}: {
+  children: React.ReactNode;
+  tone?: "muted" | "danger";
+}) {
+  return (
+    <p className={`mt-4 text-sm ${tone === "danger" ? "text-rose-600" : "text-slate-500"}`}>
+      {children}
+    </p>
+  );
+}
+
 function PollLink({
   address,
   note,
@@ -322,12 +340,15 @@ function PollLink({
   endsAt?: bigint | undefined;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
-      <div className="min-w-0">
-        <Link href={`/poll/${address}`} className="font-mono text-xs text-slate-700 underline">
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 transition hover:border-slate-300 hover:shadow-sm">
+      <div className="flex min-w-0 items-center gap-2">
+        <Link
+          href={`/poll/${address}`}
+          className="font-mono text-xs text-slate-700 underline decoration-slate-300 underline-offset-2 transition hover:text-slate-900"
+        >
           {shortenAddress(address)}
         </Link>
-        <span className="ml-2 text-xs text-slate-500">{note}</span>
+        <span className="text-xs text-slate-500">{note}</span>
       </div>
       {endsAt !== undefined && <Countdown endsAt={endsAt} />}
     </div>

@@ -19,6 +19,7 @@
     "verify:sourcify": "hardhat run scripts/verify-sourcify.ts",
     "seed:local": "hardhat run scripts/seed-local.ts --network localhost",
     "create-poll:sepolia": "hardhat run scripts/create-poll.ts --network sepolia",
+    "verify:rules": "hardhat run scripts/verify-rules-hash.ts --network localhost",
     "pin:metadata": "hardhat run scripts/pin-metadata.ts"
   },
   "devDependencies": {
