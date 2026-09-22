@@ -3,6 +3,8 @@ import { MyVotes } from "@/components/MyVotes";
 import { PageShell } from "@/components/PageShell";
 import { getConfiguredTarget, getPolls } from "@/lib/data";
 import { describeFailure } from "@/lib/failure";
+import { translatorFor } from "@/lib/i18n";
+import { currentLocale } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +22,7 @@ export const dynamic = "force-dynamic";
  * there is nothing to show.
  */
 export default async function MyPolls() {
+  const t = translatorFor(await currentLocale());
   const configuredTarget = getConfiguredTarget();
 
   let addresses: string[] | null = null;
@@ -29,20 +32,21 @@ export default async function MyPolls() {
     addresses = (await getPolls()).map((poll) => poll.address);
   } catch (error) {
     console.error("[my page] the poll list could not be read", error);
-    listError = describeFailure(error);
+    listError = describeFailure(error, t.locale);
   }
 
   return (
     <PageShell
-      title="我的投票"
-      subtitle="列出你这个地址发起的投票，以及你当前持有票的投票。两个列表都直接读链：链上记录了谁创建了哪个投票，而「我投过哪些」只能逐个投票读 voterState，因此有扫描上限。"
+      title={t.t("my.title")}
+      subtitle={t.t("my.subtitle")}
       configuredTarget={configuredTarget}
+      translator={t}
     >
       {listError !== null && (
         <section className="mt-6 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm leading-relaxed text-rose-700">
-          服务端读取投票列表失败：{listError}
+          {t.t("my.serverListFailed", { error: listError })}
           <br />
-          下面的列表仍会尝试由你的浏览器直接读取工厂合约。
+          {t.t("my.browserRetry")}
         </section>
       )}
 

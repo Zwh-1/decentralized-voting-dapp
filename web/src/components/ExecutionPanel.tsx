@@ -22,6 +22,7 @@ import {
   ZERO_ADDRESS,
 } from "@/lib/governance";
 import { Badge, Card, Row, Section, Skeleton } from "@/components/ui";
+import { useTranslator } from "@/components/LocaleProvider";
 import { useMounted } from "@/hooks/useMounted";
 import { pollAbi, resolveChainTarget } from "@/lib/voting";
 
@@ -81,6 +82,7 @@ export function ExecutionPanel({
   outcome: outcomeProp,
   creator,
 }: ExecutionPanelProps) {
+  const { t, ballot } = useTranslator();
   const mounted = useMounted();
   const chainId = useChainId();
   const { address: account } = useAccount();
@@ -218,12 +220,9 @@ export function ExecutionPanel({
   const writeFailure = error === null ? null : describeWriteFailure(error);
 
   return (
-    <Section
-      title="结果执行"
-      description="A passed vote can authorise exactly one on-chain action. It waits out the timelock first, so voters can see what is about to happen."
-    >
+    <Section title={t("execution.title")} description={t("execution.description")}>
       <Card>
-        <Row label="结果">
+        <Row label={t("execution.outcome")}>
           {outcomeUnknown ? (
             <Skeleton className="h-5 w-28" />
           ) : (
@@ -241,19 +240,19 @@ export function ExecutionPanel({
           )}
         </Row>
 
-        {!outcomeUnknown && <Row label="说明">{presented.detail}</Row>}
+        {!outcomeUnknown && <Row label={t("execution.explanation")}>{presented.detail}</Row>}
 
-        <Row label="法定人数">{quorumLabel(quorumBps)}</Row>
-        <Row label="出席率">
+        <Row label={t("execution.quorum")}>{quorumLabel(quorumBps)}</Row>
+        <Row label={t("execution.turnout")}>
           <span className={clears ? "" : "text-rose-700"}>
             {formatBps(turnoutBps)}
-            {quorumBps === 0n ? "" : clears ? " — quorum met" : " — below quorum"}
+            {quorumBps === 0n ? "" : clears ? t("execution.quorumMet") : t("execution.belowQuorum")}
           </span>
         </Row>
 
         {stage === "none" && !outcomeUnknown && (
-          <Row label="队列">
-            {outcome === 1 ? "Nothing queued yet." : "Only a passed vote can be queued."}
+          <Row label={t("execution.queue")}>
+            {outcome === 1 ? t("execution.nothingQueued") : t("execution.onlyPassed")}
           </Row>
         )}
 
@@ -261,41 +260,45 @@ export function ExecutionPanel({
 
         {stage !== "none" && (
           <>
-            <Row label="目标">
+            <Row label={t("execution.target")}>
               <span className="font-mono text-xs">{target}</span>
             </Row>
 
-            <Row label="状态">
+            <Row label={t("execution.status")}>
               {stage === "waiting" && (
                 <span>
-                  Waiting out the timelock —{" "}
-                  {secondsUntilReady(readyAt, Math.floor(Date.now() / 1000))}s remaining.
+                  {t("execution.waiting", {
+                    // `interpolate` takes `string | number` only, and this is a
+                    // plain count of seconds rather than a wei amount, so the
+                    // number is passed as one.
+                    seconds: secondsUntilReady(readyAt, Math.floor(Date.now() / 1000)),
+                  })}
                 </span>
               )}
-              {stage === "ready" && <span>Ready to execute now.</span>}
-              {stage === "done" && <span>Executed.</span>}
+              {stage === "ready" && <span>{t("execution.ready")}</span>}
+              {stage === "done" && <span>{t("execution.done")}</span>}
               {stage === "failed" && (
                 <span className="text-rose-700">
-                  The last attempt reverted
+                  {t("execution.failed")}
                   {describeRevertData(lastError) === ""
                     ? "."
                     : `: ${describeRevertData(lastError)}`}
-                  . The vote is unchanged and this can be retried.
+                  {t("execution.failedTail")}
                 </span>
               )}
             </Row>
 
             {calldata !== "0x" && (
-              <Row label="调用数据">
+              <Row label={t("execution.calldata")}>
                 <span className="font-mono text-xs break-all">{calldata}</span>
               </Row>
             )}
           </>
         )}
 
-        <Row label="允许的目标">
+        <Row label={t("execution.allowedTargets")}>
           {listedTargets.length === 0 ? (
-            <span>This poll itself only.</span>
+            <span>{t("execution.selfOnly")}</span>
           ) : (
             <ul className="space-y-1">
               {listedTargets.map((entry) => (
@@ -315,7 +318,7 @@ export function ExecutionPanel({
               disabled={busy || configuredTarget === null}
               className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
             >
-              {written?.kind === "queue" && busy ? "Submitting…" : "Queue an action"}
+              {written?.kind === "queue" && busy ? ballot.busy : t("execution.queueAction")}
             </button>
           )}
 
@@ -326,7 +329,7 @@ export function ExecutionPanel({
               disabled={busy || stage === "waiting" || configuredTarget === null}
               className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
             >
-              {written?.kind === "execute" && busy ? "Submitting…" : "Execute"}
+              {written?.kind === "execute" && busy ? ballot.busy : t("execution.execute")}
             </button>
           )}
 
@@ -337,7 +340,7 @@ export function ExecutionPanel({
               disabled={busy || configuredTarget === null}
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 disabled:opacity-50"
             >
-              {written?.kind === "cancel" && busy ? "Submitting…" : "Cancel"}
+              {written?.kind === "cancel" && busy ? ballot.busy : t("execution.cancel")}
             </button>
           )}
         </div>

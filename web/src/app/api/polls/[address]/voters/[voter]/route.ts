@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { NextResponse } from "next/server";
 
+import { currentLocale } from "@/lib/i18n/server";
 import { getVoter } from "@/lib/data";
 import { describeFailure } from "@/lib/failure";
 
@@ -39,7 +40,7 @@ export async function GET(
     console.error("[api/polls/:address/voters/:voter] read failed", error);
 
     return NextResponse.json(
-      { error: "upstream_unavailable", message: describeFailure(error) },
+      { error: "upstream_unavailable", message: describeFailure(error, await currentLocale()) },
       { status: 503 },
     );
   }

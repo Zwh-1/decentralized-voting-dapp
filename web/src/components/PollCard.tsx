@@ -66,6 +66,7 @@ export function PollCard({
       endsAt: BigInt(summary.endsAt),
       nowSeconds: BigInt(Math.floor(Date.now() / 1000)),
     }),
+    translator.locale,
   );
 
   return (

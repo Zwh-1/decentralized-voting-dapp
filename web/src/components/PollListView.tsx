@@ -166,7 +166,7 @@ export function PollListView({
     : !factoryKnown
       ? translator.t("list.noFactory", {
           chainId: subjectChainId,
-          chainName: chainName(subjectChainId),
+          chainName: chainName(subjectChainId, translator.locale),
         })
       : factory.isError
         ? translator.t("list.factoryReadFailed")

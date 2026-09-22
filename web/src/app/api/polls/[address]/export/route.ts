@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getEligibility, getPoll, getResults } from "@/lib/data";
 import { describeFailure } from "@/lib/failure";
 import { resultCsv, resultRows, turnout } from "@/lib/poll-report";
+import { currentLocale } from "@/lib/i18n/server";
 import { phaseLabel } from "@/lib/voting";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +36,13 @@ const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
  */
 export async function GET(request: Request, context: { params: Promise<{ address: string }> }) {
   const { address } = await context.params;
+
+  // The exported phase name is a word in the reader's language, so the file has
+  // to be written in the language the reader asked for. When there is no cookie
+  // (a script fetching the URL directly) this falls back to the default rather
+  // than failing -- an export must stay reproducible for a machine that has no
+  // opinion about language.
+  const locale = await currentLocale();
 
   if (!ADDRESS_PATTERN.test(address)) {
     return NextResponse.json(
@@ -100,7 +108,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
           question: summary.question,
           creator: summary.creator,
           phase: summary.phase,
-          phaseLabel: phaseLabel(summary.phase),
+          phaseLabel: phaseLabel(summary.phase, locale),
           endsAt: summary.endsAt,
         },
         totals: {
@@ -146,7 +154,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
     const csv = resultCsv({
       pollAddress: address,
       question: summary.question,
-      phase: phaseLabel(summary.phase),
+      phase: phaseLabel(summary.phase, locale),
       endsAt: new Date(Number(summary.endsAt) * 1000).toISOString(),
       totalVotes: results.onChainTotal,
       rows,
@@ -163,7 +171,7 @@ export async function GET(request: Request, context: { params: Promise<{ address
     console.error("[api/polls/:address/export] read failed", error);
 
     return NextResponse.json(
-      { error: "upstream_unavailable", message: describeFailure(error) },
+      { error: "upstream_unavailable", message: describeFailure(error, await currentLocale()) },
       { status: 503 },
     );
   }

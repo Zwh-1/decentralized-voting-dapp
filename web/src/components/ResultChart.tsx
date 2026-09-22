@@ -41,6 +41,13 @@
  * zero-length bars underneath a confident "0%".
  */
 import { tallySourceLabel } from "@/lib/ballot-labels";
+import {
+  ballotPhrasesFor,
+  DEFAULT_LOCALE,
+  interpolate,
+  messagesFor,
+  type Locale,
+} from "@/lib/i18n";
 import { sharePercent } from "@/lib/presentation";
 import type { TallyResponse } from "@/lib/types";
 
@@ -108,8 +115,19 @@ export interface ResultBar {
 export type TallyChart =
   { kind: "bars"; bars: ResultBar[] } | { kind: "no-votes"; message: string };
 
-/** The sentence every empty tally gets. One spelling, in one place. */
-export const NO_VOTES_MESSAGE = "还没有票——这个投票目前一票都没有。";
+/**
+ * The sentence every empty tally gets. One spelling, in one place.
+ *
+ * A function of the language rather than a constant, because the chart is a
+ * Server Component and a constant would freeze whichever language it was compiled
+ * in. The NAME is kept so the sentence still has one owner: `chartGeometry` fills
+ * it in and `chartAriaLabel` reads it back off the chart, so the caption, the
+ * picture and the spoken label can never say three different things about the same
+ * zero.
+ */
+export function noVotesMessage(locale: Locale = DEFAULT_LOCALE): string {
+  return messagesFor(locale)["chart.noVotes"];
+}
 
 /**
  * Every option's bar, derived from the tally.
@@ -140,9 +158,15 @@ export const NO_VOTES_MESSAGE = "还没有票——这个投票目前一票都�
  * minimum would draw a mark for a count of nothing, and the count is printed next
  * to it anyway.
  */
-export function chartGeometry(options: readonly ResultOption[], total: number): TallyChart {
+export function chartGeometry(
+  options: readonly ResultOption[],
+  total: number,
+  locale: Locale = DEFAULT_LOCALE,
+): TallyChart {
+  const phrases = ballotPhrasesFor(locale);
+
   if (total <= 0) {
-    return { kind: "no-votes", message: NO_VOTES_MESSAGE };
+    return { kind: "no-votes", message: noVotesMessage(locale) };
   }
 
   const counts = options.map((option) => option.voteCount);
@@ -158,7 +182,11 @@ export function chartGeometry(options: readonly ResultOption[], total: number): 
 
     return {
       id: option.id,
-      label: option.label ?? `选项 #${option.id}`,
+      // From the BALLOT catalogue, not the message catalogue: `选项 #{id}` is the
+      // same sentence the option cards print, and the placeholder keeps its `#`
+      // because `interpolate` only substitutes the braced name — which is what
+      // makes the rendered label `选项 #3` rather than `选项 3`.
+      label: option.label ?? interpolate(phrases.optionNumbered, { id: option.id }),
       voteCount: count,
       percent: sharePercent(count, total),
       y: index * (BAR_HEIGHT + BAR_GAP),
@@ -208,32 +236,58 @@ export function chartViewBox(barCount: number): string {
  * source is still named, because "0 票 from the chain" and "0 票 from the index"
  * are different claims. A poll with no options at all gets its own sentence, so
  * the label never opens with a list that turns out to be empty.
+ *
+ * Every number and every unit comes out of the catalogue's templates rather than
+ * being concatenated here, because the two languages place them differently: a
+ * reader is told "8 votes" in one and "8 票" in the other. What stays in this
+ * function is the ORDER — which option, what count, which share — and the choice
+ * between the four sentences, which is the part a translation must not reorder.
  */
-export function chartAriaLabel(tally: {
-  total: number;
-  source: TallyResponse["source"];
-  options: readonly ResultOption[];
-}): string {
-  const source = tallySourceLabel(tally.source);
+export function chartAriaLabel(
+  tally: {
+    total: number;
+    source: TallyResponse["source"];
+    options: readonly ResultOption[];
+  },
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  const messages = messagesFor(locale);
+  const source = tallySourceLabel(tally.source, locale);
 
   if (tally.options.length === 0) {
     // A poll created but never given an option list. "还没有票" would be true and
     // beside the point; the thing that is missing is the options themselves, and
     // the label says which of the two situations this is.
-    return `结果图表：这个投票还没有选项，没有可以展示的结果。数据来源：${source}。`;
+    return interpolate(messages["chart.ariaNoOptions"], { source });
   }
 
   if (tally.total <= 0) {
-    return `结果图表：${NO_VOTES_MESSAGE}数据来源：${source}。`;
+    return interpolate(messages["chart.ariaNoVotes"], {
+      message: noVotesMessage(locale),
+      source,
+    });
   }
 
-  const parts = tally.options.map((option) => {
-    const label = option.label ?? `选项 #${option.id}`;
+  const items = tally.options
+    .map((option) =>
+      interpolate(messages["chart.ariaItem"], {
+        label:
+          option.label ?? interpolate(ballotPhrasesFor(locale).optionNumbered, { id: option.id }),
+        votes: option.voteCount,
+        percent: sharePercent(option.voteCount, tally.total),
+      }),
+    )
+    // The separator is Chinese punctuation and stays in the code, not in the
+    // catalogue: it is a glyph between two whole clauses, so a translation has
+    // nothing to reorder — and a key holding nothing but `；` is the kind of
+    // "translation" `i18n.test.ts` refuses when two of them collide.
+    .join("；");
 
-    return `${label} ${option.voteCount} 票（${sharePercent(option.voteCount, tally.total)}%）`;
+  return interpolate(messages["chart.ariaBars"], {
+    items,
+    total: tally.total,
+    source,
   });
-
-  return `结果图表：${parts.join("；")}。合计 ${tally.total} 票，数据来源：${source}。`;
 }
 
 /** One option as this component takes it: the tally's own fields, plus the source. */
@@ -249,6 +303,22 @@ export interface ResultChartProps {
     total: number;
     options: readonly ResultOption[];
   };
+  /**
+   * The reader's language, as an ordinary prop.
+   *
+   * This file has no `"use client"` and must not gain one: it renders on the
+   * server as part of the page's own answer, and `useTranslator()` is a client
+   * hook. So the language travels down from whoever mounts it — `PollBallot`,
+   * which is a Client Component and already resolved it — exactly as
+   * `ConsistencyBadge` takes its translator.
+   *
+   * Defaulted rather than required, unlike `ConsistencyBadge`'s translator: this
+   * component's unit tests call `chartGeometry` and `chartAriaLabel` directly and
+   * every one of them asserts the Chinese, so a required prop would only push a
+   * `DEFAULT_LOCALE` into thirty call sites without adding a check. The component
+   * itself passes its own value straight through.
+   */
+  locale?: Locale;
 }
 
 /**
@@ -264,19 +334,25 @@ export interface ResultChartProps {
  * checkable against something on the page instead of being a claim only a screen
  * reader ever hears.
  */
-export function ResultChart({ tally }: ResultChartProps) {
-  const chart = chartGeometry(tally.options, tally.total);
-  const ariaLabel = chartAriaLabel(tally);
+export function ResultChart({ tally, locale = DEFAULT_LOCALE }: ResultChartProps) {
+  const messages = messagesFor(locale);
+  const chart = chartGeometry(tally.options, tally.total, locale);
+  const ariaLabel = chartAriaLabel(tally, locale);
 
   return (
     <figure data-result-chart className="rounded-xl border border-slate-200 bg-white p-4">
       <figcaption className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          结果图表
+          {messages["chart.title"]}
         </span>
         <span className="text-xs text-slate-400">
-          数据来源 <span data-chart-source>{tallySourceLabel(tally.source)}</span> · 合计{" "}
-          <span className="tabular-nums">{tally.total}</span> 票
+          {interpolate(messages["chart.caption"], {
+            // The SAME `tallySourceLabel` call the textual tally's 数据来源 row
+            // makes. Writing the words again here is how the chart and the numbers
+            // would start describing their own provenance differently.
+            source: tallySourceLabel(tally.source, locale),
+            total: tally.total,
+          })}
         </span>
       </figcaption>
 
@@ -295,45 +371,52 @@ export function ResultChart({ tally }: ResultChartProps) {
             viewBox={chartViewBox(chart.bars.length)}
             className="mt-3 h-auto w-full"
           >
-            {chart.bars.map((bar) => (
-              <g key={bar.id}>
-                <text
-                  x={LABEL_COLUMN}
-                  y={bar.y + bar.height - 1.5}
-                  textAnchor="end"
-                  fontSize={TEXT_SIZE}
-                  fill="#64748b"
-                >
-                  {bar.label}
-                </text>
-                {/* The track, so a short bar is still read as "short of what". */}
-                <rect
-                  x={LABEL_COLUMN + INNER_GAP}
-                  y={bar.y}
-                  width={TRACK}
-                  height={bar.height}
-                  rx={bar.height / 2}
-                  fill="#f1f5f9"
-                />
-                <rect
-                  data-chart-bar
-                  x={LABEL_COLUMN + INNER_GAP}
-                  y={bar.y}
-                  width={bar.width}
-                  height={bar.height}
-                  rx={bar.height / 2}
-                  fill="#334155"
-                />
-                <text
-                  x={LABEL_COLUMN + INNER_GAP + TRACK + 1.5}
-                  y={bar.y + bar.height - 1.5}
-                  fontSize={TEXT_SIZE}
-                  fill="#475569"
-                >
-                  {bar.voteCount} 票 · {bar.percent}%
-                </text>
-              </g>
-            ))}
+            {chart.bars.map((bar) => {
+              const printed = interpolate(messages["chart.barValue"], {
+                votes: bar.voteCount,
+                percent: bar.percent,
+              });
+
+              return (
+                <g key={bar.id}>
+                  <text
+                    x={LABEL_COLUMN}
+                    y={bar.y + bar.height - 1.5}
+                    textAnchor="end"
+                    fontSize={TEXT_SIZE}
+                    fill="#64748b"
+                  >
+                    {bar.label}
+                  </text>
+                  {/* The track, so a short bar is still read as "short of what". */}
+                  <rect
+                    x={LABEL_COLUMN + INNER_GAP}
+                    y={bar.y}
+                    width={TRACK}
+                    height={bar.height}
+                    rx={bar.height / 2}
+                    fill="#f1f5f9"
+                  />
+                  <rect
+                    data-chart-bar
+                    x={LABEL_COLUMN + INNER_GAP}
+                    y={bar.y}
+                    width={bar.width}
+                    height={bar.height}
+                    rx={bar.height / 2}
+                    fill="#334155"
+                  />
+                  <text
+                    x={LABEL_COLUMN + INNER_GAP + TRACK + 1.5}
+                    y={bar.y + bar.height - 1.5}
+                    fontSize={TEXT_SIZE}
+                    fill="#475569"
+                  >
+                    {printed}
+                  </text>
+                </g>
+              );
+            })}
           </svg>
 
           <ul className="mt-3 space-y-0.5 text-xs text-slate-600">
@@ -341,7 +424,10 @@ export function ResultChart({ tally }: ResultChartProps) {
               <li key={bar.id} className="flex items-baseline justify-between gap-3">
                 <span className="min-w-0 truncate">{bar.label}</span>
                 <span className="shrink-0 tabular-nums text-slate-500">
-                  {bar.voteCount} 票 · {bar.percent}%
+                  {interpolate(messages["chart.barValue"], {
+                    votes: bar.voteCount,
+                    percent: bar.percent,
+                  })}
                 </span>
               </li>
             ))}

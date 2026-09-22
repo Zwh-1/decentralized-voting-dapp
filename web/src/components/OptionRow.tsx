@@ -1,6 +1,7 @@
 "use client";
 
 import { useCandidateMetadata } from "@/hooks/useCandidateMetadata";
+import { useTranslator } from "@/components/LocaleProvider";
 import { ShareBar } from "@/components/ui";
 import { isRetryableMetadata } from "@/lib/ipfs";
 import { isMetadataCid, optionMetadataLabel, optionName } from "@/lib/ballot-labels";
@@ -52,9 +53,14 @@ export function OptionRow({
   isSubmitting,
   onAct,
 }: OptionRowProps) {
+  const { t, locale } = useTranslator();
   const metadata = useCandidateMetadata(labelCid);
 
-  const name = optionName(id, labelCid, metadata.data);
+  // The two label helpers take the language so that the option's NAME, its
+  // metadata line and this card's own buttons are all resolved the same way. The
+  // helpers keep the branch — "read failed" versus "the answer is zero" — which is
+  // the part a translation must not be able to move (`ballot-labels.ts`).
+  const name = optionName(id, labelCid, metadata.data, locale);
   const slogan = metadata.data?.status === "ok" ? metadata.data.metadata.slogan : undefined;
   const percent = share(voteCount, totalVotes);
   const enabled = disabledReason === undefined && !isSubmitting;
@@ -89,7 +95,7 @@ export function OptionRow({
       <dl className="mt-4 space-y-1 text-xs">
         <div className="flex gap-2">
           <dt className="shrink-0 text-slate-400">
-            {isMetadataCid(labelCid) ? "元数据 CID" : "链上存的字符串"}
+            {isMetadataCid(labelCid) ? t("option.metadataCid") : t("option.rawString")}
           </dt>
           <dd className="truncate font-mono text-slate-600" title={labelCid}>
             {labelCid}
@@ -103,10 +109,15 @@ export function OptionRow({
         <div className="flex gap-2">
           <dt className="shrink-0 text-slate-400">IPFS</dt>
           <dd className="text-slate-600">
-            {optionMetadataLabel(labelCid, metadata.data, {
-              isPending: metadata.isPending,
-              isError: metadata.isError,
-            })}
+            {optionMetadataLabel(
+              labelCid,
+              metadata.data,
+              {
+                isPending: metadata.isPending,
+                isError: metadata.isError,
+              },
+              locale,
+            )}
           </dd>
           {/*
             Offered only where another attempt could produce a different answer. A
@@ -122,7 +133,7 @@ export function OptionRow({
               disabled={metadata.isFetching}
               className="shrink-0 self-start rounded border border-slate-300 px-1.5 py-0.5 text-xs text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
             >
-              {metadata.isFetching ? "重试中…" : "重试"}
+              {metadata.isFetching ? t("option.retrying") : t("common.retry")}
             </button>
           )}
         </div>
@@ -143,12 +154,12 @@ export function OptionRow({
           }`}
         >
           {isSubmitting
-            ? "提交中…"
+            ? t("common.busy")
             : isMine
-              ? "你当前投给了这个选项"
+              ? t("option.mine")
               : action === "change"
-                ? "改投到这个选项"
-                : `投一票（${formatEth(STAKE)} ETH 押金）`}
+                ? t("option.changeHere")
+                : t("option.voteWithStake", { amount: formatEth(STAKE) })}
         </button>
         {disabledReason !== undefined && !isSubmitting && (
           <p className="mt-2 text-xs text-slate-500">{disabledReason}</p>

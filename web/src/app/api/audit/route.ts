@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { NextResponse } from "next/server";
 
+import { currentLocale } from "@/lib/i18n/server";
 import { parseAuditFilters, summarizeAudit } from "@/lib/audit";
 import { getAuditActivity } from "@/lib/data";
 import { describeFailure } from "@/lib/failure";
@@ -41,7 +42,7 @@ export async function GET(request: Request) {
   const pageSize = clampPageSize(parsePositiveInteger(params.get("pageSize")));
 
   try {
-    const entries = await getAuditActivity(parsed.filters);
+    const entries = await getAuditActivity(parsed.filters, await currentLocale());
 
     if (entries === null) {
       return NextResponse.json(
@@ -88,7 +89,7 @@ export async function GET(request: Request) {
     console.error("[api/audit] read failed", error);
 
     return NextResponse.json(
-      { error: "upstream_unavailable", message: describeFailure(error) },
+      { error: "upstream_unavailable", message: describeFailure(error, await currentLocale()) },
       { status: 503 },
     );
   }

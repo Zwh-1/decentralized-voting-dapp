@@ -6,6 +6,8 @@ import { PageShell } from "@/components/PageShell";
 import { PollList } from "@/components/PollList";
 import { getConfiguredTarget, getPolls } from "@/lib/data";
 import { describeFailure } from "@/lib/failure";
+import { translatorFor } from "@/lib/i18n";
+import { currentLocale } from "@/lib/i18n/server";
 import type { PollSummary } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +37,7 @@ export const dynamic = "force-dynamic";
  *     the address the factory returned, with its failed read named on the card.
  */
 export default async function Home() {
+  const t = translatorFor(await currentLocale());
   const configuredTarget = getConfiguredTarget();
 
   let polls: PollSummary[] | null = null;
@@ -47,27 +50,31 @@ export default async function Home() {
     // raw one embeds the RPC endpoint and its apiKey (ADR-0020), and this string
     // is server-rendered into a page anyone can load.
     console.error("[page] the poll list could not be read", error);
-    listError = describeFailure(error);
+    listError = describeFailure(error, t.locale);
   }
 
   const addresses = polls === null ? null : polls.map((poll) => poll.address);
 
   return (
     <PageShell
-      title="去中心化投票平台"
-      subtitle="任何人都可以发起投票；每个投票是独立合约，发起人管理它。你可以投票、改投、撤票并取回押金。选项元数据存放在 IPFS，链上只保存 CID；所有写入都由你自己的钱包签名。"
+      title={t.t("list.title")}
+      subtitle={t.t("home.subtitle")}
       configuredTarget={configuredTarget}
+      translator={t}
     >
       {listError !== null && (
         <section className="mb-6 rounded-xl border border-rose-200 bg-rose-50 p-5">
-          <h2 className="text-sm font-medium text-rose-800">无法从链上读取投票列表</h2>
+          <h2 className="text-sm font-medium text-rose-800">{t.t("home.listFailedTitle")}</h2>
           <p className="mt-1.5 text-sm leading-relaxed text-rose-700">{listError}</p>
           <p className="mt-2 text-xs leading-relaxed text-rose-700">
-            请确认 <code className="font-mono">web/.env</code> 里的{" "}
-            <code className="font-mono">RPC_URL</code> 可达、
-            <code className="font-mono">CHAIN_ID</code> 上有已部署的工厂合约，并已执行过{" "}
-            <code className="font-mono">pnpm export-abi</code>。
-            连接钱包后，下面的列表会直接向你的钱包所在网络重新读取一次。
+            {t.t("home.listFailedDetail", {
+              // Configuration names are quoted, never translated: an operator
+              // copies these into a terminal, so the sentence may not restyle them.
+              envFile: (<code className="font-mono">web/.env</code>) as unknown as string,
+              rpcUrl: (<code className="font-mono">RPC_URL</code>) as unknown as string,
+              chainId: (<code className="font-mono">CHAIN_ID</code>) as unknown as string,
+              exportAbi: (<code className="font-mono">pnpm export-abi</code>) as unknown as string,
+            })}
           </p>
         </section>
       )}
@@ -97,11 +104,13 @@ export default async function Home() {
         reads, which is the part that matters.
       */}
       <p className="mt-8 text-xs text-slate-500">
-        需要核对链上事件与索引记录？打开{" "}
-        <Link href="/audit" className="underline">
-          审计视图
-        </Link>
-        ，可按事件类型、投票合约或地址过滤。该页读取索引，不读取链上实时状态。
+        {t.t("home.auditLine", {
+          audit: (
+            <Link href="/audit" className="underline">
+              {t.t("nav.audit")}
+            </Link>
+          ) as unknown as string,
+        })}
       </p>
 
       {/*
@@ -112,11 +121,13 @@ export default async function Home() {
         "notifications" both look like "things that happened".
       */}
       <p className="mt-2 text-xs text-slate-500">
-        只想看你订阅的投票？打开{" "}
-        <Link href="/notifications" className="underline">
-          我的通知
-        </Link>
-        ，它按连接的钱包地址列出你订阅的投票在上次查看之后的新事件；不订阅则没有内容可列。
+        {t.t("home.notificationsLine", {
+          notifications: (
+            <Link href="/notifications" className="underline">
+              {t.t("notifications.title")}
+            </Link>
+          ) as unknown as string,
+        })}
       </p>
     </PageShell>
   );

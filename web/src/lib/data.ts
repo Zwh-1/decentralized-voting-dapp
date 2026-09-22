@@ -53,7 +53,8 @@ import { watermarkFor, type NotificationEntry, type Subscription } from "./notif
 import { migrate } from "./db/migrate";
 import { createPool } from "./db/pool";
 import { createRotatingChainReader, type RotatingChainReader } from "./indexer/endpoints";
-import { describeFailure } from "./failure";
+import { classifyFailure, renderFailure, type FailureShape } from "./failure";
+import { DEFAULT_LOCALE, translatorFor, type Locale } from "./i18n";
 import { lagBlocks } from "./indexer/plan";
 import { readCursor, startSyncLoop, syncOnce, type Logger, type SyncOutcome } from "./indexer/sync";
 import { checkConsistency, readIndexedTally } from "./report";
@@ -103,8 +104,14 @@ interface ServerState {
    *
    * Cleared by any successful index read, so a recovered database stops being
    * reported without a restart. Reported through `/api/health`.
+   *
+   * Stored as a CLASSIFIED SHAPE rather than as a rendered sentence. This object
+   * lives for the life of the process and the failure is recorded once, before any
+   * reader exists — so a stored sentence would freeze whichever language was
+   * active at that instant and then serve it to everybody. It is rendered per
+   * request instead, at the point where a locale is actually known.
    */
-  indexError: string | null;
+  indexError: FailureShape | null;
 }
 
 /** A plain key rather than a symbol: symbols are not valid interface keys. */
@@ -195,13 +202,31 @@ async function ready(state: ServerState): Promise<void> {
  * once; the operator still gets the full detail at least once per outage mode.
  */
 function recordIndexFailure(state: ServerState, error: unknown): void {
-  const described = describeFailure(error);
+  const described = classifyFailure(error);
 
-  if (state.indexError !== described) {
+  // Compared on the SHAPE, not on rendered text, so the "log once per distinct
+  // failure mode" behaviour does not depend on which language was active.
+  if (!sameFailure(state.indexError, described)) {
     console.error("[index] read failed", error);
   }
 
   state.indexError = described;
+}
+
+/** Whether two classified failures would render to the same sentence. */
+function sameFailure(a: FailureShape | null, b: FailureShape): boolean {
+  if (a === null) {
+    return false;
+  }
+
+  return (
+    a.fromChainClient === b.fromChainClient &&
+    a.fromDatabase === b.fromDatabase &&
+    a.method === b.method &&
+    a.isError === b.isError &&
+    a.message === b.message &&
+    a.name === b.name
+  );
 }
 
 /** Clears a previously recorded failure: the index answered this time. */
@@ -472,7 +497,7 @@ export async function getEligibility(address: `0x${string}`): Promise<OnChainEli
   return readOnChainEligibility(state.client, address);
 }
 
-export async function getHealth(): Promise<HealthResponse> {
+export async function getHealth(locale: Locale = DEFAULT_LOCALE): Promise<HealthResponse> {
   const state = getServerState();
   await ready(state);
 
@@ -543,7 +568,10 @@ export async function getHealth(): Promise<HealthResponse> {
             lastIndexedBlock,
             confirmations: state.config.confirmations,
           }).toString(),
-    indexError: state.indexError,
+    // Rendered HERE, per request, rather than stored ready-made: the failure was
+    // recorded once at process level, so the only place a reader's language is
+    // known is this one.
+    indexError: state.indexError === null ? null : renderFailure(state.indexError, locale),
   };
 }
 
@@ -822,7 +850,10 @@ export async function getVotedPolls(voter: `0x${string}`): Promise<VotedPollsRes
  * is mapped back to `null` here so the caller never has to know that convention —
  * a UI that rendered "option 0" would be showing a row that does not exist.
  */
-export async function getPollActivity(address: `0x${string}`): Promise<ActivityEntry[] | null> {
+export async function getPollActivity(
+  address: `0x${string}`,
+  locale: Locale = DEFAULT_LOCALE,
+): Promise<ActivityEntry[] | null> {
   const state = getServerState();
   await ready(state);
 
@@ -884,7 +915,7 @@ export async function getPollActivity(address: `0x${string}`): Promise<ActivityE
           txHash: row.tx_hash,
           actor: row.actor ?? undefined,
           optionId: row.option_id === null || row.option_id === 0 ? null : Number(row.option_id),
-          detail: activityDetail(row),
+          detail: activityDetail(row, locale),
         })),
       ),
     );
@@ -928,7 +959,10 @@ export async function getPollActivity(address: `0x${string}`): Promise<ActivityE
  * The `LIKE`-free design is deliberate: every filter is an equality on an indexed
  * column or nothing at all.
  */
-export async function getAuditActivity(filters: AuditFilters): Promise<AuditEntry[] | null> {
+export async function getAuditActivity(
+  filters: AuditFilters,
+  locale: Locale = DEFAULT_LOCALE,
+): Promise<AuditEntry[] | null> {
   const state = getServerState();
   await ready(state);
 
@@ -1009,7 +1043,7 @@ export async function getAuditActivity(filters: AuditFilters): Promise<AuditEntr
           txHash: row.tx_hash,
           actor: row.actor ?? undefined,
           optionId: row.option_id === null || row.option_id === 0 ? null : Number(row.option_id),
-          detail: activityDetail(row),
+          detail: activityDetail(row, locale),
         })),
       ),
     ) as AuditEntry[];
@@ -1176,7 +1210,10 @@ export async function listSubscriptions(address: string): Promise<Subscription[]
  * `JOIN subscriptions` also means an unsubscribed poll contributes nothing without
  * a second `WHERE`.
  */
-export async function listNotifications(address: string): Promise<NotificationEntry[] | null> {
+export async function listNotifications(
+  address: string,
+  locale: Locale = DEFAULT_LOCALE,
+): Promise<NotificationEntry[] | null> {
   const state = getServerState();
   await ready(state);
 
@@ -1237,7 +1274,7 @@ export async function listNotifications(address: string): Promise<NotificationEn
           txHash: row.tx_hash,
           actor: row.actor ?? undefined,
           optionId: row.option_id === null || row.option_id === 0 ? null : Number(row.option_id),
-          detail: activityDetail(row),
+          detail: activityDetail(row, locale),
         })),
       ),
     ) as NotificationEntry[];
@@ -1322,20 +1359,55 @@ export async function markNotificationsRead(
  * Built here rather than in the component so the "0 means withdrawn" and
  * "which phase did it move to" rules live beside the query that produced them,
  * instead of being re-derived from raw columns in the view layer.
- */ function activityDetail(row: {
-  kind: ActivityEntry["kind"];
-  allowed: number | null;
-  from_phase: number | null;
-  to_phase: number | null;
-  amount_wei: string | null;
-}): string | undefined {
+ *
+ * ---------------------------------------------------------------------------
+ * Why this takes a language
+ * ---------------------------------------------------------------------------
+ *
+ * The `detail` it produces is rendered as TEXT by three readers — the poll
+ * page's activity feed, the audit table's 详情 column and the notifications
+ * list — so it is copy, even though it is built in a data module. It used to be
+ * hardcoded Chinese, which meant an English page showed 加入白名单 in its own
+ * detail column with no way for the component to translate it: the string
+ * arrives already finished, as a plain `ActivityEntry` field.
+ *
+ * 阶段 comes from `poll.phase` and 退回 has no existing spelling, so the latter
+ * is a key of its own. `ETH` and the two phase numbers are values and stay
+ * verbatim — `formatWei` is doing arithmetic, not wording.
+ */
+function activityDetail(
+  row: {
+    kind: ActivityEntry["kind"];
+    allowed: number | null;
+    from_phase: number | null;
+    to_phase: number | null;
+    amount_wei: string | null;
+  },
+  locale: Locale,
+): string | undefined {
+  const t = translatorFor(locale);
+
   switch (row.kind) {
     case "whitelist":
-      return row.allowed === 1 ? "加入白名单" : "移出白名单";
+      // These record an event that HAS happened, which is why they are not the
+      // `admin.addToWhitelist` / `admin.removeFromWhitelist` button captions.
+      // The two are byte-identical today and the shared Chinese is allowed to
+      // stay that way — see the allowance table in `i18n.test.ts`.
+      return row.allowed === 1 ? t.t("whitelist.added") : t.t("whitelist.removed");
     case "phase":
-      return `阶段 ${row.from_phase} → ${row.to_phase}`;
+      /*
+        "阶段 1 → 4": the LABEL is translated, the two NUMBERS are not.
+
+        A phase number is what `PollPhase` is, and the contract stores it. A
+        reader checking this row against a block explorer needs the same digits
+        the explorer shows them, so the ordinal is passed through as data while
+        the word in front of it follows the reader's language.
+      */
+      return `${t.t("activity.kind.phase")} ${row.from_phase} → ${row.to_phase}`;
     case "refunded":
-      return row.amount_wei === null ? undefined : `退回 ${formatWei(row.amount_wei)} ETH`;
+      return row.amount_wei === null
+        ? undefined
+        : `${t.t("activity.refundedPrefix")} ${formatWei(row.amount_wei)} ETH`;
     default:
       return undefined;
   }

@@ -191,7 +191,7 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
           <Notice>
             {translator.t("myVotes.noFactory", {
               chainId: subjectChainId,
-              chainName: chainName(subjectChainId),
+              chainName: chainName(subjectChainId, translator.locale),
             })}
           </Notice>
         )}
@@ -302,9 +302,11 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
                   phase === undefined
                     ? translator.t("myVotes.lineReading")
                     : results === undefined
-                      ? translator.t("myVotes.line", { phase: phaseLabel(phase) })
+                      ? translator.t("myVotes.line", {
+                          phase: phaseLabel(phase, translator.locale),
+                        })
                       : translator.t("myVotes.lineWithVotes", {
-                          phase: phaseLabel(phase),
+                          phase: phaseLabel(phase, translator.locale),
                           votes: results,
                         })
                 }
@@ -319,7 +321,7 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
         <p className="text-[11px] text-slate-400">
           {translator.t("myVotes.currentAddress", {
             address: shortenAddress(actor),
-            chainName: chainName(subjectChainId),
+            chainName: chainName(subjectChainId, translator.locale),
             chainId: subjectChainId,
           })}
         </p>

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { NextResponse } from "next/server";
 
+import { currentLocale } from "@/lib/i18n/server";
 import { getHealth } from "@/lib/data";
 import { describeFailure } from "@/lib/failure";
 
@@ -16,12 +17,16 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   try {
-    return NextResponse.json(await getHealth());
+    return NextResponse.json(await getHealth(await currentLocale()));
   } catch (error) {
     console.error("[api/health] read failed", error);
 
     return NextResponse.json(
-      { status: "degraded", error: "config_error", message: describeFailure(error) },
+      {
+        status: "degraded",
+        error: "config_error",
+        message: describeFailure(error, await currentLocale()),
+      },
       { status: 503 },
     );
   }

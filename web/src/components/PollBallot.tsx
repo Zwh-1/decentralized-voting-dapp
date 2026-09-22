@@ -332,7 +332,7 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
   // Which of the four chain states this poll is in, decided in one place so the
   // header badge and the list card cannot disagree. `phase` is `undefined` until
   // the read lands, which `phaseTone` already renders as 读取中.
-  const phaseInfo = phaseTone(phaseState === "ready" ? phase : undefined, deadlinePassed);
+  const phaseInfo = phaseTone(phaseState === "ready" ? phase : undefined, deadlinePassed, locale);
 
   // ---- the rows' values ----
   //
@@ -406,7 +406,18 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
               (readFailed ? t("ballot.questionReadFailed") : t("ballot.readingPoll"))}
           </h1>
           <Badge className={badgeClass(phaseInfo.tone)}>
-            <span data-phase-label>{phaseInfo.label}</span>
+            {/*
+              The attribute names the PHASE, not its label.
+
+              It used to be a bare `data-phase-label` wrapping `phaseInfo.label`,
+              which made its text look like a machine-readable value while being
+              translatable copy — the same trap `TrustPanel`'s `data-fingerprint`
+              fell into. Nothing selected on it, so nothing broke; but a hook that
+              reads as a value and changes with the reader's language is one that
+              breaks the day somebody finally selects on it. The phase number is
+              the stable thing, so that is what the attribute carries.
+            */}
+            <span data-phase={phase}>{phaseInfo.label}</span>
           </Badge>
         </div>
 
@@ -626,7 +637,14 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
       */}
       {tally !== undefined && (
         <section>
-          <ResultChart tally={tally} />
+          {/*
+            `locale` rather than a translator: `ResultChart` is a Server Component
+            with no `"use client"`, so it cannot call the hook and takes the
+            language as data. This component already resolved it, and passing it
+            down is what keeps the chart's caption, its spoken label and the tally
+            beside it in one language.
+          */}
+          <ResultChart tally={tally} locale={locale} />
         </section>
       )}
 

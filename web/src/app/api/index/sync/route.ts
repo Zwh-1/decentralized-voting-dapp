@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { NextResponse } from "next/server";
 
+import { currentLocale } from "@/lib/i18n/server";
 import { runSyncOnce } from "@/lib/data";
 import { describeFailure } from "@/lib/failure";
 
@@ -32,7 +33,11 @@ export async function POST() {
     console.error("[api/index/sync] sync failed", error);
 
     return NextResponse.json(
-      { enabled: true, error: "sync_failed", message: describeFailure(error) },
+      {
+        enabled: true,
+        error: "sync_failed",
+        message: describeFailure(error, await currentLocale()),
+      },
       { status: 503 },
     );
   }

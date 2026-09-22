@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 
+import { useTranslator } from "@/components/LocaleProvider";
+
 /**
  * "Tell me when this poll moves."
  *
@@ -42,6 +44,7 @@ type State =
   | { state: "known"; subscribed: boolean };
 
 export function SubscribeButton({ address }: { address: `0x${string}` }) {
+  const { t } = useTranslator();
   const { address: account, isConnected } = useAccount();
   const [status, setStatus] = useState<State>({ state: "no-wallet" });
   const [busy, setBusy] = useState(false);
@@ -124,11 +127,11 @@ export function SubscribeButton({ address }: { address: `0x${string}` }) {
   if (status.state === "no-wallet") {
     return (
       <p className="text-xs text-slate-500" data-subscribe-state="no-wallet">
-        连接钱包后可以订阅这个投票，它的投票、改投、撤票、退款与阶段变更会出现在{" "}
+        {t("subscribe.connectFirst")}{" "}
         <Link href="/notifications" className="underline">
-          我的通知
+          {t("subscribe.notifications")}
         </Link>
-        。订阅只是一行本站记录，不需要签名，也不上链。
+        {t("subscribe.connectLast")}
       </p>
     );
   }
@@ -136,7 +139,7 @@ export function SubscribeButton({ address }: { address: `0x${string}` }) {
   if (status.state === "loading") {
     return (
       <p className="text-xs text-slate-400" data-subscribe-state="loading">
-        正在读取订阅状态…
+        {t("subscribe.reading")}
       </p>
     );
   }
@@ -144,8 +147,9 @@ export function SubscribeButton({ address }: { address: `0x${string}` }) {
   if (status.state === "no-index") {
     return (
       <p className="text-xs leading-relaxed text-slate-500" data-subscribe-state="no-index">
-        这个部署没有配置索引（<code className="font-mono">DATABASE_URL</code>
-        ），所以无法保存订阅。这不是「订阅失败」——是这里根本没有地方记录它。
+        {t("subscribe.noIndex1")}
+        <code className="font-mono">DATABASE_URL</code>
+        {t("subscribe.noIndex2")}
       </p>
     );
   }
@@ -153,7 +157,7 @@ export function SubscribeButton({ address }: { address: `0x${string}` }) {
   if (status.state === "failed") {
     return (
       <p className="text-xs leading-relaxed text-rose-600" data-subscribe-state="failed">
-        读取订阅状态失败，因此无法确定当前是否已订阅。完整错误见浏览器控制台。
+        {t("subscribe.readFailed")}
       </p>
     );
   }
@@ -174,10 +178,10 @@ export function SubscribeButton({ address }: { address: `0x${string}` }) {
             : "border-slate-900 bg-slate-900 font-medium text-white"
         }`}
       >
-        {status.subscribed ? "取消订阅这个投票" : "订阅这个投票"}
+        {status.subscribed ? t("subscribe.unsubscribe") : t("subscribe.subscribe")}
       </button>
 
-      <span className="text-xs text-slate-400">订阅只是本站的一行记录，不上链、不需要签名。</span>
+      <span className="text-xs text-slate-400">{t("subscribe.note")}</span>
     </div>
   );
 }

@@ -36,7 +36,11 @@ export function HealthPanel() {
     retry: false,
   });
 
-  const rows = data === undefined ? [] : healthRows(data);
+  // The panel's own vocabulary, so it follows the reader's language like the rest
+  // of the page. Without the locale this rendered 状态 / 正常 / 落后区块 inside an
+  // otherwise entirely English panel -- a leak no test caught, because every
+  // assertion on `healthRows` pinned the default locale.
+  const rows = data === undefined ? [] : healthRows(data, translator.locale);
 
   return (
     <section className="mt-10 rounded-xl border border-slate-200 bg-white shadow-sm">

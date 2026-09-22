@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { NextResponse } from "next/server";
 
+import { currentLocale } from "@/lib/i18n/server";
 import { listSubscriptions, subscribe, unsubscribe } from "@/lib/data";
 import { describeFailure } from "@/lib/failure";
 import { parseAddressParam, parseSubscriptionRequest } from "@/lib/notify";
@@ -63,7 +64,7 @@ export async function GET(request: Request) {
     console.error("[api/subscriptions] read failed", error);
 
     return NextResponse.json(
-      { error: "upstream_unavailable", message: describeFailure(error) },
+      { error: "upstream_unavailable", message: describeFailure(error, await currentLocale()) },
       { status: 503 },
     );
   }
@@ -104,7 +105,7 @@ export async function POST(request: Request) {
     console.error("[api/subscriptions] write failed", error);
 
     return NextResponse.json(
-      { error: "upstream_unavailable", message: describeFailure(error) },
+      { error: "upstream_unavailable", message: describeFailure(error, await currentLocale()) },
       { status: 503 },
     );
   }
@@ -142,7 +143,7 @@ export async function DELETE(request: Request) {
     console.error("[api/subscriptions] delete failed", error);
 
     return NextResponse.json(
-      { error: "upstream_unavailable", message: describeFailure(error) },
+      { error: "upstream_unavailable", message: describeFailure(error, await currentLocale()) },
       { status: 503 },
     );
   }

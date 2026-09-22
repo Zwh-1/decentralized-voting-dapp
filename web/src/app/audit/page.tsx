@@ -10,6 +10,8 @@ import {
   type AuditKind,
 } from "@/lib/audit";
 import { getAuditActivity, getConfiguredTarget } from "@/lib/data";
+import { translatorFor } from "@/lib/i18n";
+import { currentLocale } from "@/lib/i18n/server";
 import { paginate, parsePositiveInteger } from "@/lib/pagination";
 import { shortenAddress } from "@/lib/voting";
 
@@ -41,12 +43,23 @@ export const dynamic = "force-dynamic";
  * reads the INDEX, and says so. It is not the consistency check, and a reader
  * should not mistake a clean feed for proof that the index is complete — that is
  * what the per-poll consistency badge is for (ADR-0001).
+ *
+ * ---------------------------------------------------------------------------
+ * Why the language is read here rather than through a hook
+ * ---------------------------------------------------------------------------
+ *
+ * This is a Server Component that reads the database, so it must not gain
+ * `"use client"` — the hook would drag the whole feed across a client boundary
+ * and the page would stop being part of the server's answer. `currentLocale()`
+ * reads the same cookie the root layout does, and `translatorFor` turns it into
+ * the same translator the client components get, so one language governs both.
  */
 export default async function AuditPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const t = translatorFor(await currentLocale());
   const raw = await searchParams;
   const configuredTarget = getConfiguredTarget();
 
@@ -68,10 +81,10 @@ export default async function AuditPage({
 
   if (parsed.ok) {
     try {
-      entries = await getAuditActivity(parsed.filters);
+      entries = await getAuditActivity(parsed.filters, t.locale);
     } catch (error) {
       console.error("[audit page] read failed", error);
-      loadError = "读取审计事件时发生未预期的错误。完整错误见服务端日志。";
+      loadError = t.t("audit.readFailed");
     }
   }
 
@@ -109,13 +122,14 @@ export default async function AuditPage({
 
   return (
     <PageShell
-      title="审计视图"
-      subtitle="索引器记录过的全部事件，跨所有投票。按事件类型、投票合约或地址过滤。此页读取的是索引，不是链上实时状态——索引与链上是否一致请看每个投票页的一致性标记。"
+      title={t.t("audit.title")}
+      subtitle={t.t("audit.subtitle")}
       configuredTarget={configuredTarget}
+      translator={t}
     >
       <p className="mt-4 text-xs text-slate-400">
         <Link href="/" className="underline">
-          ← 全部投票
+          {t.t("audit.backToPolls")}
         </Link>
       </p>
 
@@ -127,7 +141,7 @@ export default async function AuditPage({
       )}
 
       {/* The kind filter, as links, so the state survives a copy-paste and works without JS. */}
-      <nav className="mt-6 flex flex-wrap items-center gap-2" aria-label="按事件类型过滤">
+      <nav className="mt-6 flex flex-wrap items-center gap-2" aria-label={t.t("audit.filterLabel")}>
         <Link
           href={hrefWith({ kind: null })}
           className={`rounded-full border px-3 py-1.5 text-xs ${
@@ -136,7 +150,7 @@ export default async function AuditPage({
               : "border-slate-200 bg-white text-slate-600"
           }`}
         >
-          全部
+          {t.t("audit.allKinds")}
         </Link>
         {AUDIT_KINDS.map((kind: AuditKind) => (
           <Link
@@ -148,7 +162,7 @@ export default async function AuditPage({
                 : "border-slate-200 bg-white text-slate-600"
             }`}
           >
-            {auditKindLabel(kind)}
+            {auditKindLabel(kind, t.locale)}
           </Link>
         ))}
       </nav>
@@ -165,16 +179,23 @@ export default async function AuditPage({
 
       {loadError === null && entries === null && (
         <section className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
-          <h2 className="text-sm font-medium text-slate-800">这个部署没有可用的索引</h2>
+          <h2 className="text-sm font-medium text-slate-800">{t.t("audit.noIndexTitle")}</h2>
           <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-            审计事件来自 MySQL 索引，而当前部署没有配置{" "}
-            <code className="font-mono">DATABASE_URL</code>，所以无法列出历史事件。
-            这不代表「没有活动」——链上的事件仍然在发生，只是这里读不到。
+            {t.t("audit.indexRequired", {
+              // The variable and the commands are quoted into the sentence, not
+              // reformatted by it: they are the exact strings an operator types.
+              databaseUrl: (<code className="font-mono">DATABASE_URL</code>) as unknown as string,
+            })}
           </p>
           <p className="mt-2 text-xs leading-relaxed text-slate-500">
-            配置 <code className="font-mono">DATABASE_URL</code> 后运行{" "}
-            <code className="font-mono">pnpm indexer:migrate &amp;&amp; pnpm indexer:drain</code>{" "}
-            即可建立索引；每个投票页的活动记录也会随之出现。
+            {t.t("audit.indexHowTo", {
+              databaseUrl: (<code className="font-mono">DATABASE_URL</code>) as unknown as string,
+              commands: (
+                <code className="font-mono">
+                  pnpm indexer:migrate &amp;&amp; pnpm indexer:drain
+                </code>
+              ) as unknown as string,
+            })}
           </p>
         </section>
       )}
@@ -187,17 +208,23 @@ export default async function AuditPage({
             a 50-event one.
           */}
           <p className="mt-6 text-xs text-slate-500">
-            共 {current.total} 条事件，涉及 {summarizeAudit(entries ?? []).polls} 个投票
-            {parsed.ok && parsed.filters.kind !== null
-              ? `，类型：${auditKindLabel(parsed.filters.kind)}`
-              : ""}
-            。
+            {t.t("audit.summary", {
+              count: current.total,
+              polls: summarizeAudit(entries ?? []).polls,
+              kind:
+                parsed.ok && parsed.filters.kind !== null
+                  ? t.t("audit.summaryKind", {
+                      kind: auditKindLabel(parsed.filters.kind, t.locale),
+                    })
+                  : "",
+            })}
           </p>
 
           {current.items.length === 0 ? (
             <section className="mt-4 rounded-xl border border-slate-200 bg-white p-5">
               <p className="text-sm text-slate-600">
-                索引里没有符合当前过滤条件的事件。过滤条件与索引自身都是可读的，所以这是「没有匹配」而不是「读不到」。
+                {t.t("audit.empty")}
+                {t.t("audit.emptyDetail")}
               </p>
             </section>
           ) : (
@@ -205,12 +232,12 @@ export default async function AuditPage({
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 text-xs text-slate-500">
                   <tr>
-                    <th className="px-3 py-2 font-medium">类型</th>
-                    <th className="px-3 py-2 font-medium">投票</th>
-                    <th className="px-3 py-2 font-medium">地址</th>
-                    <th className="px-3 py-2 font-medium">详情</th>
-                    <th className="px-3 py-2 font-medium">区块</th>
-                    <th className="px-3 py-2 font-medium">交易</th>
+                    <th className="px-3 py-2 font-medium">{t.t("audit.kind")}</th>
+                    <th className="px-3 py-2 font-medium">{t.t("audit.poll")}</th>
+                    <th className="px-3 py-2 font-medium">{t.t("audit.actor")}</th>
+                    <th className="px-3 py-2 font-medium">{t.t("audit.detail")}</th>
+                    <th className="px-3 py-2 font-medium">{t.t("audit.block")}</th>
+                    <th className="px-3 py-2 font-medium">{t.t("audit.tx")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -219,7 +246,9 @@ export default async function AuditPage({
                       key={`${entry.txHash}-${entry.blockNumber}-${entry.kind}`}
                       className="border-t border-slate-100"
                     >
-                      <td className="px-3 py-2 text-slate-700">{auditKindLabel(entry.kind)}</td>
+                      <td className="px-3 py-2 text-slate-700">
+                        {auditKindLabel(entry.kind, t.locale)}
+                      </td>
                       <td className="px-3 py-2">
                         <Link
                           href={`/poll/${entry.pollAddress}`}
@@ -229,13 +258,13 @@ export default async function AuditPage({
                         </Link>
                       </td>
                       <td className="px-3 py-2 font-mono text-xs text-slate-500">
-                        {entry.actor === undefined ? "—" : shortenAddress(entry.actor)}
+                        {entry.actor === undefined ? t.ballot.nothing : shortenAddress(entry.actor)}
                       </td>
                       <td className="px-3 py-2 text-xs text-slate-600">
                         {entry.detail ??
                           (entry.optionId === null || entry.optionId === undefined
-                            ? "—"
-                            : `选项 ${entry.optionId}`)}
+                            ? t.ballot.nothing
+                            : t.t("activity.option", { id: entry.optionId }))}
                       </td>
                       <td className="px-3 py-2 font-mono text-xs text-slate-500">
                         {entry.blockNumber}
@@ -251,9 +280,12 @@ export default async function AuditPage({
           )}
 
           {current.pageCount > 1 && (
-            <nav className="mt-6 flex items-center justify-between" aria-label="审计分页">
+            <nav
+              className="mt-6 flex items-center justify-between"
+              aria-label={t.t("audit.pagination")}
+            >
               <p className="text-xs text-slate-500">
-                第 {current.page} / {current.pageCount} 页
+                {t.t("common.pageOf", { page: current.page, pageCount: current.pageCount })}
               </p>
               <div className="flex gap-2">
                 {current.page > 1 && (
@@ -261,7 +293,7 @@ export default async function AuditPage({
                     href={pageHref(current.page - 1)}
                     className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                   >
-                    上一页
+                    {t.t("common.previous")}
                   </Link>
                 )}
                 {current.page < current.pageCount && (
@@ -269,7 +301,7 @@ export default async function AuditPage({
                     href={pageHref(current.page + 1)}
                     className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
                   >
-                    下一页
+                    {t.t("common.next")}
                   </Link>
                 )}
               </div>

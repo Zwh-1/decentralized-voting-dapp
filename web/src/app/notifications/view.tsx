@@ -51,33 +51,39 @@ export function NotificationsView() {
   const [load, setLoad] = useState<Load>({ state: "idle" });
   const [busy, setBusy] = useState(false);
 
-  const read = useCallback(async (subject: string) => {
-    setLoad({ state: "loading" });
+  const read = useCallback(
+    async (subject: string) => {
+      setLoad({ state: "loading" });
 
-    try {
-      const response = await fetch(`/api/notifications?address=${subject}`);
+      try {
+        const response = await fetch(`/api/notifications?address=${subject}`);
 
-      if (response.status === 404) {
-        setLoad({ state: "no-index" });
+        if (response.status === 404) {
+          setLoad({ state: "no-index" });
 
-        return;
+          return;
+        }
+
+        if (!response.ok) {
+          setLoad({
+            state: "failed",
+            message: translator.t("notifications.readFailedHttp", { status: response.status }),
+          });
+
+          return;
+        }
+
+        setLoad({ state: "ready", data: (await response.json()) as NotificationsResponse });
+      } catch (error) {
+        console.error("[notifications] read failed", error);
+        setLoad({
+          state: "failed",
+          message: translator.t("notifications.readFailedUnexpected"),
+        });
       }
-
-      if (!response.ok) {
-        setLoad({ state: "failed", message: `读取失败（HTTP ${response.status}）。` });
-
-        return;
-      }
-
-      setLoad({ state: "ready", data: (await response.json()) as NotificationsResponse });
-    } catch (error) {
-      console.error("[notifications] read failed", error);
-      setLoad({
-        state: "failed",
-        message: "读取通知时发生未预期的错误。完整错误见浏览器控制台。",
-      });
-    }
-  }, []);
+    },
+    [translator],
+  );
 
   useEffect(() => {
     if (!isConnected || address === undefined) {
@@ -121,9 +127,7 @@ export function NotificationsView() {
   if (!isConnected) {
     return (
       <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5">
-        <p className="text-sm text-slate-600">
-          通知按钱包地址归属，所以需要先连接钱包。连接后这一页会列出你订阅的投票的新动态。
-        </p>
+        <p className="text-sm text-slate-600">{translator.t("notifications.connectFirst")}</p>
       </section>
     );
   }
@@ -140,11 +144,13 @@ export function NotificationsView() {
   if (load.state === "no-index") {
     return (
       <section className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5">
-        <h2 className="text-sm font-medium text-slate-800">这个部署没有可用的索引</h2>
+        <h2 className="text-sm font-medium text-slate-800">{translator.t("audit.noIndexTitle")}</h2>
         <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-          通知由索引器记录的事件推导，而当前部署没有配置{" "}
-          <code className="font-mono">DATABASE_URL</code>，所以无法列出任何动态。
-          这不代表「没有新动态」——链上事件仍然在发生，只是这里读不到。
+          {translator.t("notifications.indexRequired", {
+            // The variable is quoted into the sentence rather than restyled by it:
+            // it is the exact name an operator sets.
+            databaseUrl: (<code className="font-mono">DATABASE_URL</code>) as unknown as string,
+          })}
         </p>
       </section>
     );
@@ -164,8 +170,11 @@ export function NotificationsView() {
     <>
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-slate-500" data-notification-summary>
-          未读 {summary.total} 条，涉及 {summary.pollCount} 个投票
-          {truncated ? `（本页只列出最新的 ${limit} 条）` : ""}。
+          {translator.t("notifications.summary", {
+            count: summary.total,
+            polls: summary.pollCount,
+            truncated: truncated ? translator.t("notifications.summaryTruncated", { limit }) : "",
+          })}
         </p>
 
         {summary.total > 0 && (
@@ -176,15 +185,15 @@ export function NotificationsView() {
             data-notification-mark-read
             className="min-h-[44px] rounded-lg bg-slate-900 px-4 py-2 text-xs font-medium text-white disabled:opacity-50"
           >
-            全部标记为已读
+            {translator.t("notifications.markAllRead")}
           </button>
         )}
       </div>
 
       {summary.total === 0 ? (
         <EmptyState
-          title="没有未读动态"
-          description="索引可读，且你订阅的投票在上次查看之后没有新事件。这是一种确定的状态，不是读取失败。还没有订阅？在任意投票页点「订阅这个投票」，之后它的投票、改投、撤票、退款与阶段变更都会出现在这里。"
+          title={translator.t("notifications.emptyTitle")}
+          description={translator.t("notifications.emptyDescription")}
         />
       ) : (
         <ul className="mt-4 space-y-2" data-notification-list>
@@ -196,7 +205,9 @@ export function NotificationsView() {
             >
               <div className="min-w-0">
                 <p className="text-sm text-slate-800">
-                  <span className="font-medium">{auditKindLabel(entry.kind)}</span>
+                  <span className="font-medium">
+                    {auditKindLabel(entry.kind, translator.locale)}
+                  </span>
                   {" · "}
                   <Link href={`/poll/${entry.pollAddress}`} className="font-mono text-xs underline">
                     {shortenAddress(entry.pollAddress)}
@@ -205,10 +216,10 @@ export function NotificationsView() {
                 <p className="mt-0.5 text-xs text-slate-500">
                   {entry.detail ??
                     (entry.optionId === null || entry.optionId === undefined
-                      ? "—"
-                      : `选项 ${entry.optionId}`)}
+                      ? translator.ballot.nothing
+                      : translator.t("activity.option", { id: entry.optionId }))}
                   {entry.actor === undefined ? "" : ` · ${shortenAddress(entry.actor)}`}
-                  {` · 区块 ${entry.blockNumber}`}
+                  {` · ${translator.t("notifications.block", { block: entry.blockNumber })}`}
                 </p>
               </div>
 
@@ -218,7 +229,7 @@ export function NotificationsView() {
                 onClick={() => void markRead(entry.pollAddress)}
                 className="min-h-[44px] rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-600 disabled:opacity-50"
               >
-                这个投票标记为已读
+                {translator.t("notifications.markThisRead")}
               </button>
             </li>
           ))}
@@ -226,7 +237,7 @@ export function NotificationsView() {
       )}
 
       <p className="mt-6 text-xs leading-relaxed text-slate-400">
-        {translator.t("nav.audit")} 会列出全部事件（跨所有投票），这里只列出你订阅的部分。
+        {translator.t("notifications.auditLine", { audit: translator.t("nav.audit") })}
       </p>
     </>
   );

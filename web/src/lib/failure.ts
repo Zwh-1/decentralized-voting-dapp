@@ -28,8 +28,18 @@
  * `config.ts`), so replacing them would lose the operator's only clue.
  */
 
-/** What can be safely learned from an arbitrary thrown value. */
-interface FailureShape {
+import { DEFAULT_LOCALE, translatorFor, type Locale } from "./i18n";
+
+/**
+ * What can be safely learned from an arbitrary thrown value.
+ *
+ * Exported because it is also what `data.ts` STORES. The index-failure record
+ * lives for the life of the process and is written once, before any reader
+ * exists, so it cannot hold a rendered sentence — that would freeze whichever
+ * language was active at the moment of the failure and then serve it to
+ * everyone. The shape is stored and rendered per request instead.
+ */
+export interface FailureShape {
   name: string;
   message: string;
   /** False for a thrown non-Error (a string, an object, a driver's plain value). */
@@ -123,12 +133,14 @@ function firstLine(text: string): string {
  * `RPC_URL` would send the operator to edit the one endpoint that was probably
  * working. "Every configured endpoint" is the accurate description of what was
  * attempted, and it is true whether one endpoint is configured or five.
+ *
+ * `{call}` names the JSON-RPC method when the error carried one, and is the empty
+ * string otherwise — it is a value, never a sentence, so it is passed through
+ * `interpolate` rather than concatenated. Concatenating it is what used to make
+ * the two branches possible to get wrong in different ways.
  */
-function rpcFailure(call: string): string {
-  return (
-    `链上读取失败${call}：所有已配置的 RPC 端点都未响应（连接失败或请求超时）。` +
-    "请检查 web/.env 里的 RPC_URL / RPC_URLS 是否可达；完整错误见服务端日志。"
-  );
+function rpcFailure(call: string, locale: Locale): string {
+  return translatorFor(locale).t("failure.rpcUnreachable", { call });
 }
 
 /**
@@ -137,10 +149,48 @@ function rpcFailure(call: string): string {
  * Guarantees, in order of how much they cost when broken: the result never
  * contains the configured endpoint or key; it names which dependency failed; and
  * a failure that came from a chain call says which JSON-RPC method it was.
+ *
+ * ---------------------------------------------------------------------------
+ * Why this takes a language, and why the LOG does not
+ * ---------------------------------------------------------------------------
+ *
+ * This function is easy to mistake for a logging helper, and it is the opposite
+ * of one. The RAW throwable is what goes to the server log (`data.ts` does
+ * exactly that, on the line above where it stores this function's result). What
+ * this returns is the scrubbed REPLACEMENT for it, and that value has readers:
+ * nine `/api/*` routes return it as `message`, `/api/health` publishes it as
+ * `indexError` and the health panel renders it, and `/`, `/my` and
+ * `/poll/<address>` render it into their server-read failure banners. So every
+ * sentence below is translated.
+ *
+ * The two redaction placeholders are NOT. `<已隐去的 URL>` and `<已隐去>` stand
+ * where text was already removed, and they are the marker an operator is told to
+ * search for in the log — translating them would mean an English reader searching
+ * for a string that the Chinese log line never contained. They are also part of
+ * the security guarantee rather than of the copy: `failure.test.ts` asserts that
+ * no endpoint survives by looking for exactly these, in both languages.
  */
-export function describeFailure(error: unknown): string {
-  const shape = shapeOf(error);
-  const call = shape.method === null ? "" : `（${shape.method} 调用）`;
+/**
+ * Classifies a failure without rendering it, so the caller can render it later.
+ *
+ * Named separately from `describeFailure` for the process-level record described
+ * on `FailureShape` above: a caller that must remember a failure across requests
+ * stores this value and calls `renderFailure` when it finally knows the reader's
+ * language.
+ */
+export function classifyFailure(error: unknown): FailureShape {
+  return shapeOf(error);
+}
+
+/** Renders a previously classified failure in the reader's language. */
+export function renderFailure(shape: FailureShape, locale: Locale = DEFAULT_LOCALE): string {
+  const t = translatorFor(locale);
+  // The parenthetical names the JSON-RPC method that failed. It is a SENTENCE
+  // FRAGMENT built around a value, so it has to be translated too: leaving it
+  // Chinese while the sentence around it is English is the half-translated
+  // output this whole change exists to remove. The method name itself
+  // (`eth_blockNumber`) is data and stays verbatim.
+  const call = shape.method === null ? "" : t.t("failure.callSuffix", { method: shape.method });
 
   // Ordered by how specific the evidence is, not by how common the failure is. A
   // viem error is unambiguous (only viem's `BaseError` has `walk`), and the
@@ -149,26 +199,28 @@ export function describeFailure(error: unknown): string {
   // came from MySQL or from `fetch`, so the text alone would send the operator to
   // `RPC_URL` while the database is what is down.
   if (shape.fromChainClient) {
-    return rpcFailure(call);
+    return rpcFailure(call, locale);
   }
 
   if (shape.fromDatabase) {
-    return "索引数据库（MySQL）不可读或不可写。请检查 web/.env 里的 DATABASE_URL，以及数据库是否在运行；完整错误见服务端日志。";
+    return t.t("failure.databaseUnreachable");
   }
 
   if (UNREACHABLE.test(shape.message)) {
-    return rpcFailure(call);
+    return rpcFailure(call, locale);
   }
-
-  const generic = `未预期的失败（${shape.name}）。完整错误见服务端日志。`;
 
   if (!shape.isError) {
     // A thrown non-Error has no message to classify, and `String(value)` would
     // only render as "undefined" or "[object Object]".
-    return "未预期的失败。完整错误见服务端日志。";
+    return t.t("failure.unexpected");
   }
 
   const own = scrub(firstLine(shape.message));
 
-  return own.length > 0 ? own : generic;
+  return own.length > 0 ? own : t.t("failure.unexpectedNamed", { name: shape.name });
+}
+
+export function describeFailure(error: unknown, locale: Locale = DEFAULT_LOCALE): string {
+  return renderFailure(shapeOf(error), locale);
 }

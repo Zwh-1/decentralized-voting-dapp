@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { NextResponse } from "next/server";
 
+import { currentLocale } from "@/lib/i18n/server";
 import { listNotifications, markNotificationsRead } from "@/lib/data";
 import { describeFailure } from "@/lib/failure";
 import { parseAddressParam, summarizeNotifications } from "@/lib/notify";
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
   const limit = Math.min(requested ?? DEFAULT_LIMIT, MAX_LIMIT);
 
   try {
-    const entries = await listNotifications(parsed.address);
+    const entries = await listNotifications(parsed.address, await currentLocale());
 
     if (entries === null) {
       return NextResponse.json(
@@ -73,7 +74,7 @@ export async function GET(request: Request) {
     console.error("[api/notifications] read failed", error);
 
     return NextResponse.json(
-      { error: "upstream_unavailable", message: describeFailure(error) },
+      { error: "upstream_unavailable", message: describeFailure(error, await currentLocale()) },
       { status: 503 },
     );
   }
@@ -141,7 +142,7 @@ export async function POST(request: Request) {
     poll is acknowledged, and the heights always come from the index.
   */
   try {
-    const entries = await listNotifications(parsed.address);
+    const entries = await listNotifications(parsed.address, await currentLocale());
 
     if (entries === null) {
       return NextResponse.json(
@@ -172,7 +173,7 @@ export async function POST(request: Request) {
     console.error("[api/notifications] write failed", error);
 
     return NextResponse.json(
-      { error: "upstream_unavailable", message: describeFailure(error) },
+      { error: "upstream_unavailable", message: describeFailure(error, await currentLocale()) },
       { status: 503 },
     );
   }

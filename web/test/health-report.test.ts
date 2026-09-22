@@ -157,3 +157,84 @@ describe("healthRows", () => {
     ]);
   });
 });
+
+/**
+ * The language checks.
+ *
+ * ---------------------------------------------------------------------------
+ * Why this block exists at all
+ * ---------------------------------------------------------------------------
+ *
+ * Two reviewers independently found that nothing here asserted the panel was
+ * translated. Every other test in this file pins the DEFAULT-locale output, so
+ * they pass whether or not `healthRows` consults a locale at all — the panel
+ * could have stayed Chinese-only on English pages with the whole suite green.
+ * A test that passes for both the correct and the broken implementation is not
+ * coverage, so this closes that specifically rather than by adding another
+ * default-locale assertion.
+ */
+describe("healthRows in English", () => {
+  it("translates every row label", () => {
+    const rows = healthRows(health(), "en");
+
+    // Asserted as a whole list, not one spot check: a single translated row
+    // proves a locale parameter exists, not that all ten use it.
+    assert.deepEqual(
+      rows.map((row) => row.label),
+      [
+        "Status",
+        "Chain ID",
+        "Factory contract",
+        "Poll count",
+        "Confirmations",
+        "Index configured",
+        "Indexer loop",
+        "Indexed height",
+        "Chain height",
+        "Lag",
+      ],
+    );
+  });
+
+  it("translates the values that are words rather than data", () => {
+    const rows = healthRows(health(), "en");
+
+    // "Healthy" rather than "OK": the Chinese pair is 正常 / 降级, two parallel
+    // adjectives, and an English pair of "OK" / "Degraded" mixes an initialism
+    // with an adjective. The catalogue is the place to be faithful to the source
+    // pairing rather than to the shortest rendering of it.
+    assert.equal(rowValue(rows, "Status"), "Healthy");
+    assert.equal(rowValue(rows, "Index configured"), "Yes");
+    assert.equal(rowValue(rows, "Indexer loop"), "Running");
+    assert.equal(rowValue(rows, "Lag"), "5 blocks");
+  });
+
+  it("leaves the values that are data alone", () => {
+    const rows = healthRows(health(), "en");
+
+    // The factory address and the chain id are the same in every language, and
+    // translating them would break the copy-paste a reader uses to check them.
+    assert.equal(rowValue(rows, "Factory contract"), FACTORY);
+    assert.equal(rowValue(rows, "Chain ID"), "11155111");
+  });
+
+  it("says 'not applicable' rather than 'not enabled' when a number cannot exist", () => {
+    // These are two different claims and the panel must not conflate them: a
+    // feature that is switched off is `未启用` / "Not enabled", while a number
+    // this deployment cannot compute is `不适用` / "Not applicable". ADR-0015 is
+    // the reason — inventing a reading out of a missing one is the failure this
+    // whole panel exists to avoid.
+    assert.equal(lagLabel(null, "en").value, "Not applicable");
+    assert.equal(lagLabel(null).value, "不适用");
+  });
+
+  it("returns a different string per language, so the parameter is load-bearing", () => {
+    const zh = healthRows(health(), "zh").map((row) => row.label);
+    const en = healthRows(health(), "en").map((row) => row.label);
+
+    // Guards the failure mode where someone "translates" by passing the locale
+    // through and then reading the Chinese table anyway.
+    assert.notDeepEqual(zh, en);
+    assert.equal(zh.length, en.length, "both languages must describe the same rows");
+  });
+});

@@ -1,4 +1,5 @@
 import { CHAIN_IDS, getDeployment, PollPhase, factoryAbi, pollAbi } from "./contracts";
+import { DEFAULT_LOCALE, type Locale } from "./i18n";
 
 export { factoryAbi, pollAbi, PollPhase };
 
@@ -27,8 +28,38 @@ export const CHAIN_NAMES: Record<number, string> = {
   [CHAIN_IDS.sepolia]: "Sepolia",
 };
 
-export function chainName(chainId: number): string {
-  return CHAIN_NAMES[chainId] ?? `未知链 ${chainId}`;
+/**
+ * Chain names in English.
+ *
+ * Only the entries that are actually prose need a second spelling: `Sepolia` is a
+ * protocol name and is written the same way in both languages, so it is not
+ * repeated here. A chain with no entry falls back to the identifier form below,
+ * which every catalogue already renders untranslated because it is data (a chain
+ * id) rather than a sentence.
+ */
+const EN_CHAIN_NAMES: Record<number, string> = {
+  [CHAIN_IDS.hardhat]: "Local Hardhat",
+};
+
+/**
+ * The chain's name, for a sentence that names it.
+ *
+ * The locale parameter is what keeps this from leaking Chinese into an English
+ * page: this string is interpolated into messages like `list.noFactory`, so
+ * without it an English reader was shown
+ * "The current chain (31337, 本地 Hardhat) has no registered factory address".
+ * That is the mixed-language defect the catalogue exists to remove, arriving
+ * through an interpolation value instead of through a literal.
+ */
+export function chainName(chainId: number, locale: Locale = DEFAULT_LOCALE): string {
+  const table = locale === "en" ? EN_CHAIN_NAMES : CHAIN_NAMES;
+
+  return table[chainId] ?? chainUnknown(chainId, locale);
+}
+
+/** The name to fall back to for a chain this build has never heard of. */
+function chainUnknown(chainId: number, locale: Locale): string {
+  return locale === "en" ? `Unknown chain ${chainId}` : `未知链 ${chainId}`;
 }
 
 /** A chain and the `VotingFactory` address deployed on it. */
@@ -81,12 +112,31 @@ export const PHASE_LABELS: Record<number, string> = {
   [PollPhase.Ended]: "已结束",
 };
 
-export function phaseLabel(phase: number | undefined): string {
+/**
+ * The same phases in English, keyed by the SAME enum members.
+ *
+ * Keyed by name rather than by ordinal on purpose: batch 1 inserted `Reveal` into
+ * the contract's enum and shifted `Ended` from 2 to 3, which is the defect that
+ * has now broken code in this repository three times. Writing `[PollPhase.Ended]`
+ * makes that shift impossible to get wrong.
+ */
+const EN_PHASE_LABELS: Record<number, string> = {
+  [PollPhase.Setup]: "Setup",
+  [PollPhase.Voting]: "Voting",
+  [PollPhase.Reveal]: "Reveal",
+  [PollPhase.Ended]: "Ended",
+};
+
+export function phaseLabel(phase: number | undefined, locale: Locale = DEFAULT_LOCALE): string {
+  const unknown = locale === "en" ? "Unknown" : "未知";
+
   if (phase === undefined) {
-    return "未知";
+    return unknown;
   }
 
-  return PHASE_LABELS[phase] ?? `未知 (${phase})`;
+  const table = locale === "en" ? EN_PHASE_LABELS : PHASE_LABELS;
+
+  return table[phase] ?? `${unknown} (${phase})`;
 }
 
 export function formatEth(wei: bigint): string {

@@ -35,6 +35,7 @@
  * and the element renders unstyled in production while looking fine in dev.
  */
 
+import { DEFAULT_LOCALE, type Locale } from "./i18n";
 import { phaseLabel, PollPhase } from "./voting";
 
 /**
@@ -98,34 +99,55 @@ export interface PhaseTone {
  * written again here. Two independent spellings of the same state is how the
  * list page and the detail page end up disagreeing about what to call it.
  */
-export function phaseTone(phase: number | undefined, deadlinePassed: boolean): PhaseTone {
+/**
+ * The four phase-badge labels that are not simply a phase's own name.
+ *
+ * They live here rather than in the shared catalogue because they are this
+ * function's vocabulary — a badge word, not a sentence — and because two of them
+ * (`未开始`, `已过截止`) describe a state the contract's enum does not have: a poll
+ * that has not opened, and one mid-flight past its deadline. Keeping them beside
+ * the branch that chooses them is what stops the choice and the word drifting
+ * apart.
+ */
+const PHASE_TONE_LABELS = {
+  zh: { reading: "读取中", notStarted: "未开始", ended: "已结束", pastDue: "已过截止" },
+  en: { reading: "Reading", notStarted: "Not started", ended: "Ended", pastDue: "Past due" },
+} as const;
+
+export function phaseTone(
+  phase: number | undefined,
+  deadlinePassed: boolean,
+  locale: Locale = DEFAULT_LOCALE,
+): PhaseTone {
+  const words = PHASE_TONE_LABELS[locale];
+
   if (phase === undefined) {
-    return { label: "读取中", tone: "neutral", votable: false };
+    return { label: words.reading, tone: "neutral", votable: false };
   }
 
   if (phase === PollPhase.Setup) {
-    return { label: "未开始", tone: "waiting", votable: false };
+    return { label: words.notStarted, tone: "waiting", votable: false };
   }
 
   if (phase === PollPhase.Ended) {
-    return { label: "已结束", tone: "closed", votable: false };
+    return { label: words.ended, tone: "closed", votable: false };
   }
 
   if (phase === PollPhase.Reveal) {
-    return { label: phaseLabel(phase), tone: "waiting", votable: false };
+    return { label: phaseLabel(phase, locale), tone: "waiting", votable: false };
   }
 
   if (phase === PollPhase.Voting) {
     return deadlinePassed
-      ? { label: "已过截止", tone: "danger", votable: false }
-      : { label: phaseLabel(phase), tone: "live", votable: true };
+      ? { label: words.pastDue, tone: "danger", votable: false }
+      : { label: phaseLabel(phase, locale), tone: "live", votable: true };
   }
 
   // An unknown phase is a read that returned something this build does not know
   // about — a newer contract, most likely. It is NOT reported as votable: an
   // interface that offers a vote it cannot justify is worse than one that says
   // it does not understand.
-  return { label: phaseLabel(phase), tone: "neutral", votable: false };
+  return { label: phaseLabel(phase, locale), tone: "neutral", votable: false };
 }
 
 /** The classes for a badge in the given tone. */

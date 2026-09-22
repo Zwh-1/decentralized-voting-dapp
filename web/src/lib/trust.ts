@@ -37,6 +37,7 @@
  */
 
 import { PollPhase } from "./contracts";
+import { DEFAULT_LOCALE, translatorFor, type Locale } from "./i18n";
 
 /** How a poll's current rules compare to its creation-time commitment. */
 export type RulesVerdict = "unchanged" | "changed" | "unknown";
@@ -101,34 +102,58 @@ function normalise(value: string | null | undefined): string | null {
  * about foul play would be wrong — the edit may be entirely legitimate — and an
  * `unknown` rendered as reassurance would be the exact false assurance the check
  * exists to prevent. Both are text, and text is testable.
+ *
+ * ---------------------------------------------------------------------------
+ * Why the sentences take a language
+ * ---------------------------------------------------------------------------
+ *
+ * They are RESULTS of a pure function, not JSX: `TrustPanel` receives the
+ * finished `{title, detail}` and renders it, so by the time a component holds
+ * the string the language decision has already been made and no translator can
+ * reach it. Until this parameter existed, an English page showed 规则与创建时一致
+ * and a full paragraph of Chinese directly beneath it inside an otherwise
+ * English panel.
+ *
+ * The trailing `locale` defaults to `DEFAULT_LOCALE`, which is the same
+ * additive shape `voting.ts` uses for `chainName` and `phaseLabel`: every
+ * existing call site and assertion keeps producing byte-identical Chinese, and
+ * the English path runs only where a reader asked for it.
+ *
+ * `title` and `detail` move together on purpose — a translated title above an
+ * untranslated paragraph is worse than either alone, because it reads as a
+ * broken page rather than as a missing translation. `trust.test.ts` pins the
+ * properties of each verdict's detail (it must not accuse, must not reassure,
+ * and must name how to check) in BOTH languages.
  */
-export function rulesSummary(check: RulesCheck): {
+export function rulesSummary(
+  check: RulesCheck,
+  locale: Locale = DEFAULT_LOCALE,
+): {
   title: string;
   detail: string;
   tone: "ok" | "warn" | "neutral";
 } {
+  const t = translatorFor(locale);
+
   switch (check.verdict) {
     case "unchanged":
       return {
-        title: "规则与创建时一致",
-        detail:
-          "把当前链上的问题、选项、截止时间、准入方式与白名单重新做了一次指纹计算，结果与创建时写入的承诺相同：这些内容自创建以来没有被改动过。任何人都可以独立重算并得到相同结果。",
+        title: t.t("trust.rulesUnchangedTitle"),
+        detail: t.t("trust.rulesUnchangedDetail"),
         tone: "ok",
       };
 
     case "changed":
       return {
-        title: "规则在创建后有过改动",
-        detail:
-          "当前链上状态的指纹与创建时写入的承诺不同，说明问题、选项、截止时间、准入方式或白名单在创建之后被改过至少一次。这不一定有问题——发起人在投票开始前增删选项、维护白名单本来就是正常流程——但你应该知道这件事，而不是只能相信页面。改动只可能发生在投票开始之前，因为选项在开始后会被冻结。",
+        title: t.t("trust.rulesChangedTitle"),
+        detail: t.t("trust.rulesChangedDetail"),
         tone: "warn",
       };
 
     case "unknown":
       return {
-        title: "无法比对规则指纹",
-        detail:
-          "没能同时读到创建时的承诺与当前状态，所以无法判断规则是否被改动过。这不代表规则没问题，也不代表有问题——只是这一次没有验证成功。可以重试，或直接在区块浏览器上调用 rulesHash() 与 currentRulesHash() 自行比对。",
+        title: t.t("trust.rulesUnknownTitle"),
+        detail: t.t("trust.rulesUnknownDetail"),
         tone: "neutral",
       };
   }

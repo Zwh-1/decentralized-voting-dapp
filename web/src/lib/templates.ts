@@ -43,6 +43,7 @@
  * calldata stays something a reader can explain.
  */
 
+import { DEFAULT_LOCALE, interpolate, messagesFor, type Locale } from "./i18n";
 import { DEFAULT_CONFIG, validateConfig, type PollConfig } from "./mechanisms";
 
 /** How a template decides its default admission. Mirrors a `PollConfig` field. */
@@ -50,18 +51,105 @@ export interface TemplateDefaults {
   openToAll: boolean;
 }
 
-/** One pre-set poll shape. */
+/**
+ * A template's name and its explanation, in one language.
+ *
+ * Two fields rather than one string with a separator, because the picker styles
+ * them differently: the name is the button's label and the description is the
+ * prose underneath it.
+ */
+export interface TemplateText {
+  name: string;
+  description: string;
+}
+
+/**
+ * A template's own wording, per language.
+ *
+ * ---------------------------------------------------------------------------
+ * Why this is a record of literals rather than catalogue keys
+ * ---------------------------------------------------------------------------
+ *
+ * The alternative — `t("template.multi-select.name")` — needs the message key
+ * to be derivable from the template's id, and a template id is DATA: it is
+ * persisted in a draft, used as a React key, and matched against what
+ * `findTemplate` was given. Building a key from it would make a typo in the
+ * draft storage silently address a different message, and the compiler could not
+ * see it because the key would be a computed string.
+ *
+ * A record makes the correspondence explicit and total: `TemplateText` wants both
+ * fields for every locale, so a language that has not answered one is a compile
+ * error, not an empty button. `templates.test.ts` checks the same property at
+ * runtime for every locale the app offers.
+ *
+ * Deliberately NOT `Record<Locale, ...>`: `Locale` is a union with a closed
+ * member list, and indexing such a record with a `Locale` is fine — but the two
+ * languages here are written out beside the template they describe on purpose, so
+ * that a mechanism's explanation cannot drift away from the config it explains.
+ */
+const TEMPLATE_TEXT: Record<string, Record<Locale, TemplateText>> = {
+  single: {
+    zh: {
+      name: "单选",
+      description: "一个问题、一个答案，一人一票。默认所有人可投，最快能开始收集意见。",
+    },
+    en: {
+      name: "Single choice",
+      description:
+        "One question, one answer, one vote each. Open to everyone by default, which is the fastest way to start collecting opinions.",
+    },
+  },
+  "multi-select": {
+    zh: {
+      name: "多选",
+      description: "一次可选多个选项；每张票最多选中的数量由选项数量决定，不必手填。",
+    },
+    en: {
+      name: "Multi-select",
+      description:
+        "Several options can be chosen at once; the most a single ballot may select follows from the number of options, so there is nothing to fill in by hand.",
+    },
+  },
+  weighted: {
+    zh: {
+      name: "加权",
+      description: "按地址权重计票，适合股东或成员表决；合约要求先建白名单，因此默认仅白名单可投。",
+    },
+    en: {
+      name: "Weighted",
+      description:
+        "Votes are counted by address weight, which suits a shareholder or member vote; the contract requires an allowlist first, so only allowlisted addresses may vote by default.",
+    },
+  },
+};
+
+/**
+ * One pre-set poll shape.
+ *
+ * The wording is not on the object: `text(locale)` answers it, so a template
+ * cannot be rendered in a language it does not carry and the picker cannot end up
+ * with a name from one language and a description from another.
+ */
 export interface PollTemplate {
   /** Stable id, persisted in a draft and used as a React key. Never translated. */
   id: string;
-  /** The label shown on the picker, in the reader's language. */
-  name: string;
-  /** What the template chooses, including what it cannot change. */
-  description: string;
   /** The fields this template differs from `DEFAULT_CONFIG` in. */
   overrides: Partial<PollConfig>;
   /** The admission the template needs for its config to be valid. */
   defaultAdmission: TemplateDefaults;
+  /** This template's name and description in the reader's language. */
+  text: (locale: Locale) => TemplateText;
+}
+
+/** The wording for a template id, in a language. Never returns `undefined`. */
+function templateText(id: string, locale: Locale): TemplateText {
+  const byLocale = TEMPLATE_TEXT[id];
+  const text = byLocale?.[locale];
+
+  // A template whose id has no entry is a programming error, not a reader state:
+  // the two are built in the same file. The name falls back to the raw id, which
+  // is visibly not copy, rather than to an empty button that looks deliberate.
+  return text ?? { name: id, description: "" };
 }
 
 /**
@@ -74,10 +162,9 @@ export interface PollTemplate {
  */
 export const DEFAULT_TEMPLATE: PollTemplate = {
   id: "single",
-  name: "单选",
-  description: "一个问题、一个答案，一人一票。默认所有人可投，最快能开始收集意见。",
   overrides: {},
   defaultAdmission: { openToAll: true },
+  text: (locale) => templateText("single", locale),
 };
 
 /**
@@ -91,19 +178,17 @@ export const POLL_TEMPLATES: readonly PollTemplate[] = Object.freeze([
   DEFAULT_TEMPLATE,
   {
     id: "multi-select",
-    name: "多选",
-    description: "一次可选多个选项；每张票最多选中的数量由选项数量决定，不必手填。",
     overrides: { multiSelect: true, maxSelections: 4 },
     defaultAdmission: { openToAll: true },
+    text: (locale) => templateText("multi-select", locale),
   },
   {
     id: "weighted",
-    name: "加权",
-    description: "按地址权重计票，适合股东或成员表决；合约要求先建白名单，因此默认仅白名单可投。",
     overrides: { weighted: true },
     // Not a preference: `validateConfig` refuses `weighted && openToAll`, because
     // an open poll has no finite eligible set to take a weight from.
     defaultAdmission: { openToAll: false },
+    text: (locale) => templateText("weighted", locale),
   },
 ]);
 
@@ -187,17 +272,29 @@ export function buildPollConfig(
  * multi-select cap it prints is the one the options allowed, not the cap the
  * template stored. `web/test/templates.test.ts` pins the caps and the sentences
  * that must follow them.
+ *
+ * The five clauses are catalogue entries joined here, in one place, rather than
+ * one template sentence for the whole line: the English clauses are not word-for-
+ * word images of the Chinese ones, so a single sentence with placeholders would
+ * have to be written to fit one grammar and would read as broken in the other.
  */
-export function describeMechanisms(config: PollConfig): string {
+export function describeMechanisms(config: PollConfig, locale: Locale = DEFAULT_LOCALE): string {
+  const messages = messagesFor(locale);
   const parts: string[] = [];
 
   parts.push(
-    config.multiSelect ? `多选，每票最多 ${config.maxSelections} 项` : "单选，每票一个选项",
+    config.multiSelect
+      ? interpolate(messages["mechanism.multiSelect"], { count: config.maxSelections })
+      : messages["mechanism.single"],
   );
-  parts.push(config.weighted ? "按地址权重计票" : "一人一票");
-  parts.push("不隐藏选择（非 commit-reveal）");
-  parts.push(config.delegable ? "可委托票权" : "不可委托");
-  parts.push(config.openToAll ? "所有人可投" : "仅白名单可投");
+  parts.push(config.weighted ? messages["mechanism.weighted"] : messages["mechanism.oneVoteEach"]);
+  parts.push(messages["mechanism.notCommitReveal"]);
+  parts.push(
+    config.delegable ? messages["mechanism.delegable"] : messages["mechanism.notDelegable"],
+  );
+  parts.push(
+    config.openToAll ? messages["mechanism.openToAll"] : messages["mechanism.whitelistOnly"],
+  );
 
   return parts.join(" · ");
 }
@@ -226,20 +323,27 @@ export function describeMechanisms(config: PollConfig): string {
  * Reached in practice by choosing a template whose config conflicts with the
  * admission radio — `加权` with `所有人可投` is the one a reader can produce from
  * the visible controls.
+ *
+ * The mapping is per language rather than per call site: the sentence is a
+ * catalogue entry, so this returns the same message `i18n.test.ts` knows about
+ * and `chrome-copy.test.ts` can pin, instead of a private table inside a module.
  */
-export function describeConfigProblem(config: PollConfig): string | null {
+export function describeConfigProblem(
+  config: PollConfig,
+  locale: Locale = DEFAULT_LOCALE,
+): string | null {
   const verdict = validateConfig(config);
   if (verdict.ok) return null;
 
+  const messages = messagesFor(locale);
+
   const translations: Record<string, string> = {
-    "multi-select requires maxSelections >= 2":
-      "多选模板要求每票至少能选 2 项，当前上限不足 2，合约会拒绝创建。",
-    "weighted voting requires whitelist admission":
-      "加权投票要求先建白名单：开放给所有人时没有确定的票权集合，合约会拒绝创建。请把「谁可以投票」改回「仅白名单」，或换一个模板。",
+    "multi-select requires maxSelections >= 2": messages["mechanism.problem.multiSelect"],
+    "weighted voting requires whitelist admission": messages["mechanism.problem.weighted"],
     "commit-reveal requires a non-zero reveal window":
-      "选择隐藏（commit-reveal）时必须给出揭示窗口，当前为 0，合约会拒绝创建。",
+      messages["mechanism.problem.commitRevealWindow"],
     "commit-reveal cannot be combined with delegation yet":
-      "隐藏选择目前不能与委托投票组合，合约会拒绝创建。",
+      messages["mechanism.problem.commitRevealDelegation"],
   };
 
   return translations[verdict.reason] ?? verdict.reason;

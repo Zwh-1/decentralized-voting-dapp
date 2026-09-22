@@ -72,7 +72,7 @@ export function RulesCheck({
   const current = hexOrNull(reads.data?.[1]?.result);
 
   const check = compareRules({ committed, current });
-  const summary = rulesSummary(check);
+  const summary = rulesSummary(check, translator.locale);
 
   return (
     <section

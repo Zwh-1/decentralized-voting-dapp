@@ -27,6 +27,7 @@
  * whose whole contract is "already scoped to one poll".
  */
 
+import { DEFAULT_LOCALE, translatorFor, type Locale } from "./i18n";
 import type { ActivityEntry } from "./poll-report";
 
 /** The event kinds the index records, as `ActivityEntry.kind` names them. */
@@ -156,17 +157,58 @@ export function summarizeAudit(entries: readonly AuditEntry[]): AuditSummary {
   };
 }
 
-/** The human label for one kind. Kept beside the kind list so they cannot drift. */
-export const AUDIT_KIND_LABELS: Record<AuditKind, string> = {
-  cast: "投票",
-  changed: "改投",
-  withdrawn: "撤票",
-  refunded: "退款",
-  whitelist: "白名单",
-  phase: "阶段",
+/** The human label for each kind, as a catalogue key. Kept beside the kind list so they cannot drift. */
+const AUDIT_KIND_KEYS: Record<
+  AuditKind,
+  | "audit.kind.cast"
+  | "audit.kind.changed"
+  | "audit.kind.withdrawn"
+  | "audit.kind.refunded"
+  | "audit.kind.whitelist"
+  | "poll.phase"
+> = {
+  cast: "audit.kind.cast",
+  changed: "audit.kind.changed",
+  withdrawn: "audit.kind.withdrawn",
+  refunded: "audit.kind.refunded",
+  whitelist: "audit.kind.whitelist",
+  /*
+    阶段 comes from `poll.phase` rather than from a key of its own.
+
+    The poll detail row and this table's filter chip render the same word for the
+    same concept, and `i18n.test.ts` fails when one Chinese sentence appears under
+    two names. A `audit.kind.phase` holding 阶段 would be exactly that second
+    name, so the lookup points at the one spelling that already exists — the same
+    choice the ballot's stat row makes for 阶段 and 票数合计.
+  */
+  phase: "poll.phase",
 };
 
-/** The label for a kind, falling back to the raw name for an unknown one. */
-export function auditKindLabel(kind: string): string {
-  return isAuditKind(kind) ? AUDIT_KIND_LABELS[kind] : kind;
+/**
+ * The label for a kind, falling back to the raw name for an unknown one.
+ *
+ * ---------------------------------------------------------------------------
+ * Why the LABEL is translated but the NAME is not
+ * ---------------------------------------------------------------------------
+ *
+ * A kind is an IDENTIFIER before it is a word. `AUDIT_KINDS` above is the set of
+ * names the index records and what `?kind=` accepts; the same names are the
+ * `event_type` column in MySQL, the branches in `EVENT_BRANCHES`, and the
+ * `entry.kind` a row carries. `audit/page.tsx` builds every filter link out of
+ * the raw name and only calls this function for the text inside the chip — so
+ * switching the reader's language changes what a chip SAYS and never what it
+ * LINKS TO, which is what keeps a pasted `?kind=refunded` URL working for both
+ * languages.
+ *
+ * The fallback stays the raw name for the same reason `TrustPanel`'s
+ * `data-fingerprint` is a stable id: a row from a newer schema version must show
+ * something recognisable, not a blank cell and not a translation of a word this
+ * build has never heard of.
+ */
+export function auditKindLabel(kind: string, locale: Locale = DEFAULT_LOCALE): string {
+  if (!isAuditKind(kind)) {
+    return kind;
+  }
+
+  return translatorFor(locale).t(AUDIT_KIND_KEYS[kind]);
 }

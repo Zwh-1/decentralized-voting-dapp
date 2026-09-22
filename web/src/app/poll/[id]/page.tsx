@@ -11,6 +11,8 @@ import { ResultExport } from "@/components/ResultExport";
 import { RulesCheck, StakeRisk } from "@/components/TrustPanel";
 import { getConfiguredTarget, getPoll } from "@/lib/data";
 import { describeFailure } from "@/lib/failure";
+import { translatorFor } from "@/lib/i18n";
+import { currentLocale } from "@/lib/i18n/server";
 import type { PollSummary } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -33,23 +35,30 @@ const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
  * that one (ADR-0019).
  */
 export default async function PollPage({ params }: { params: Promise<{ id: string }> }) {
+  const t = translatorFor(await currentLocale());
   const { id } = await params;
   const configuredTarget = getConfiguredTarget();
 
   if (!ADDRESS_PATTERN.test(id)) {
     return (
       <PageShell
-        title="无效的投票地址"
-        subtitle="投票页的地址必须是 20 字节的十六进制合约地址。"
+        title={t.t("pollPage.invalidTitle")}
+        subtitle={t.t("pollPage.invalidSubtitle")}
         configuredTarget={configuredTarget}
+        translator={t}
       >
         <section className="mt-6 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-          路径里的 <code className="font-mono">/poll/[id]</code> 必须是投票合约的地址 （
-          <code className="font-mono">0x</code> 加 40 位十六进制），收到的是{" "}
-          <code className="font-mono">{id.slice(0, 64)}</code>。
+          {t.t("pollPage.invalidDetail", {
+            // The route segment itself is quoted, never translated: it is the path
+            // an operator types, and the address is echoed back so the reader can
+            // see exactly what arrived.
+            segment: (<code className="font-mono">/poll/[id]</code>) as unknown as string,
+            prefix: (<code className="font-mono">0x</code>) as unknown as string,
+            received: (<code className="font-mono">{id.slice(0, 64)}</code>) as unknown as string,
+          })}
           <br />
           <Link href="/" className="mt-3 inline-block underline">
-            ← 回到全部投票
+            {t.t("pollPage.backToPolls")}
           </Link>
         </section>
       </PageShell>
@@ -65,18 +74,19 @@ export default async function PollPage({ params }: { params: Promise<{ id: strin
     poll = await getPoll(address);
   } catch (error) {
     console.error("[poll page] the poll could not be read", error);
-    pollError = describeFailure(error);
+    pollError = describeFailure(error, t.locale);
   }
 
   return (
     <PageShell
-      title={poll?.question ?? "投票"}
-      subtitle="投票、改投、撤票都由你的钱包签名。按钮是否可用完全来自链上状态，包括白名单、阶段与截止时间。"
+      title={poll?.question ?? t.t("pollPage.fallbackTitle")}
+      subtitle={t.t("pollPage.subtitle")}
       configuredTarget={configuredTarget}
+      translator={t}
     >
       <p className="mt-4 text-xs text-slate-400">
         <Link href="/" className="underline">
-          ← 全部投票
+          {t.t("pollPage.backToPolls")}
         </Link>
       </p>
 
@@ -89,9 +99,9 @@ export default async function PollPage({ params }: { params: Promise<{ id: strin
       */}
       {pollError !== null && (
         <section className="mt-6 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm leading-relaxed text-rose-700">
-          服务端无法读取这个投票（{address}）：{pollError}
+          {t.t("pollPage.serverReadFailed", { address, error: pollError })}
           <br />
-          下面仍会尝试用你的浏览器直接读取同一个合约；如果链上确实没有这个地址，各项会显示读取失败。
+          {t.t("pollPage.browserRetry")}
         </section>
       )}
 

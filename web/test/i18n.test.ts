@@ -240,6 +240,7 @@ describe("the ballot phrase catalogue", () => {
     // phrase that loses one fails as well. The declaration is the second half of
     // the check rather than a hole in it.
     const expected: Record<string, string[]> = {
+      // ---- the ballot phrases ----
       wrongNetwork: ["chainId", "chainName", "suffix"],
       candidateNumbered: ["id"],
       optionNumbered: ["id"],
@@ -250,18 +251,152 @@ describe("the ballot phrase catalogue", () => {
       syncSynced: ["from", "to", "seen", "inserted"],
       syncRewound: ["block"],
       syncIdle: ["block"],
+
+      // ---- the catalogue keys that predate this surface ----
+      //
+      // Declared here because both catalogues are walked below. They were
+      // unchecked while the loop visited `ZH_BALLOT_PHRASES` only, which is the
+      // gap this table exists to close rather than to preserve.
+      "common.pageOf": ["page", "pageCount"],
+      "language.switchTo": ["language"],
+      "list.matchedOf": ["matched", "total"],
+      "list.showing": ["from", "to", "total"],
+      "list.scanTruncated": ["total", "limit"],
+      "list.headingCount": ["count"],
+      "list.searchNoMatch": ["query"],
+      "list.noFactory": ["chainId", "chainName"],
+      "list.connectedCount": ["count"],
+      "list.noMatchDescription": ["query"],
+      "myVotes.createdDescription": ["call"],
+      "myVotes.noFactory": ["chainId", "chainName"],
+      "myVotes.votedFromIndex": ["view"],
+      "myVotes.votedFromChain": ["call"],
+      "myVotes.scanTruncated": ["total", "limit", "link"],
+      "myVotes.scanning": ["count"],
+      "myVotes.line": ["phase"],
+      "myVotes.lineWithVotes": ["phase", "votes"],
+      "myVotes.currentAddress": ["address", "chainName", "chainId"],
+      "poll.votedSoFar": ["count"],
+      "poll.optionCount": ["count"],
+      "poll.cardReadFailedDetail": ["call"],
+      "ballot.serverReadFailedDetail": ["error"],
+      "ballot.deadlinePassed": ["time"],
+      "ballot.deadline": ["time"],
+      "ballot.optionsCount": ["count"],
+      "countdown.deadline": ["time"],
+      "countdown.closedAt": ["time"],
+      "countdown.remaining": ["remaining", "absolute"],
+      "countdown.daysHours": ["days", "hours"],
+      "countdown.hoursMinutes": ["hours", "minutes"],
+      "countdown.minutes": ["minutes"],
+      "consistency.lagging": ["blocks", "onChain"],
+      "consistency.divergent": ["onChain", "indexed", "count"],
+      "consistency.consistent": ["onChain", "indexed"],
+      "consistency.consistentPending": ["count"],
+      "consistency.unknownStatus": ["status"],
+      "wallet.pointsTo": ["chainName"],
+      "wallet.notConnected": ["chainName"],
+      "wallet.switchTo": ["chainName"],
+      "trust.howComputed": ["rulesHash", "currentRulesHash"],
+      "trust.stakeGraceDays": ["days"],
+      "trust.whyRule": ["refund", "sweep", "gracePeriod"],
+      "activity.option": ["id"],
+      "activity.total": ["count"],
+      "export.verifyContract2": ["results"],
+
+      // ---- the creation/admin surface's own parameters ----
+      //
+      // `{count}`, `{id}` and `{number}` are the same three shapes the ballot
+      // phrases above already use, but declared per key: the point of this table
+      // is that every parameterised sentence is named, so a new one cannot
+      // arrive unnoticed.
+      "admin.addressesFound": ["count"],
+      "admin.addressesList": ["list"],
+      "admin.optionCount": ["count"],
+      "admin.optionLabel": ["id"],
+      "admin.optionEditField": ["id"],
+      "admin.reason.startTooFewOptions": ["min"],
+      "admin.reason.noFactoryReason": ["chainId", "chainName"],
+      "admin.reason.closeNoFactory": ["chainId", "chainName"],
+      "admin.reason.whitelistTooMany": ["limit", "count"],
+      "admin.reason.removeTooFew": ["count"],
+      "admin.reason.sweepGracePeriod": ["time"],
+      "create.optionsLabel": ["min"],
+      "create.optionPlaceholderNumbered": ["number"],
+      "create.cidSummary1": ["total", "cids"],
+      "create.cidSummary2": ["raw"],
+      "create.reason.noFactory": ["chainId", "chainName"],
+      // `{min}` appears TWICE in this sentence ("fewer than {min} options"), and
+      // the declaration lists it twice on purpose: the assertion compares the
+      // matched placeholders occurrence by occurrence, so a declaration that
+      // deduplicated would stop noticing a second placeholder being dropped.
+      "create.reason.tooFewOptions": ["min", "min"],
+      "template.switchConfirm": ["name"],
+      "mechanism.multiSelect": ["count"],
+      "execution.waiting": ["seconds"],
+
+      // ---- the pages and components outside this surface ----
+      "audit.indexRequired": ["databaseUrl"],
+      "audit.indexHowTo": ["databaseUrl", "commands"],
+      "audit.summary": ["count", "polls", "kind"],
+      "audit.summaryKind": ["kind"],
+      "notifications.readFailedHttp": ["status"],
+      "notifications.indexRequired": ["databaseUrl"],
+      "notifications.summary": ["count", "polls", "truncated"],
+      "notifications.summaryTruncated": ["limit"],
+      "notifications.block": ["block"],
+      "notifications.auditLine": ["audit"],
+      "home.listFailedDetail": ["envFile", "rpcUrl", "chainId", "exportAbi"],
+      "home.auditLine": ["audit"],
+      "home.notificationsLine": ["notifications"],
+      "my.serverListFailed": ["error"],
+      "shell.footerWhitelist": ["call"],
+      "chart.caption": ["source", "total"],
+      "chart.barValue": ["votes", "percent"],
+      "chart.ariaNoOptions": ["source"],
+      "chart.ariaNoVotes": ["message", "source"],
+      "chart.ariaItem": ["label", "votes", "percent"],
+      "chart.ariaBars": ["items", "total", "source"],
+      "option.voteWithStake": ["amount"],
+      "pollPage.invalidDetail": ["segment", "prefix", "received"],
+      "pollPage.serverReadFailed": ["address", "error"],
+
+      // ---- the library-level label tables ----
+      //
+      // These are the strings `lib/failure.ts` and `lib/poll-report.ts` return
+      // rather than render, so they are catalogue keys like any other and their
+      // placeholders are declared here. `lib/health-report.ts` is NOT included:
+      // its rows are one panel's own vocabulary and live in a locale table in
+      // that file, which this walk cannot see by construction.
+      "failure.rpcUnreachable": ["call"],
+      "failure.unexpectedNamed": ["name"],
+      "failure.callSuffix": ["method"],
     };
 
-    for (const [name, text] of Object.entries(ZH_BALLOT_PHRASES)) {
-      const found = [...text.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort();
+    // Both catalogues are walked, not just the ballot's: the table above declares
+    // keys from `Messages` as well (`create.*`, `admin.*`, `audit.*`, `chart.*`),
+    // and a check that only visited the ballot phrases would leave every one of
+    // those unverified while still looking like it covered them.
+    const catalogues: [string, Record<string, string>][] = [
+      ["ZH_BALLOT_PHRASES", { ...ZH_BALLOT_PHRASES }],
+      ["ZH_MESSAGES", { ...ZH_MESSAGES }],
+    ];
 
-      assert.deepEqual(found, (expected[name] ?? []).slice().sort(), name);
+    for (const [catalogueName, catalogue] of catalogues) {
+      for (const [name, text] of Object.entries(catalogue)) {
+        const found = [...text.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort();
+
+        assert.deepEqual(found, (expected[name] ?? []).slice().sort(), `${catalogueName} ${name}`);
+      }
     }
 
-    // And the declaration itself must not name a phrase that does not exist,
-    // which would otherwise let a rename silently retire a check.
+    // And the declaration itself must not name a key that does not exist, which
+    // would otherwise let a rename silently retire a check.
     for (const name of Object.keys(expected)) {
-      assert.ok(name in ZH_BALLOT_PHRASES, `${name} is declared but not in the catalogue`);
+      assert.ok(
+        name in ZH_BALLOT_PHRASES || name in ZH_MESSAGES,
+        `${name} is declared but not in either catalogue`,
+      );
     }
   });
 

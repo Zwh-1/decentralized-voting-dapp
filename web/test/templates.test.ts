@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { DEFAULT_CONFIG, validateConfig, type PollConfig } from "../src/lib/mechanisms";
+import { LOCALES } from "../src/lib/i18n/locales";
 import {
   DEFAULT_TEMPLATE,
   POLL_TEMPLATES,
@@ -52,14 +53,39 @@ describe("POLL_TEMPLATES", () => {
     assert.equal(new Set(EXPECTED_IDS).size, POLL_TEMPLATES.length, "ids must be unique");
   });
 
-  it("names and describes every template in the reader's language", () => {
+  it("names and describes every template in every language", () => {
+    // The wording is not on the object any more: `text(locale)` answers it, so
+    // this checks each language the app offers rather than one hard-coded
+    // Chinese pair. The `[a-zA-Z]{4,}` rule below is deliberately kept for the
+    // Chinese half only — it is the assertion that caught a label shipping in
+    // English before this app had a second language at all.
+    for (const locale of LOCALES) {
+      for (const template of POLL_TEMPLATES) {
+        const { name, description } = template.text(locale);
+
+        assert.ok(name.trim().length > 0, `${template.id}/${locale} name`);
+        assert.ok(description.trim().length > 2, `${template.id}/${locale} description`);
+
+        if (locale === "zh") {
+          assert.equal(
+            /[a-zA-Z]{4,}/.test(name),
+            false,
+            `${template.id} must not ship an English label in Chinese`,
+          );
+        }
+      }
+    }
+  });
+
+  it("answers a DIFFERENT name in each language", () => {
+    // The failure this guards is a `text()` that ignores its argument and hands
+    // back the Chinese for every locale: every other assertion here would pass,
+    // and an English reader would get 单选 on the button.
     for (const template of POLL_TEMPLATES) {
-      assert.ok(template.name.trim().length > 0, template.id);
-      assert.ok(template.description.trim().length > 2, template.id);
-      assert.equal(
-        /[a-zA-Z]{4,}/.test(template.name),
-        false,
-        `${template.id} must not ship an English label`,
+      assert.notEqual(
+        template.text("zh").name,
+        template.text("en").name,
+        `${template.id} is identical in both languages`,
       );
     }
   });

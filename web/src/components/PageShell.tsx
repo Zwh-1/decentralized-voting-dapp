@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { HealthPanel } from "@/components/HealthPanel";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { WalletSlot } from "@/components/WalletSlot";
+import { translatorFor, type Translator } from "@/lib/i18n";
 import type { ChainTarget } from "@/lib/voting";
 /**
  * The frame every page shares: masthead, navigation, content, footer.
@@ -29,6 +30,22 @@ import type { ChainTarget } from "@/lib/voting";
  * `sticky` on the nav, not on the masthead: the masthead carries the chain badge,
  * which is the one thing worth keeping in view, but a taller pinned header eats
  * a phone's viewport. The nav is one line and earns the space.
+ *
+ * ---------------------------------------------------------------------------
+ * Why the translator arrives as a prop with no default
+ * ---------------------------------------------------------------------------
+ *
+ * Every page hands this shell a title and a subtitle it has ALREADY resolved, so
+ * the shell itself needs no translator — but the masthead, the footer and the
+ * navigation do, and this file has no `"use client"` and must not gain one: the
+ * pages it wraps are the ones that must render when the index is down or absent.
+ * So the translator travels from whatever mounted it as an ordinary prop, exactly
+ * as `ConsistencyBadge` does it.
+ *
+ * Required rather than defaulted to `translatorFor()`, for that file's reason: a
+ * default would silently pin the masthead and the footer to Chinese for every
+ * caller that forgot to pass one, which is a half-translated page — the one
+ * outcome worse than either language on its own.
  */
 export function PageShell({
   title,
@@ -36,6 +53,7 @@ export function PageShell({
   configuredTarget,
   children,
   actions,
+  translator,
 }: {
   title: string;
   subtitle: string;
@@ -44,10 +62,12 @@ export function PageShell({
   children: ReactNode;
   /** Optional primary actions, right-aligned in the page header. */
   actions?: ReactNode;
+  /** The active language, for the masthead, the navigation and the footer. */
+  translator: Translator;
 }) {
   return (
     <div className="min-h-screen bg-slate-50">
-      <Masthead configuredTarget={configuredTarget} />
+      <Masthead configuredTarget={configuredTarget} translator={translator} />
 
       <main className="mx-auto max-w-5xl px-4 pb-16 pt-8 sm:px-6">
         <header className="flex flex-wrap items-start justify-between gap-4">
@@ -69,7 +89,7 @@ export function PageShell({
         */}
         <HealthPanel />
 
-        <Footer />
+        <Footer translator={translator} />
       </main>
     </div>
   );
@@ -84,18 +104,26 @@ export function PageShell({
  * happens to be on. Showing it unconditionally is what lets a reader notice they
  * are on the wrong one before they try to vote.
  */
-function Masthead({ configuredTarget }: { configuredTarget: ChainTarget | null }) {
+function Masthead({
+  configuredTarget,
+  translator,
+}: {
+  configuredTarget: ChainTarget | null;
+  translator: Translator;
+}) {
   return (
     <div className="bg-slate-900 text-slate-100">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <Link href="/" className="group flex items-center gap-2.5">
             <ShieldMark />
-            <span className="text-sm font-semibold tracking-tight">去中心化投票平台</span>
+            <span className="text-sm font-semibold tracking-tight">
+              {translator.t("shell.brand")}
+            </span>
           </Link>
 
           <nav className="flex items-center gap-1 text-sm">
-            <NavLink href="/">全部投票</NavLink>
+            <NavLink href="/">{translator.t("nav.polls")}</NavLink>
             {/*
               `prefetch={false}` on 我的投票, and not as a micro-optimisation: that
               page is dynamic and its render performs a chain read of every poll, so
@@ -103,7 +131,7 @@ function Masthead({ configuredTarget }: { configuredTarget: ChainTarget | null }
               open the link.
             */}
             <NavLink href="/my" prefetch={false}>
-              我的投票
+              {translator.t("nav.myVotes")}
             </NavLink>
           </nav>
         </div>
@@ -183,32 +211,38 @@ function ShieldMark() {
  * half of its design is not being honest with the person deciding whether to put
  * money into it.
  */
-function Footer() {
+function Footer({ translator }: { translator: Translator }) {
   return (
     <footer className="mt-12 border-t border-slate-200 pt-6">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">使用前请知悉</h2>
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        {translator.t("shell.footerHeading")}
+      </h2>
       <ul className="mt-3 space-y-2 text-xs leading-relaxed text-slate-500">
         <li className="flex gap-2">
           <Mark />
           <span>
-            每个投票的发起人可以维护自己的白名单，也可以在宽限期后调用{" "}
-            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">
-              sweepUnclaimed()
-            </code>{" "}
-            取走无人领回的押金。
+            {translator.t("shell.footerWhitelist", {
+              // The entry point is NOT translated: a reader looks it up in a block
+              // explorer, so it is quoted into whichever sentence surrounds it.
+              call: (
+                <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">
+                  sweepUnclaimed()
+                </code>
+              ) as unknown as string,
+            })}
           </span>
         </li>
         <li className="flex gap-2">
           <Mark />
           <span>
-            索引器（本应用内的只读层）是可重建的缓存，
-            <strong className="text-slate-600">链上数据才是唯一真相</strong>
-            ，索引不可用时页面会直接读链。
+            {translator.t("shell.footerIndex")}
+            <strong className="text-slate-600">{translator.t("shell.footerIndexEmphasis")}</strong>
+            {translator.t("shell.footerIndexTail")}
           </span>
         </li>
         <li className="flex gap-2">
           <Mark />
-          <span>任何写入都由你自己的钱包签名，后端不持私钥。</span>
+          <span>{translator.t("shell.footerWallet")}</span>
         </li>
       </ul>
     </footer>

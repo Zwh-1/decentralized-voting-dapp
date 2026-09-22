@@ -47,7 +47,9 @@ export function WalletBar({ configuredTarget }: { configuredTarget: ChainTarget 
         <div className="flex items-center gap-2">
           {configuredTarget !== null && (
             <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-slate-300">
-              {translator.t("wallet.pointsTo", { chainName: chainName(configuredTarget.chainId) })}
+              {translator.t("wallet.pointsTo", {
+                chainName: chainName(configuredTarget.chainId, translator.locale),
+              })}
             </span>
           )}
           <button
@@ -76,7 +78,8 @@ export function WalletBar({ configuredTarget }: { configuredTarget: ChainTarget 
     );
   }
 
-  const named = configuredTarget === null ? undefined : chainName(configuredTarget.chainId);
+  const named =
+    configuredTarget === null ? undefined : chainName(configuredTarget.chainId, translator.locale);
   const wrongChain = configuredTarget !== null && chainId !== configuredTarget.chainId;
   // Narrowed to a chain this build can actually switch to: `switchChain` only
   // accepts an id the client config registers.
@@ -96,7 +99,7 @@ export function WalletBar({ configuredTarget }: { configuredTarget: ChainTarget 
               : "bg-emerald-500/15 text-emerald-300"
           }`}
         >
-          {chainName(chainId)}
+          {chainName(chainId, translator.locale)}
         </span>
         <span className="rounded-lg bg-white/10 px-3 py-1.5 font-mono text-xs text-slate-200">
           {address === undefined ? "—" : shortenAddress(address)}

@@ -23,7 +23,7 @@ import {
   chartGeometry,
   chartHeight,
   chartViewBox,
-  NO_VOTES_MESSAGE,
+  noVotesMessage,
   type ResultOption,
 } from "../src/components/ResultChart";
 import { tallySourceLabel } from "../src/lib/ballot-labels";
@@ -111,8 +111,8 @@ describe("chartGeometry", () => {
     const chart = chartGeometry([{ id: 1, voteCount: 0 }], 0);
 
     assert.equal(chart.kind, "no-votes");
-    assert.equal(chart.kind === "no-votes" ? chart.message : "", NO_VOTES_MESSAGE);
-    assert.match(NO_VOTES_MESSAGE, /还没有票/);
+    assert.equal(chart.kind === "no-votes" ? chart.message : "", noVotesMessage());
+    assert.match(noVotesMessage(), /还没有票/);
 
     // And no geometry is reachable from that branch, so a caller cannot draw one.
     assert.equal("bars" in chart, false);

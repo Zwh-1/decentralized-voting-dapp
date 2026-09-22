@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslator } from "@/components/LocaleProvider";
 import { POLL_TEMPLATES, type PollTemplate } from "@/lib/templates";
 
 /**
@@ -37,6 +38,16 @@ import { POLL_TEMPLATES, type PollTemplate } from "@/lib/templates";
  * poll is not going to be created with, which is exactly the "second copy of a
  * derived value" this repository forbids. The parent owns the config, so the
  * parent owns the sentence describing it.
+ *
+ * ---------------------------------------------------------------------------
+ * Why the wording is read from the template rather than passed in
+ * ---------------------------------------------------------------------------
+ *
+ * `PollTemplate.text(locale)` answers the name and the description together, so
+ * a button label and the prose underneath it cannot come from two different
+ * languages — the picker would otherwise have to take a second prop carrying
+ * half of the same fact. The locale is the provider's, which is what makes the
+ * picker follow a language switch without the form arranging it.
  */
 
 export interface TemplatePickerProps {
@@ -59,13 +70,12 @@ export function TemplatePicker({
   dirty,
   onSelect,
 }: TemplatePickerProps) {
+  const { t, locale } = useTranslator();
+
   function choose(id: string | null, label: string) {
     if (id === selectedId) return;
 
-    if (
-      dirty &&
-      !window.confirm(`切换到「${label}」会替换当前的机制配置，已填写的字段保留。继续吗？`)
-    ) {
+    if (dirty && !window.confirm(t("template.switchConfirm", { name: label }))) {
       return;
     }
 
@@ -82,6 +92,7 @@ export function TemplatePicker({
         */}
         {POLL_TEMPLATES.map((template) => {
           const active = template.id === selectedId;
+          const { name } = template.text(locale);
 
           return (
             <button
@@ -89,14 +100,14 @@ export function TemplatePicker({
               type="button"
               data-template={template.id}
               aria-pressed={active}
-              onClick={() => choose(template.id, template.name)}
+              onClick={() => choose(template.id, name)}
               className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
                 active
                   ? "border-slate-900 bg-slate-900 text-white"
                   : "border-slate-300 text-slate-700 hover:bg-slate-50"
               }`}
             >
-              {template.name}
+              {name}
             </button>
           );
         })}
@@ -105,20 +116,22 @@ export function TemplatePicker({
           type="button"
           data-template="defaults"
           aria-pressed={selectedId === null}
-          onClick={() => choose(null, "默认配置")}
+          onClick={() => choose(null, t("template.defaultsLabel"))}
           className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
             selectedId === null
               ? "border-slate-900 bg-slate-900 text-white"
               : "border-slate-300 text-slate-700 hover:bg-slate-50"
           }`}
         >
-          默认
+          {t("template.defaultsLabel")}
         </button>
       </div>
 
       {selected !== null && (
         <div className="mt-2 space-y-1">
-          <p className="text-[11px] leading-relaxed text-slate-500">{selected.description}</p>
+          <p className="text-[11px] leading-relaxed text-slate-500">
+            {selected.text(locale).description}
+          </p>
           <p
             data-template-summary={selected.id}
             className="font-mono text-[11px] leading-relaxed text-slate-400"

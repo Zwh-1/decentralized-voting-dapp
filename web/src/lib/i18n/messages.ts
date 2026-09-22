@@ -309,6 +309,545 @@ export const ZH_MESSAGES = {
   "audit.detail": "详情",
   "audit.block": "区块",
   "audit.tx": "交易",
+  /*
+    ---------------------------------------------------------------------------
+    The rest of 审计视图: the fail-closed sentences, the filter control and the
+    paging. The table's own headings above are reused as-is.
+    ---------------------------------------------------------------------------
+  */
+  "audit.readFailed": "读取审计事件时发生未预期的错误。完整错误见服务端日志。",
+  "audit.indexRequired":
+    "审计事件来自 MySQL 索引，而当前部署没有配置 {databaseUrl}，所以无法列出历史事件。这不代表「没有活动」——链上的事件仍然在发生，只是这里读不到。",
+  "audit.indexHowTo":
+    "配置 {databaseUrl} 后运行 {commands} 即可建立索引；每个投票页的活动记录也会随之出现。",
+  "audit.filterLabel": "按事件类型过滤",
+  "audit.summary": "共 {count} 条事件，涉及 {polls} 个投票{kind}。",
+  "audit.summaryKind": "，类型：{kind}",
+  "audit.emptyDetail": "过滤条件与索引自身都是可读的，所以这是「没有匹配」而不是「读不到」。",
+  "audit.pagination": "审计分页",
+  "audit.backToPolls": "← 全部投票",
+
+  "notifications.title": "我的通知",
+  "notifications.subtitle":
+    "你订阅的投票在上次查看之后发生的事。通知由索引器记录的事件推导得出，不引入邮件或 webhook；订阅只保存在本站，且仅与你的钱包地址关联。",
+  "notifications.readFailedHttp": "读取失败（HTTP {status}）。",
+  "notifications.readFailedUnexpected": "读取通知时发生未预期的错误。完整错误见浏览器控制台。",
+  "notifications.connectFirst":
+    "通知按钱包地址归属，所以需要先连接钱包。连接后这一页会列出你订阅的投票的新动态。",
+  "notifications.indexRequired":
+    "通知由索引器记录的事件推导，而当前部署没有配置 {databaseUrl}，所以无法列出任何动态。这不代表「没有新动态」——链上事件仍然在发生，只是这里读不到。",
+  "notifications.summary": "未读 {count} 条，涉及 {polls} 个投票{truncated}。",
+  "notifications.summaryTruncated": "（本页只列出最新的 {limit} 条）",
+  "notifications.markAllRead": "全部标记为已读",
+  "notifications.emptyTitle": "没有未读动态",
+  "notifications.emptyDescription":
+    "索引可读，且你订阅的投票在上次查看之后没有新事件。这是一种确定的状态，不是读取失败。还没有订阅？在任意投票页点「订阅这个投票」，之后它的投票、改投、撤票、退款与阶段变更都会出现在这里。",
+  "notifications.markThisRead": "这个投票标记为已读",
+  "notifications.block": "区块 {block}",
+  "notifications.auditLine": "{audit} 会列出全部事件（跨所有投票），这里只列出你订阅的部分。",
+
+  "home.subtitle":
+    "任何人都可以发起投票；每个投票是独立合约，发起人管理它。你可以投票、改投、撤票并取回押金。选项元数据存放在 IPFS，链上只保存 CID；所有写入都由你自己的钱包签名。",
+  "home.listFailedTitle": "无法从链上读取投票列表",
+  "home.listFailedDetail":
+    "请确认 {envFile} 里的 {rpcUrl} 可达、{chainId} 上有已部署的工厂合约，并已执行过 {exportAbi}。连接钱包后，下面的列表会直接向你的钱包所在网络重新读取一次。",
+  "home.auditLine":
+    "需要核对链上事件与索引记录？打开 {audit}，可按事件类型、投票合约或地址过滤。该页读取索引，不读取链上实时状态。",
+  "home.notificationsLine":
+    "只想看你订阅的投票？打开 {notifications}，它按连接的钱包地址列出你订阅的投票在上次查看之后的新事件；不订阅则没有内容可列。",
+
+  "my.title": "我的投票",
+  "my.subtitle":
+    "列出你这个地址发起的投票，以及你当前持有票的投票。两个列表都直接读链：链上记录了谁创建了哪个投票，而「我投过哪些」只能逐个投票读 voterState，因此有扫描上限。",
+  "my.serverListFailed": "服务端读取投票列表失败：{error}",
+  "my.browserRetry": "下面的列表仍会尝试由你的浏览器直接读取工厂合约。",
+
+  "shell.brand": "去中心化投票平台",
+  "shell.footerHeading": "使用前请知悉",
+  "shell.footerWhitelist":
+    "每个投票的发起人可以维护自己的白名单，也可以在宽限期后调用 {call} 取走无人领回的押金。",
+  "shell.footerIndex": "索引器（本应用内的只读层）是可重建的缓存，",
+  "shell.footerIndexEmphasis": "链上数据才是唯一真相",
+  "shell.footerIndexTail": "，索引不可用时页面会直接读链。",
+  "shell.footerWallet": "任何写入都由你自己的钱包签名，后端不持私钥。",
+
+  /*
+    ---------------------------------------------------------------------------
+    The result chart.
+    ---------------------------------------------------------------------------
+
+    `chart.caption` names the source with a `{source}` placeholder, and that value
+    is `tallySourceLabel`'s — the same single spelling the textual tally uses. So
+    the chart cannot describe its own provenance differently from the numbers
+    beside it; see `ballot-labels.ts`.
+
+    The 票 unit is part of the template rather than of the number, because English
+    needs "8 votes" where Chinese needs "8 票" — the same reason `activity.total`
+    spells its own.
+  */
+  "chart.title": "结果图表",
+  "chart.caption": "数据来源 {source} · 合计 {total} 票",
+  "chart.barValue": "{votes} 票 · {percent}%",
+  "chart.noVotes": "还没有票——这个投票目前一票都没有。",
+  "chart.ariaNoOptions": "结果图表：这个投票还没有选项，没有可以展示的结果。数据来源：{source}。",
+  "chart.ariaNoVotes": "结果图表：{message}数据来源：{source}。",
+  "chart.ariaItem": "{label} {votes} 票（{percent}%）",
+  "chart.ariaBars": "结果图表：{items}。合计 {total} 票，数据来源：{source}。",
+
+  /*
+    ---------------------------------------------------------------------------
+    One option card.
+    ---------------------------------------------------------------------------
+
+    `option.metadataCid` and `option.rawString` are the two names of the same row:
+    what the chain stores is a CID for some polls and a plain string for others,
+    and the label says which one the reader is looking at.
+  */
+  "option.metadataCid": "元数据 CID",
+  "option.rawString": "链上存的字符串",
+  "option.retrying": "重试中…",
+  "option.mine": "你当前投给了这个选项",
+  "option.changeHere": "改投到这个选项",
+  "option.voteWithStake": "投一票（{amount} ETH 押金）",
+
+  /*
+    ---------------------------------------------------------------------------
+    The /poll/<address> page's own frame.
+    ---------------------------------------------------------------------------
+
+    That page used to take its title and subtitle from inline literals while the
+    ballots inside it were already translated. They belong with the rest of the
+    page chrome rather than under `poll.*`, which owns the poll DETAIL FIELDS
+    (问题/发起人/截止时间) that the list card and the ballot's stat row both render.
+  */
+  "pollPage.invalidTitle": "无效的投票地址",
+  "pollPage.invalidSubtitle": "投票页的地址必须是 20 字节的十六进制合约地址。",
+  "pollPage.invalidDetail":
+    "路径里的 {segment} 必须是投票合约的地址 （{prefix} 加 40 位十六进制），收到的是 {received}。",
+  "pollPage.backToPolls": "← 回到全部投票",
+  "pollPage.fallbackTitle": "投票",
+  "pollPage.subtitle":
+    "投票、改投、撤票都由你的钱包签名。按钮是否可用完全来自链上状态，包括白名单、阶段与截止时间。",
+  "pollPage.serverReadFailed": "服务端无法读取这个投票（{address}）：{error}",
+  "pollPage.browserRetry":
+    "下面仍会尝试用你的浏览器直接读取同一个合约；如果链上确实没有这个地址，各项会显示读取失败。",
+
+  /*
+    ===========================================================================
+    The CREATION / ADMIN surface
+    ===========================================================================
+
+    ---------------------------------------------------------------------------
+    Why `create.mechanism*` is a set of FRAGMENTS rather than finished sentences
+    ---------------------------------------------------------------------------
+
+    `describeMechanisms` returns one line built by joining five clauses with
+    ` · `, and the reader's question is "what will this poll do" — a question
+    whose answer is a list. The English clauses are not word-for-word images of
+    the Chinese ones ("多选，每票最多 2 项" is "Multi-select, up to 2 per ballot"),
+    so a single template with a placeholder would have to be written to fit one
+    grammar and would read as broken in the other. Each clause therefore owns its
+    own key, and `templates.ts` joins them in the same order in both languages:
+    one decision per key, one place for the separator.
+
+    `mechanism.multiSelect` takes `{count}` — the cap that will ACTUALLY be
+    submitted, which `buildPollConfig` clamps to the number of options, never the
+    cap the template stored. `web/test/templates.test.ts` pins that distinction.
+
+    ---------------------------------------------------------------------------
+    Why the admin panel's disabled-control reasons live here
+    ---------------------------------------------------------------------------
+
+    They are the same kind of sentence as the ballot's, but they are built from
+    `PollAdmin`'s own reads — the contract's phase, the deadline, the option
+    count — rather than from the five predicates in `ballot-reasons.ts`, so they
+    are assembled by the component and belong in the catalogue.
+
+    The contract's own error names (`InvalidPhase`, `TooFewOptions`,
+    `PollAlreadyEnded`, `GracePeriodNotElapsed`) are quoted verbatim in BOTH
+    languages, exactly as `ballot-phrases.ts` quotes `AlreadyVoted`: a reader
+    looks them up in their wallet, and renaming one severs the only link between
+    the sentence and the revert that actually happened.
+
+    ---------------------------------------------------------------------------
+    What is deliberately NOT here
+    ---------------------------------------------------------------------------
+
+    Template NAMES and template DESCRIPTIONS. They are keys of `PollTemplate`,
+    which is a data shape rather than a message: the descriptions are long prose
+    that explains a mechanism, so they sit beside the config they describe in
+    `templates.ts` rather than being split from it across two files that would
+    then have to be kept in step by hand. Draft values (`question`, `options`,
+    `deadline`, `templateId` chosen by a reader) are their data and are never
+    translated at all.
+  */
+  "admin.heading": "发起人管理",
+  "admin.onlyYou": "仅你可见",
+  "admin.intro":
+    "你创建了这个投票，所以只有你能维护白名单、改动选项、开始与结束投票。这些调用都由你的钱包签名；面板的显示与否只是界面决定，真正的权限检查在合约的",
+  "admin.introTail": "里。",
+  "admin.lifecycle": "生命周期",
+  "admin.startPoll": "开始投票",
+  "admin.endPoll": "提前结束投票",
+  "admin.closeNote1": "若截止时间已过而投票仍显示「投票中」，任何人都可以调用",
+  "admin.closeNote2": "正式关闭它——在那之前，连你自己的押金也取不回来。",
+  "admin.whitelist": "白名单",
+  "admin.whitelistHint":
+    "每行一个地址，或用逗号分隔。合约按批次写入，重复地址会被幂等地设为同一状态。",
+  "admin.whitelistField": "白名单地址",
+  "admin.addressesFound": "识别到 {count} 个地址",
+  "admin.addressesList": "：{list}",
+  "admin.addressesEnd": "。",
+  "admin.addToWhitelist": "加入白名单",
+  "admin.removeFromWhitelist": "移出白名单",
+  "admin.options": "选项管理",
+  "admin.optionCount": "当前 {count} 个",
+  "admin.optionLabel": "#{id}",
+  "admin.optionEditField": "选项 {id} 的新内容",
+  "admin.save": "保存",
+  "admin.cancel": "取消",
+  "admin.rename": "改名",
+  "admin.delete": "删除",
+  "admin.removeRenumber": "删除中间选项会让它后面的选项编号整体前移；投票开始后无法再改动。",
+  "admin.newOptionPlaceholder": "新的选项文字或 CID",
+  "admin.newOptionLabel": "新选项",
+  "admin.addOption": "增加选项",
+  "admin.sweepTitle": "无人认领的押金",
+  "admin.sweepIntro":
+    "宽限期（7 天）过后，仍未被投票人取回的押金可以由你取走。这是本项目已声明的中心化风险：押金是投票人的钱，取走前请确认宽限期确实已过。",
+  "admin.totalStaked": "合约当前记在账上的押金合计：",
+  "admin.sweepToPlaceholder": "接收地址 0x…",
+  "admin.sweepToLabel": "扫款接收地址",
+  "admin.useMyAddress": "填入我的地址",
+  "admin.sweep": "取走无人认领的押金",
+
+  "admin.reason.connectFirst": "请先连接钱包：这些调用都由你的钱包签名。",
+  "admin.reason.readFailed": "读取合约状态失败，无法判断可以做什么；请检查 RPC 后重试。",
+  "admin.reason.reading": "正在读取合约状态…",
+  "admin.reason.noFactoryReason":
+    "当前链（{chainId}，{chainName}）没有已登记的工厂合约，无法确定投票合约。请在钱包里切到本应用部署的那条链。",
+  "admin.reason.closeNoFactory": "当前链（{chainId}，{chainName}）没有已登记的工厂合约。",
+  "admin.reason.closeReadFailed": "读取合约阶段失败，无法判断能否关闭；请检查 RPC 后重试。",
+  "admin.reason.closeEnded": "投票已经正式关闭了。",
+  "admin.reason.closeInSetup": "投票还没开始，合约会以 InvalidPhase 拒绝 closeAfterDeadline()。",
+  "admin.reason.closeBeforeDeadline":
+    "还没到截止时间，合约会以 DeadlineNotInFuture 拒绝 closeAfterDeadline()。",
+  "admin.reason.startOnlyWhileSetup":
+    "投票已经开始过了，合约会以 InvalidPhase 拒绝再次调用 startPoll()。",
+  "admin.reason.startTooFewOptions": "至少要有 {min} 个选项才能开始，合约会以 TooFewOptions 拒绝。",
+  "admin.reason.startPastDeadline":
+    "截止时间已经过去了，合约会以 PollAlreadyEnded 拒绝开始；请重新建一个投票。",
+  "admin.reason.endNotStarted": "投票还没开始，合约会以 InvalidPhase 拒绝 endPoll()。",
+  "admin.reason.endAlreadyEnded": "投票已经结束了，合约会以 InvalidPhase 拒绝 endPoll()。",
+  "admin.reason.whitelistAfterEnd": "投票已经结束，合约会以 InvalidPhase 拒绝改动白名单。",
+  "admin.reason.whitelistEmpty": "请先填写地址：每行一个，或用逗号分隔。",
+  "admin.reason.whitelistMalformed":
+    "有地址不是 20 字节的十六进制格式（0x 加 40 位），整批都不会提交。",
+  "admin.reason.whitelistTooMany": "一次最多提交 {limit} 个地址，收到 {count} 个；请分批。",
+  "admin.reason.optionsLocked":
+    "选项只能在投票开始前改动；一旦开始，合约会以 InvalidPhase 拒绝所有选项写入。",
+  "admin.reason.removeTooFew": "只剩 {count} 个选项，合约会以 TooFewOptions 拒绝删除。",
+  "admin.reason.sweepNotEnded": "投票还没结束，合约会以 InvalidPhase 拒绝 sweepUnclaimed()。",
+  "admin.reason.sweepNoCloseTime": "合约还没有记录关闭时间，无法判断宽限期是否已过。",
+  "admin.reason.sweepGracePeriod":
+    "宽限期还没结束，合约会以 GracePeriodNotElapsed 拒绝；可领取时间是 {time}。",
+  "admin.reason.sweepNoRecipient": "请填写接收地址。",
+  "admin.reason.sweepBadRecipient": "接收地址必须是 20 字节的十六进制地址。",
+
+  "create.heading": "发起新投票",
+  "create.subtitleExpanded": "交易由你自己的钱包签名，后端不持私钥。",
+  "create.subtitleCollapsed": "任何人都能创建投票；发起人负责它的白名单与结束。",
+  "create.intro":
+    "交易由你自己的钱包签名，后端不持私钥；合约会把发起人记成你的地址，之后只有你能维护这个投票的白名单。",
+  "create.draftRestored":
+    "已从本机浏览器恢复上次未提交的草稿（只存在这台设备上，不会上传）。提交成功后会自动清除。",
+  "create.templateLabel": "投票类型（模板）",
+  "create.questionLabel": "问题",
+  "create.questionPlaceholder": "例如：社区资金应该先资助哪个提案？",
+  "create.optionsLabel": "选项（至少 {min} 个；可以填元数据 CID，也可以直接填文字）",
+  "create.optionPlaceholderFirst": "bafkrei… 或 直接写选项文字",
+  "create.optionPlaceholderNumbered": "选项 {number}",
+  "create.removeOption": "删除",
+  "create.addOption": "+ 增加一个选项",
+  "create.deadlineLabel": "截止时间",
+  "create.deadlineHint": "按你本机时区解释，上链时换算成 Unix 时间戳。",
+  "create.admissionLegend": "谁可以投票",
+  "create.admissionOpen": "所有人可投",
+  "create.admissionOpenHint": "——任何地址都能投，无需你事先添加。",
+  "create.admissionWhitelist": "仅白名单",
+  "create.admissionWhitelistHint":
+    "——创建后你要在投票页的管理面板里逐个添加地址，否则没有人能投票。",
+  "create.admissionFixed": "这个选择在创建时写入合约，",
+  "create.admissionFixedEmphasis": "之后无法更改",
+  "create.admissionFixedTail": "（合约没有对应的修改函数）。要换一种准入方式，只能另建一个投票。",
+  "create.cidSummary1": "这 {total} 个选项里，有 {cids} 个会被登记为",
+  "create.cidEmphasis": "元数据 CID",
+  "create.cidSummary2":
+    "（打开投票的人会按 CID 去 IPFS 网关取文档）；另外 {raw} 个不是 CID 形状，会被",
+  "create.cidRawEmphasis": "原样存成选项文字",
+  "create.cidSummary3": "，没有文档可取。合约不做这个检查，字符串是永久写入的，创建后不可修改。",
+  "create.submit": "创建投票",
+  "create.draftSaved": "草稿已保存在本机浏览器，刷新后可以继续。",
+  "create.draftUnsaved1": "当前浏览器不允许本地存储（无痕模式或存储已禁用），草稿",
+  "create.draftUnsavedEmphasis": "不会",
+  "create.draftUnsaved2": "被保留，刷新后需要重新填写。",
+  "create.clearDraft": "清除草稿",
+  "create.created": " · 已确认，新投票已出现在下面的列表里",
+  "create.connectForCreator": "连接钱包后这里会显示发起人地址。",
+
+  "create.reason.noFactory":
+    "当前链（{chainId}，{chainName}）没有已登记的工厂合约，无法创建投票。请在钱包里切到本应用部署的那条链。",
+  "create.reason.connectFirst":
+    "请先连接钱包：创建投票要由你的钱包签名，合约会把发起人记成这个地址。",
+  "create.reason.emptyQuestion": "请填写投票的问题：合约会以 EmptyQuestion 拒绝空问题。",
+  "create.reason.tooFewOptions":
+    "至少需要 {min} 个选项：合约会以 TooFewOptions 拒绝少于 {min} 个选项的投票。",
+  "create.reason.noDeadline": "请选择截止时间：合约会以 DeadlineNotInFuture 拒绝空或无效的时间。",
+  "create.reason.deadlinePast":
+    "截止时间必须在未来：合约会以 DeadlineNotInFuture 拒绝已经过去的时间。",
+
+  "subscribe.connectFirst":
+    "连接钱包后可以订阅这个投票，它的投票、改投、撤票、退款与阶段变更会出现在",
+  "subscribe.notifications": "我的通知",
+  "subscribe.connectLast": "。订阅只是一行本站记录，不需要签名，也不上链。",
+  "subscribe.reading": "正在读取订阅状态…",
+  "subscribe.noIndex1": "这个部署没有配置索引（",
+  "subscribe.noIndex2": "），所以无法保存订阅。这不是「订阅失败」——是这里根本没有地方记录它。",
+  "subscribe.readFailed": "读取订阅状态失败，因此无法确定当前是否已订阅。完整错误见浏览器控制台。",
+  "subscribe.subscribe": "订阅这个投票",
+  "subscribe.unsubscribe": "取消订阅这个投票",
+  "subscribe.note": "订阅只是本站的一行记录，不上链、不需要签名。",
+
+  "template.defaultsLabel": "默认",
+  "template.switchConfirm": "切换到「{name}」会替换当前的机制配置，已填写的字段保留。继续吗？",
+
+  "mechanism.single": "单选，每票一个选项",
+  "mechanism.multiSelect": "多选，每票最多 {count} 项",
+  "mechanism.weighted": "按地址权重计票",
+  "mechanism.oneVoteEach": "一人一票",
+  "mechanism.notCommitReveal": "不隐藏选择（非 commit-reveal）",
+  "mechanism.delegable": "可委托票权",
+  "mechanism.notDelegable": "不可委托",
+  "mechanism.openToAll": "所有人可投",
+  "mechanism.whitelistOnly": "仅白名单可投",
+  "mechanism.unknown": "未知",
+
+  "mechanism.problem.multiSelect":
+    "多选模板要求每票至少能选 2 项，当前上限不足 2，合约会拒绝创建。",
+  "mechanism.problem.weighted":
+    "加权投票要求先建白名单：开放给所有人时没有确定的票权集合，合约会拒绝创建。请把「谁可以投票」改回「仅白名单」，或换一个模板。",
+  "mechanism.problem.commitRevealWindow":
+    "选择隐藏（commit-reveal）时必须给出揭示窗口，当前为 0，合约会拒绝创建。",
+  "mechanism.problem.commitRevealDelegation": "隐藏选择目前不能与委托投票组合，合约会拒绝创建。",
+
+  /*
+    ---------------------------------------------------------------------------
+    The execution panel
+    ---------------------------------------------------------------------------
+
+    Already English in both languages before this change: it is a creator's
+    governance tool, and these six labels were written in English in the JSX.
+    They are catalogue entries now so the panel can be translated at all, and the
+    Chinese is the same English rather than a fresh translation — rewriting them
+    would be a copy change wearing an extraction's clothes.
+
+    `execution.submitting` is NOT that category. It replaces a literal
+    `Submitting…`, which is what this panel used to render where every other
+    panel in the app renders 提交中…; the existing `common.busy` is the one
+    spelling of that state.
+  */
+  "execution.title": "结果执行",
+  "execution.description":
+    "A passed vote can authorise exactly one on-chain action. It waits out the timelock first, so voters can see what is about to happen.",
+  "execution.outcome": "结果",
+  "execution.explanation": "说明",
+  "execution.quorum": "法定人数",
+  "execution.turnout": "出席率",
+  "execution.quorumMet": " — quorum met",
+  "execution.belowQuorum": " — below quorum",
+  "execution.queue": "队列",
+  "execution.nothingQueued": "Nothing queued yet.",
+  "execution.onlyPassed": "Only a passed vote can be queued.",
+  "execution.target": "目标",
+  "execution.status": "状态",
+  "execution.waiting": "Waiting out the timelock — {seconds}s remaining.",
+  "execution.ready": "Ready to execute now.",
+  "execution.done": "Executed.",
+  "execution.failed": "The last attempt reverted",
+  "execution.failedTail": ". The vote is unchanged and this can be retried.",
+  "execution.calldata": "调用数据",
+  "execution.allowedTargets": "允许的目标",
+  "execution.selfOnly": "This poll itself only.",
+  "execution.queueAction": "Queue an action",
+  "execution.execute": "Execute",
+  "execution.cancel": "Cancel",
+
+  "common.busy": "提交中…",
+
+  /*
+    ===========================================================================
+    The library-level label tables — the last Chinese that leaked into English
+    ===========================================================================
+
+    ---------------------------------------------------------------------------
+    What these are, and why they were the last leak
+    ---------------------------------------------------------------------------
+
+    Every surface above renders through a component, and every component reads
+    its words from a translator. The keys below do not: they are emitted by pure
+    `lib/` modules — `health-report.ts`, `audit.ts`, `trust.ts`, `failure.ts`,
+    `poll-report.ts`, `data.ts` — which build sentences as RETURN VALUES, not as
+    JSX. A component that renders such a value cannot translate it after the
+    fact: by the time it has the string, the language decision has already been
+    made. So an English reader was shown 状态, 正常 and 规则与创建时一致 inside an
+    otherwise entirely English page, and no amount of catalogue work above could
+    have reached them.
+
+    ---------------------------------------------------------------------------
+    Why these are catalogue keys rather than a table per module
+    ---------------------------------------------------------------------------
+
+    The alternative — a second `Record<Locale, string>` beside each module, the
+    shape `voting.ts` uses for `CHAIN_NAMES` and `PHASE_LABELS` — was rejected
+    here for one reason: `i18n.test.ts` walks `ZH_MESSAGES` and fails when two
+    names hold the same Chinese string. A per-module table would sit outside that
+    check, so the reuse below (是/否/读取失败/读取中… are already answered by
+    `ballotPhrasesFor(locale)`) would have to be re-established by hand in each
+    table, and the four modules would drift. As catalogue keys they are covered
+    by the completeness check, the placeholder declaration and the duplication
+    check at once.
+
+    `voting.ts` and `health-report.ts` were both left on their own locale tables
+    deliberately: the first is already correct and named in ADR-0040, and the
+    second is one panel's own coherent vocabulary, where a single table makes
+    "did every row get translated" answerable at a glance. Moving either would be
+    churn rather than a fix.
+
+    ---------------------------------------------------------------------------
+    Why `audit.kind.*` points at `poll.phase` for one of its six entries
+    ---------------------------------------------------------------------------
+
+    阶段 is the same word the poll detail row renders for the same concept.
+    A `audit.kind.phase` holding it would be a second Chinese spelling of one
+    sentence, which `i18n.test.ts` refuses, so the lookup reuses `poll.phase`.
+  */
+  "audit.kind.cast": "投票",
+  "audit.kind.changed": "改投",
+  "audit.kind.withdrawn": "撤票",
+  "audit.kind.refunded": "退款",
+  "audit.kind.whitelist": "白名单",
+
+  /*
+    The rules-fingerprint verdict: three sentences about whether a poll's rules
+    still match the promise it was created with.
+
+    Kept out of the two `*Panel.tsx` components for the reason `trust.ts` gives
+    in its own header — the wording IS the feature. A `changed` verdict asserted
+    as reassurance about wrongdoing would be a false accusation, and an
+    `unknown` rendered as reassurance is the exact false assurance the check
+    exists to prevent. Both are text, and text that decides a reader's judgement
+    of someone else's honesty belongs in the tested module rather than in JSX.
+
+    `—` is written here for the same reason it appears verbatim in the ballot
+    phrases: it is a value a reader copies off the page, and the difference
+    between `—` and `-` is the difference between a copy and a retype.
+  */
+  "trust.rulesUnchangedTitle": "规则与创建时一致",
+  "trust.rulesUnchangedDetail":
+    "把当前链上的问题、选项、截止时间、准入方式与白名单重新做了一次指纹计算，结果与创建时写入的承诺相同：这些内容自创建以来没有被改动过。任何人都可以独立重算并得到相同结果。",
+  "trust.rulesChangedTitle": "规则在创建后有过改动",
+  "trust.rulesChangedDetail":
+    "当前链上状态的指纹与创建时写入的承诺不同，说明问题、选项、截止时间、准入方式或白名单在创建之后被改过至少一次。这不一定有问题——发起人在投票开始前增删选项、维护白名单本来就是正常流程——但你应该知道这件事，而不是只能相信页面。改动只可能发生在投票开始之前，因为选项在开始后会被冻结。",
+  "trust.rulesUnknownTitle": "无法比对规则指纹",
+  "trust.rulesUnknownDetail":
+    "没能同时读到创建时的承诺与当前状态，所以无法判断规则是否被改动过。这不代表规则没问题，也不代表有问题——只是这一次没有验证成功。可以重试，或直接在区块浏览器上调用 rulesHash() 与 currentRulesHash() 自行比对。",
+
+  /*
+    The dependency-failure sentences.
+
+    ---------------------------------------------------------------------------
+    What reaches a READER and what reaches the LOG
+    ---------------------------------------------------------------------------
+
+    `describeFailure` is unusual: its result is BOTH a page banner (the five
+    `/api/*` routes return it as `message`, and three Server Components render it
+    into `serverReadFailed` / `listFailedDetail` slots) AND the string that
+    `/api/health` reports as `indexError`. It is never only a log line — the raw
+    throwable is what goes to the log, and `describeFailure` is precisely the
+    scrubbed replacement for it. So all four sentences below are translated.
+
+    What is NOT translated, and must not be: the redaction placeholders. `<已隐去的
+    URL>` and `<已隐去>` replace text that was ALREADY removed, and they stand in the
+    sentence where the operator expects to see the thing they must go and read in
+    the log. An English reader meeting "<URL redacted>" in a Chinese log line, or
+    a Chinese operator meeting it in an English one, gains nothing and loses the
+    one marker they were told to search for. They are also part of the security
+    guarantee rather than of the copy: `failure.test.ts` asserts that no endpoint
+    survives by looking for exactly these.
+  */
+  "failure.rpcUnreachable":
+    "链上读取失败{call}：所有已配置的 RPC 端点都未响应（连接失败或请求超时）。请检查 web/.env 里的 RPC_URL / RPC_URLS 是否可达；完整错误见服务端日志。",
+  "failure.databaseUnreachable":
+    "索引数据库（MySQL）不可读或不可写。请检查 web/.env 里的 DATABASE_URL，以及数据库是否在运行；完整错误见服务端日志。",
+  /** `{name}`. The thrown value's own class name, e.g. `TypeError`. */
+  "failure.unexpectedNamed": "未预期的失败（{name}）。完整错误见服务端日志。",
+  "failure.unexpected": "未预期的失败。完整错误见服务端日志。",
+  /**
+   * `{method}`. The parenthetical after 链上读取失败, naming the JSON-RPC call.
+   *
+   * A fragment rather than a finished sentence, because `describeFailure` splices
+   * it into the middle of `failure.rpcUnreachable` where Chinese and English need
+   * different punctuation: Chinese uses full-width brackets around the whole
+   * clause, English a comma before it. A single template covering both would have
+   * to be written to one grammar and would read as broken in the other.
+   */
+  "failure.callSuffix": "（{method} 调用）",
+
+  /*
+    The CSV export's own header block.
+
+    Two of the five metadata ROW labels reuse an existing key rather than being
+    written again: 问题 is `poll.question` and 阶段 is `poll.phase`, which are the
+    exact words the poll page and the list card already render for the same two
+    fields. The tally's column headings do not overlap with anything above and
+    are named here.
+
+    `{count}` is a UNIT, not a number: Chinese writes "5 个区块" and English "5
+    blocks", so the unit travels inside the template rather than beside a bare
+    figure that would read as "个区块 5" once translated.
+  */
+  "export.pollAddress": "投票合约",
+  "export.totalVotes": "票数合计",
+  "export.optionId": "选项 ID",
+  "export.option": "选项",
+  "export.votes": "票数",
+  /** A column heading, so the `%` is part of it rather than of the value. */
+  "export.sharePercent": "占比%",
+
+  /*
+    The two whitelist actions, as recorded in the index's activity feed.
+
+    `加入白名单` and `移出白名单` are ALSO the `admin.addToWhitelist` /
+    `admin.removeFromWhitelist` button captions. They are deliberately NOT reused:
+    the button is an instruction a creator is about to carry out, while these are
+    the past-tense record of an event that already happened, and the two surfaces
+    will diverge the first time either is reworded. They are byte-identical
+    today, which is why `i18n.test.ts`'s duplication check must be told about
+    them — see the allowance table there.
+  */
+  "whitelist.added": "加入白名单",
+  "whitelist.removed": "移出白名单",
+
+  /**
+   * The word in front of a refund amount in the activity feed's detail column.
+   *
+   * A fragment rather than a template, because the amount is formatted by
+   * `formatWei` (arbitrary-precision integer arithmetic, not wording) and joined
+   * to a literal `ETH`. Passing the finished figure as `{amount}` would put a
+   * formatted number through a string template for no gain, and `interpolate`
+   * does not accept a bigint in the first place.
+   */
+  "activity.refundedPrefix": "退回",
 } as const;
 
 /**
@@ -583,4 +1122,350 @@ export const EN_MESSAGES = {
   "audit.detail": "Detail",
   "audit.block": "Block",
   "audit.tx": "Transaction",
+  "audit.readFailed":
+    "An unexpected error occurred while reading the audit events. The full error is in the server log.",
+  "audit.indexRequired":
+    "Audit events come from the MySQL index and this deployment has no {databaseUrl} configured, so the history cannot be listed. This does not mean “nothing happened” — the events are still being mined, they simply cannot be read here.",
+  "audit.indexHowTo":
+    "Configure {databaseUrl} and run {commands} to build the index; each poll page's activity record appears with it.",
+  "audit.filterLabel": "Filter by event kind",
+  "audit.summary": "{count} events across {polls} polls{kind}.",
+  "audit.summaryKind": ", kind: {kind}",
+  "audit.emptyDetail":
+    "The filters and the index itself were both readable, so this is “nothing matched” rather than “nothing could be read”.",
+  "audit.pagination": "Audit pages",
+  "audit.backToPolls": "← All polls",
+
+  "notifications.title": "My notifications",
+  "notifications.subtitle":
+    "What has happened in the polls you follow since you last looked. Notifications are derived from the events the indexer recorded — no email and no webhook — and your subscriptions are kept in this site alone, tied only to your wallet address.",
+  "notifications.readFailedHttp": "The read failed (HTTP {status}).",
+  "notifications.readFailedUnexpected":
+    "An unexpected error occurred while reading the notifications. The full error is in the browser console.",
+  "notifications.connectFirst":
+    "Notifications belong to a wallet address, so a wallet has to be connected first. Once it is, this page lists what is new in the polls you follow.",
+  "notifications.indexRequired":
+    "Notifications are derived from the events the indexer recorded and this deployment has no {databaseUrl} configured, so nothing can be listed here. This does not mean “nothing is new” — on-chain events are still happening, they simply cannot be read here.",
+  "notifications.summary": "{count} unread across {polls} polls{truncated}.",
+  "notifications.summaryTruncated": " (this page lists only the newest {limit})",
+  "notifications.markAllRead": "Mark all as read",
+  "notifications.emptyTitle": "Nothing unread",
+  "notifications.emptyDescription":
+    "The index is readable and the polls you follow have had no new events since you last looked. That is a definite state, not a failed read. Not subscribed yet? Press “Subscribe to this poll” on any poll page and its votes, vote changes, withdrawals, refunds and phase changes will all appear here.",
+  "notifications.markThisRead": "Mark this poll as read",
+  "notifications.block": "block {block}",
+  "notifications.auditLine":
+    "The {audit} lists every event (across all polls); this lists only the part you subscribe to.",
+
+  "home.subtitle":
+    "Anyone can start a poll; each poll is its own contract, managed by whoever created it. You can vote, change your vote, withdraw it and reclaim your deposit. Option metadata lives on IPFS and the chain stores only the CID; every write is signed by your own wallet.",
+  "home.listFailedTitle": "The poll list could not be read from the chain",
+  "home.listFailedDetail":
+    "Check that {rpcUrl} in {envFile} is reachable, that {chainId} has a deployed factory contract, and that {exportAbi} has been run. Once a wallet is connected, the list below re-reads it straight from your wallet's network.",
+  "home.auditLine":
+    "Need to check on-chain events against the index? Open the {audit}, where you can filter by event kind, poll contract or address. That page reads the index, not live chain state.",
+  "home.notificationsLine":
+    "Only want the polls you follow? Open {notifications}, which lists what is new since you last looked in the polls you subscribe to, keyed to the connected wallet address; with no subscription there is nothing to list.",
+
+  "my.title": "My votes",
+  "my.subtitle":
+    "The polls this address created, and the polls it currently holds a vote in. Both lists read the chain directly: the chain records who created which poll, while “which polls have I voted in” can only be answered by reading voterState poll by poll, hence the scan cap.",
+  "my.serverListFailed": "The server could not read the poll list: {error}",
+  "my.browserRetry":
+    "The list below still tries to read the factory contract straight from your browser.",
+
+  "shell.brand": "Decentralized voting platform",
+  "shell.footerHeading": "Before you use this",
+  "shell.footerWhitelist":
+    "Each poll's creator maintains its own allowlist, and may call {call} after the grace period to take the deposits nobody reclaimed.",
+  "shell.footerIndex": "The indexer (this app's read-only layer) is a rebuildable cache, ",
+  "shell.footerIndexEmphasis": "the chain is the only source of truth",
+  "shell.footerIndexTail":
+    ", and the page reads the chain directly whenever the index is unavailable.",
+  "shell.footerWallet":
+    "Every write is signed by your own wallet; the backend holds no private key.",
+
+  "chart.title": "Result chart",
+  "chart.caption": "Source {source} · {total} votes",
+  "chart.barValue": "{votes} votes · {percent}%",
+  "chart.noVotes": "No votes yet — nobody has voted in this poll so far.",
+  "chart.ariaNoOptions":
+    "Result chart: this poll has no options yet, so there is no result to show. Source: {source}.",
+  "chart.ariaNoVotes": "Result chart: {message} Source: {source}.",
+  "chart.ariaItem": "{label} {votes} votes ({percent}%)",
+  "chart.ariaBars": "Result chart: {items}. {total} votes in total, source: {source}.",
+
+  "option.metadataCid": "Metadata CID",
+  "option.rawString": "String stored on chain",
+  "option.retrying": "Retrying…",
+  "option.mine": "This is your current choice",
+  "option.changeHere": "Change your vote to this option",
+  "option.voteWithStake": "Cast a vote ({amount} ETH deposit)",
+
+  "pollPage.invalidTitle": "Invalid poll address",
+  "pollPage.invalidSubtitle":
+    "A poll page's address has to be a 20 byte hexadecimal contract address.",
+  "pollPage.invalidDetail":
+    "The path's {segment} must be a poll contract's address ({prefix} plus 40 hex digits); the value received was {received}.",
+  "pollPage.backToPolls": "← Back to all polls",
+  "pollPage.fallbackTitle": "Poll",
+  "pollPage.subtitle":
+    "Voting, changing your vote and withdrawing are all signed by your wallet. Whether a button is available comes entirely from on-chain state: the allowlist, the phase and the deadline.",
+  "pollPage.serverReadFailed": "The server could not read this poll ({address}): {error}",
+  "pollPage.browserRetry":
+    "Everything below still tries to read the same contract straight from your browser; if the address really is not on chain, the rows will show a failed read.",
+
+  "admin.heading": "Creator admin",
+  "admin.onlyYou": "Visible to you only",
+  "admin.intro":
+    "You created this poll, so you alone maintain its allowlist, edit its options and start and end the voting. Every one of these calls is signed by your wallet; whether this panel is shown is only a presentation decision, and the real permission check is the contract's",
+  "admin.introTail": ".",
+  "admin.lifecycle": "Lifecycle",
+  "admin.startPoll": "Start voting",
+  "admin.endPoll": "End voting early",
+  "admin.closeNote1":
+    "If the deadline has passed while the poll still reads Voting, anyone can call",
+  "admin.closeNote2":
+    "to close it formally — until that happens, even your own deposit cannot be taken back.",
+  "admin.whitelist": "Allowlist",
+  "admin.whitelistHint":
+    "One address per line, or separated by commas. The contract writes them in batches, and a repeated address is idempotently set to the same state.",
+  "admin.whitelistField": "Allowlist addresses",
+  "admin.addressesFound": "{count} address(es) recognised",
+  "admin.addressesList": ": {list}",
+  "admin.addressesEnd": ".",
+  "admin.addToWhitelist": "Add to the allowlist",
+  "admin.removeFromWhitelist": "Remove from the allowlist",
+  "admin.options": "Edit options",
+  "admin.optionCount": "{count} currently",
+  "admin.optionLabel": "#{id}",
+  "admin.optionEditField": "New content for option {id}",
+  "admin.save": "Save",
+  "admin.cancel": "Cancel",
+  "admin.rename": "Rename",
+  "admin.delete": "Delete",
+  "admin.removeRenumber":
+    "Deleting an option in the middle moves every option after it down one number, and none of this can be changed once voting has started.",
+  "admin.newOptionPlaceholder": "New option text or CID",
+  "admin.newOptionLabel": "New option",
+  "admin.addOption": "Add an option",
+  "admin.sweepTitle": "Unclaimed deposits",
+  "admin.sweepIntro":
+    "Once the grace period (7 days) has passed, deposits that voters have still not reclaimed may be taken by you. This is a declared centralisation risk of this project: the deposits are the voters' money, so confirm the grace period really has elapsed before taking them.",
+  "admin.totalStaked": "Total deposits the contract currently carries:",
+  "admin.sweepToPlaceholder": "Recipient address 0x…",
+  "admin.sweepToLabel": "Sweep recipient address",
+  "admin.useMyAddress": "Fill in my address",
+  "admin.sweep": "Take the unclaimed deposits",
+
+  "admin.reason.connectFirst": "Connect a wallet first: these calls are signed by your wallet.",
+  "admin.reason.readFailed":
+    "Could not read contract state, so it is not possible to tell what can be done. Check the RPC and retry.",
+  "admin.reason.reading": "Reading contract state…",
+  "admin.reason.noFactoryReason":
+    "The current chain ({chainId}, {chainName}) has no registered factory contract, so the poll contract cannot be determined. Switch your wallet to the chain this app is deployed on.",
+  "admin.reason.closeNoFactory":
+    "The current chain ({chainId}, {chainName}) has no registered factory contract.",
+  "admin.reason.closeReadFailed":
+    "Could not read the contract phase, so it is not possible to tell whether the poll can be closed. Check the RPC and retry.",
+  "admin.reason.closeEnded": "The poll is already formally closed.",
+  "admin.reason.closeInSetup":
+    "Voting has not started, and the contract will refuse closeAfterDeadline() with InvalidPhase.",
+  "admin.reason.closeBeforeDeadline":
+    "The deadline has not passed, and the contract will refuse closeAfterDeadline() with DeadlineNotInFuture.",
+  "admin.reason.startOnlyWhileSetup":
+    "Voting has already started, and the contract will refuse a second startPoll() with InvalidPhase.",
+  "admin.reason.startTooFewOptions":
+    "At least {min} options are needed to start, and the contract will refuse with TooFewOptions.",
+  "admin.reason.startPastDeadline":
+    "The deadline has already passed, and the contract will refuse the start with PollAlreadyEnded; create a new poll instead.",
+  "admin.reason.endNotStarted":
+    "Voting has not started, and the contract will refuse endPoll() with InvalidPhase.",
+  "admin.reason.endAlreadyEnded":
+    "Voting has already ended, and the contract will refuse endPoll() with InvalidPhase.",
+  "admin.reason.whitelistAfterEnd":
+    "Voting has ended, and the contract will refuse an allowlist change with InvalidPhase.",
+  "admin.reason.whitelistEmpty": "Fill in addresses first: one per line, or separated by commas.",
+  "admin.reason.whitelistMalformed":
+    "One of the entries is not a 20-byte hexadecimal address (0x plus 40 digits), so none of the batch will be submitted.",
+  "admin.reason.whitelistTooMany":
+    "At most {limit} addresses can be submitted at once and {count} were given; split them into batches.",
+  "admin.reason.optionsLocked":
+    "Options can only be changed before voting starts; once it has started the contract refuses every option write with InvalidPhase.",
+  "admin.reason.removeTooFew":
+    "Only {count} options are left, and the contract will refuse the deletion with TooFewOptions.",
+  "admin.reason.sweepNotEnded":
+    "Voting has not ended, and the contract will refuse sweepUnclaimed() with InvalidPhase.",
+  "admin.reason.sweepNoCloseTime":
+    "The contract has not recorded a closing time yet, so it is not possible to tell whether the grace period has elapsed.",
+  "admin.reason.sweepGracePeriod":
+    "The grace period has not elapsed, and the contract will refuse with GracePeriodNotElapsed; the deposits become claimable at {time}.",
+  "admin.reason.sweepNoRecipient": "Fill in a recipient address.",
+  "admin.reason.sweepBadRecipient": "The recipient must be a 20-byte hexadecimal address.",
+
+  "create.heading": "Start a new poll",
+  "create.subtitleExpanded":
+    "The transaction is signed by your own wallet; the backend holds no key.",
+  "create.subtitleCollapsed":
+    "Anyone can create a poll; the creator owns its allowlist and its ending.",
+  "create.intro":
+    "The transaction is signed by your own wallet and the backend holds no private key; the contract records you as the creator, and only you can maintain this poll's allowlist afterwards.",
+  "create.draftRestored":
+    "A draft you had not submitted was restored from this browser (it exists only on this device and is never uploaded). It is cleared automatically once the submission succeeds.",
+  "create.templateLabel": "Poll type (template)",
+  "create.questionLabel": "Question",
+  "create.questionPlaceholder":
+    "For example: which proposal should the community fund support first?",
+  "create.optionsLabel":
+    "Options (at least {min}; you can give a metadata CID or type the text directly)",
+  "create.optionPlaceholderFirst": "bafkrei… or the option text directly",
+  "create.optionPlaceholderNumbered": "Option {number}",
+  "create.removeOption": "Delete",
+  "create.addOption": "+ Add an option",
+  "create.deadlineLabel": "Deadline",
+  "create.deadlineHint":
+    "Read in this machine's timezone and converted to a Unix timestamp when it goes on chain.",
+  "create.admissionLegend": "Who may vote",
+  "create.admissionOpen": "Everyone",
+  "create.admissionOpenHint": "— any address can vote, with nothing to add in advance.",
+  "create.admissionWhitelist": "Allowlist only",
+  "create.admissionWhitelistHint":
+    "— after creating it you add addresses one by one in the poll page's admin panel, and until you do nobody can vote.",
+  "create.admissionFixed": "This choice is written into the contract at creation and ",
+  "create.admissionFixedEmphasis": "cannot be changed afterwards",
+  "create.admissionFixedTail":
+    " (the contract has no function for it). To use a different admission mode, create another poll.",
+  "create.cidSummary1": "Of these {total} options, {cids} will be registered as ",
+  "create.cidEmphasis": "metadata CIDs",
+  "create.cidSummary2":
+    " (whoever opens the poll fetches the document from an IPFS gateway by CID); the other {raw} are not CID-shaped and will be ",
+  "create.cidRawEmphasis": "stored verbatim as the option text",
+  "create.cidSummary3":
+    ", with no document to fetch. The contract does not check this, the string is written permanently, and it cannot be changed after creation.",
+  "create.submit": "Create the poll",
+  "create.draftSaved": "The draft is saved in this browser and can be resumed after a refresh.",
+  "create.draftUnsaved1":
+    "This browser does not allow local storage (private mode, or storage disabled), so the draft will ",
+  "create.draftUnsavedEmphasis": "not",
+  "create.draftUnsaved2": " be kept and will have to be retyped after a refresh.",
+  "create.clearDraft": "Clear the draft",
+  "create.created": " · confirmed; the new poll is in the list below",
+  "create.connectForCreator": "Connect a wallet and the creator's address will appear here.",
+
+  "create.reason.noFactory":
+    "The current chain ({chainId}, {chainName}) has no registered factory contract, so a poll cannot be created. Switch your wallet to the chain this app is deployed on.",
+  "create.reason.connectFirst":
+    "Connect a wallet first: creating a poll has to be signed by your wallet, and the contract records that address as the creator.",
+  "create.reason.emptyQuestion":
+    "Fill in the poll's question: the contract refuses an empty question with EmptyQuestion.",
+  "create.reason.tooFewOptions":
+    "At least {min} options are needed: the contract refuses a poll with fewer than {min} options with TooFewOptions.",
+  "create.reason.noDeadline":
+    "Pick a deadline: the contract refuses an empty or unparseable one with DeadlineNotInFuture.",
+  "create.reason.deadlinePast":
+    "The deadline has to be in the future: the contract refuses a time already past with DeadlineNotInFuture.",
+
+  "subscribe.connectFirst":
+    "Connect a wallet to subscribe to this poll; its votes, vote changes, withdrawals, refunds and phase changes will appear under",
+  "subscribe.notifications": "My notifications",
+  "subscribe.connectLast":
+    ". A subscription is one row on this site; it needs no signature and never goes on chain.",
+  "subscribe.reading": "Reading the subscription state…",
+  "subscribe.noIndex1": "This deployment has no index configured (",
+  "subscribe.noIndex2":
+    "), so a subscription cannot be saved. This is not “the subscription failed” — there is simply nowhere here to record it.",
+  "subscribe.readFailed":
+    "Reading the subscription state failed, so whether you are currently subscribed cannot be determined. The full error is in the browser console.",
+  "subscribe.subscribe": "Subscribe to this poll",
+  "subscribe.unsubscribe": "Unsubscribe from this poll",
+  "subscribe.note":
+    "A subscription is one row on this site; it never goes on chain and needs no signature.",
+
+  "template.defaultsLabel": "Default",
+  "template.switchConfirm":
+    "Switching to “{name}” replaces the current mechanism config; the fields you have filled in are kept. Continue?",
+
+  "mechanism.single": "Single choice, one option per ballot",
+  "mechanism.multiSelect": "Multi-select, up to {count} per ballot",
+  "mechanism.weighted": "Counted by address weight",
+  "mechanism.oneVoteEach": "One vote each",
+  "mechanism.notCommitReveal": "Choices are not hidden (no commit-reveal)",
+  "mechanism.delegable": "Voting power can be delegated",
+  "mechanism.notDelegable": "No delegation",
+  "mechanism.openToAll": "Open to everyone",
+  "mechanism.whitelistOnly": "Allowlist only",
+  "mechanism.unknown": "Unknown",
+
+  "mechanism.problem.multiSelect":
+    "The multi-select template needs at least 2 selections per ballot and the current cap is below 2, so the contract will refuse to create this poll.",
+  "mechanism.problem.weighted":
+    "Weighted voting needs an allowlist first: with the poll open to everyone there is no defined set of voting power, so the contract will refuse to create it. Set “Who may vote” back to “Allowlist only”, or pick another template.",
+  "mechanism.problem.commitRevealWindow":
+    "Hiding choices (commit-reveal) requires a reveal window and the current one is 0, so the contract will refuse to create this poll.",
+  "mechanism.problem.commitRevealDelegation":
+    "Hidden choices cannot be combined with delegated voting yet, so the contract will refuse to create this poll.",
+
+  "execution.title": "Result execution",
+  "execution.description":
+    "A passed vote can authorise exactly one on-chain action. It waits out the timelock first, so voters can see what is about to happen.",
+  "execution.outcome": "Outcome",
+  "execution.explanation": "Explanation",
+  "execution.quorum": "Quorum",
+  "execution.turnout": "Turnout",
+  "execution.quorumMet": " — quorum met",
+  "execution.belowQuorum": " — below quorum",
+  "execution.queue": "Queue",
+  "execution.nothingQueued": "Nothing queued yet.",
+  "execution.onlyPassed": "Only a passed vote can be queued.",
+  "execution.target": "Target",
+  "execution.status": "Status",
+  "execution.waiting": "Waiting out the timelock — {seconds}s remaining.",
+  "execution.ready": "Ready to execute now.",
+  "execution.done": "Executed.",
+  "execution.failed": "The last attempt reverted",
+  "execution.failedTail": ". The vote is unchanged and this can be retried.",
+  "execution.calldata": "Call data",
+  "execution.allowedTargets": "Allowed targets",
+  "execution.selfOnly": "This poll itself only.",
+  "execution.queueAction": "Queue an action",
+  "execution.execute": "Execute",
+  "execution.cancel": "Cancel",
+
+  "common.busy": "Submitting…",
+
+  "audit.kind.cast": "Vote",
+  "audit.kind.changed": "Change",
+  "audit.kind.withdrawn": "Withdrawal",
+  "audit.kind.refunded": "Refund",
+  "audit.kind.whitelist": "Allowlist",
+
+  "trust.rulesUnchangedTitle": "The rules match what was committed at creation",
+  "trust.rulesUnchangedDetail":
+    "The question, the options, the deadline, the admission mode and the allowlist as they stand on chain were run through the fingerprint calculation again, and the result is the same as the commitment written at creation: none of that content has been changed since. Anyone can recompute it independently and get the same answer.",
+  "trust.rulesChangedTitle": "The rules have been changed since creation",
+  "trust.rulesChangedDetail":
+    "The fingerprint of the current on-chain state differs from the commitment written at creation, so the question, the options, the deadline, the admission mode or the allowlist has been edited at least once since. That is not necessarily a problem — a creator adding or removing options and maintaining the allowlist before voting opens is the intended workflow — but you should know it rather than have to take the page's word for it. A change can only have happened before voting started, because the options are frozen once it does.",
+  "trust.rulesUnknownTitle": "The rules fingerprints cannot be compared",
+  "trust.rulesUnknownDetail":
+    "The commitment written at creation and the current state could not both be read, so whether the rules have been changed cannot be determined. This does not mean the rules are fine, and it does not mean they are not — it means this particular check did not succeed. You can retry, or call rulesHash() and currentRulesHash() yourself in a block explorer and compare them directly.",
+
+  "failure.rpcUnreachable":
+    "The on-chain read failed{call}: every configured RPC endpoint was unresponsive (the connection failed or the request timed out). Check that RPC_URL / RPC_URLS in web/.env are reachable; the full error is in the server log.",
+  "failure.databaseUnreachable":
+    "The index database (MySQL) is unreadable or unwritable. Check DATABASE_URL in web/.env and whether the database is running; the full error is in the server log.",
+  "failure.unexpectedNamed": "An unexpected failure ({name}). The full error is in the server log.",
+  "failure.unexpected": "An unexpected failure. The full error is in the server log.",
+  "failure.callSuffix": " (the {method} call)",
+
+  "export.pollAddress": "Poll contract",
+  "export.totalVotes": "Total votes",
+  "export.optionId": "Option ID",
+  "export.option": "Option",
+  "export.votes": "Votes",
+  "export.sharePercent": "Share %",
+
+  "whitelist.added": "Added to the allowlist",
+  "whitelist.removed": "Removed from the allowlist",
+
+  "activity.refundedPrefix": "Refunded",
 } satisfies Messages;

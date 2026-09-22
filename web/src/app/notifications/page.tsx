@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 import { PageShell } from "@/components/PageShell";
 import { getConfiguredTarget } from "@/lib/data";
+import { translatorFor } from "@/lib/i18n";
+import { currentLocale } from "@/lib/i18n/server";
 
 import { NotificationsView } from "./view";
 
@@ -19,15 +21,22 @@ export const dynamic = "force-dynamic";
  * not-connected reader on this page needs that badge as much as on any other —
  * arguably more, since the whole page is about a wallet, and "which chain is this
  * even talking to" is the first thing they should be able to check.
+ *
+ * The language is read on the server like the chain is: this file has no
+ * `"use client"`, so `currentLocale()` (the same cookie the root layout reads)
+ * decides what the frame says, and the translator travels down to both the shell
+ * and the client list so the two cannot disagree.
  */
-export default function NotificationsPage() {
+export default async function NotificationsPage() {
+  const t = translatorFor(await currentLocale());
   const configuredTarget = getConfiguredTarget();
 
   return (
     <PageShell
-      title="我的通知"
-      subtitle="你订阅的投票在上次查看之后发生的事。通知由索引器记录的事件推导得出，不引入邮件或 webhook；订阅只保存在本站，且仅与你的钱包地址关联。"
+      title={t.t("notifications.title")}
+      subtitle={t.t("notifications.subtitle")}
       configuredTarget={configuredTarget}
+      translator={t}
     >
       <NotificationsView />
     </PageShell>

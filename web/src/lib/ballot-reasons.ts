@@ -130,10 +130,18 @@ function isSetup(input: BallotInputs): boolean {
  * The three call sites below pass different suffixes, because the REMEDY differs
  * even though the diagnosis does not.
  */
-function unknownContract(input: BallotInputs, phrases: BallotPhrases, suffix: string): string {
+function unknownContract(
+  input: BallotInputs,
+  phrases: BallotPhrases,
+  suffix: string,
+  locale: Locale,
+): string {
   return interpolate(phrases.wrongNetwork, {
     chainId: input.subjectChainId,
-    chainName: chainName(input.subjectChainId),
+    // The chain's name is interpolated INTO a translated sentence, so it has to
+    // be translated too -- otherwise an English sentence carries the Chinese name
+    // and the reader sees the mixed-language text this module exists to remove.
+    chainName: chainName(input.subjectChainId, locale),
     suffix,
   });
 }
@@ -164,7 +172,7 @@ export function sharedBlock(
 ): string | undefined {
   const phrases = ballotPhrasesFor(locale);
 
-  return checkUntilAdmission(input, phrases) ?? admissionBlock(input, phrases);
+  return checkUntilAdmission(input, phrases, locale) ?? admissionBlock(input, phrases);
 }
 
 /**
@@ -174,9 +182,13 @@ export function sharedBlock(
  * sentences differ per control, so they repeat the same ordered checks with their
  * own wording. What they must not do is reorder them, and they do not.
  */
-function checkUntilAdmission(input: BallotInputs, phrases: BallotPhrases): string | undefined {
+function checkUntilAdmission(
+  input: BallotInputs,
+  phrases: BallotPhrases,
+  locale: Locale,
+): string | undefined {
   if (!input.contractKnown) {
-    return unknownContract(input, phrases, phrases.contractUnknownCannotDetermine);
+    return unknownContract(input, phrases, phrases.contractUnknownCannotDetermine, locale);
   }
 
   if (!input.isConnected) {
@@ -279,7 +291,7 @@ export function changeReason(
 ): string | undefined {
   const phrases = ballotPhrasesFor(locale);
   const blocked =
-    checkUntilAdmission(input, phrases) ??
+    checkUntilAdmission(input, phrases, locale) ??
     (input.marked ? undefined : admissionBlock(input, phrases));
 
   if (blocked !== undefined) {
@@ -304,7 +316,7 @@ export function withdrawReason(
   const phrases = ballotPhrasesFor(locale);
 
   if (!input.contractKnown) {
-    return unknownContract(input, phrases, phrases.contractUnknownGeneric);
+    return unknownContract(input, phrases, phrases.contractUnknownGeneric, locale);
   }
 
   if (!input.isConnected) {
@@ -360,7 +372,7 @@ export function refundReason(
   const phrases = ballotPhrasesFor(locale);
 
   if (!input.contractKnown) {
-    return unknownContract(input, phrases, phrases.contractUnknownCannotRefund);
+    return unknownContract(input, phrases, phrases.contractUnknownCannotRefund, locale);
   }
 
   if (!input.isConnected) {
@@ -409,7 +421,7 @@ export function closeReason(
   const phrases = ballotPhrasesFor(locale);
 
   if (!input.contractKnown) {
-    return unknownContract(input, phrases, phrases.contractUnknownGeneric);
+    return unknownContract(input, phrases, phrases.contractUnknownGeneric, locale);
   }
 
   if (input.phaseState !== "ready") {

@@ -139,7 +139,9 @@ export function phaseText(
   }
 
   if (input.status === "ready" && input.phase !== undefined) {
-    return phaseLabel(input.phase);
+    // The phase NAME is copy, so it takes the locale with it. Without this an
+    // English reader saw the Chinese phase word inside an otherwise English row.
+    return phaseLabel(input.phase, locale);
   }
 
   return input.status === "failed" ? phrases.readFailed : phrases.reading;

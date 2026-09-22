@@ -10,6 +10,7 @@ import {
   useWriteContract,
 } from "wagmi";
 
+import { useTranslator } from "@/components/LocaleProvider";
 import { useMounted } from "@/hooks/useMounted";
 import { parseAddressList, WHITELIST_BATCH_LIMIT } from "@/lib/admin-labels";
 import { describeWriteFailure } from "@/lib/ballot-labels";
@@ -89,6 +90,7 @@ export interface PollAdminProps {
  * produce, exactly as in `PollBallot`.
  */
 export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
+  const { t, ballot, locale } = useTranslator();
   const mounted = useMounted();
   const config = useConfig();
   const { address: account, isConnected } = useAccount();
@@ -273,23 +275,26 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
    */
   function blocked(): string | undefined {
     if (!contractKnown) {
-      return `当前链（${subjectChainId}，${chainName(subjectChainId)}）没有已登记的工厂合约，无法确定投票合约。请在钱包里切到本应用部署的那条链。`;
+      return t("admin.reason.noFactoryReason", {
+        chainId: subjectChainId,
+        chainName: chainName(subjectChainId, locale),
+      });
     }
 
     if (!isConnected) {
-      return "请先连接钱包：这些调用都由你的钱包签名。";
+      return t("admin.reason.connectFirst");
     }
 
     if (txBusy) {
-      return "上一笔交易还在确认中，请等它完成。";
+      return ballot.busy;
     }
 
     if (reads.isError) {
-      return "读取合约状态失败，无法判断可以做什么；请检查 RPC 后重试。";
+      return t("admin.reason.readFailed");
     }
 
     if (reads.isPending) {
-      return "正在读取合约状态…";
+      return t("admin.reason.reading");
     }
 
     return undefined;
@@ -303,15 +308,15 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
     }
 
     if (!voting && !setup) {
-      return "投票已经开始过了，合约会以 InvalidPhase 拒绝再次调用 startPoll()。";
+      return t("admin.reason.startOnlyWhileSetup");
     }
 
     if (optionCount !== undefined && optionCount < MIN_OPTIONS) {
-      return `至少要有 ${MIN_OPTIONS} 个选项才能开始，合约会以 TooFewOptions 拒绝。`;
+      return t("admin.reason.startTooFewOptions", { min: MIN_OPTIONS });
     }
 
     if (endsAt !== undefined && nowSeconds >= endsAt) {
-      return "截止时间已经过去了，合约会以 PollAlreadyEnded 拒绝开始；请重新建一个投票。";
+      return t("admin.reason.startPastDeadline");
     }
 
     return undefined;
@@ -325,9 +330,7 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
     }
 
     if (!voting) {
-      return setup
-        ? "投票还没开始，合约会以 InvalidPhase 拒绝 endPoll()。"
-        : "投票已经结束了，合约会以 InvalidPhase 拒绝 endPoll()。";
+      return setup ? t("admin.reason.endNotStarted") : t("admin.reason.endAlreadyEnded");
     }
 
     return undefined;
@@ -343,27 +346,30 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
    */
   function closeReason(): string | undefined {
     if (!contractKnown) {
-      return `当前链（${subjectChainId}，${chainName(subjectChainId)}）没有已登记的工厂合约。`;
+      return t("admin.reason.closeNoFactory", {
+        chainId: subjectChainId,
+        chainName: chainName(subjectChainId, locale),
+      });
     }
 
     if (reads.isError) {
-      return "读取合约阶段失败，无法判断能否关闭；请检查 RPC 后重试。";
+      return t("admin.reason.closeReadFailed");
     }
 
     if (reads.isPending) {
-      return "正在读取合约状态…";
+      return t("admin.reason.reading");
     }
 
     if (ended) {
-      return "投票已经正式关闭了。";
+      return t("admin.reason.closeEnded");
     }
 
     if (setup) {
-      return "投票还没开始，合约会以 InvalidPhase 拒绝 closeAfterDeadline()。";
+      return t("admin.reason.closeInSetup");
     }
 
     if (!deadlinePassed) {
-      return "还没到截止时间，合约会以 DeadlineNotInFuture 拒绝 closeAfterDeadline()。";
+      return t("admin.reason.closeBeforeDeadline");
     }
 
     return undefined;
@@ -377,19 +383,22 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
     }
 
     if (ended) {
-      return "投票已经结束，合约会以 InvalidPhase 拒绝改动白名单。";
+      return t("admin.reason.whitelistAfterEnd");
     }
 
     if (whitelistText.trim().length === 0) {
-      return "请先填写地址：每行一个，或用逗号分隔。";
+      return t("admin.reason.whitelistEmpty");
     }
 
     if (parsedWhitelist === null) {
-      return "有地址不是 20 字节的十六进制格式（0x 加 40 位），整批都不会提交。";
+      return t("admin.reason.whitelistMalformed");
     }
 
     if (parsedWhitelist.length > WHITELIST_BATCH_LIMIT) {
-      return `一次最多提交 ${WHITELIST_BATCH_LIMIT} 个地址，收到 ${parsedWhitelist.length} 个；请分批。`;
+      return t("admin.reason.whitelistTooMany", {
+        limit: WHITELIST_BATCH_LIMIT,
+        count: parsedWhitelist.length,
+      });
     }
 
     return undefined;
@@ -403,7 +412,7 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
     }
 
     if (!setup) {
-      return "选项只能在投票开始前改动；一旦开始，合约会以 InvalidPhase 拒绝所有选项写入。";
+      return t("admin.reason.optionsLocked");
     }
 
     return undefined;
@@ -417,7 +426,7 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
     }
 
     if (optionCount !== undefined && optionCount <= MIN_OPTIONS) {
-      return `只剩 ${optionCount} 个选项，合约会以 TooFewOptions 拒绝删除。`;
+      return t("admin.reason.removeTooFew", { count: optionCount });
     }
 
     return undefined;
@@ -431,29 +440,31 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
     }
 
     if (!ended) {
-      return "投票还没结束，合约会以 InvalidPhase 拒绝 sweepUnclaimed()。";
+      return t("admin.reason.sweepNotEnded");
     }
 
     // The grace period starts when the poll was closed, not when its deadline
     // was. `endPoll` and `closeAfterDeadline` both record `votingEndedAt`, and
     // that is the value `sweepUnclaimed` compares against.
     if (votingEndedAt === undefined || votingEndedAt === 0n) {
-      return "合约还没有记录关闭时间，无法判断宽限期是否已过。";
+      return t("admin.reason.sweepNoCloseTime");
     }
 
     const availableAt = votingEndedAt + REFUND_GRACE_PERIOD_SECONDS;
     if (nowSeconds < availableAt) {
-      return `宽限期还没结束，合约会以 GracePeriodNotElapsed 拒绝；可领取时间是 ${new Date(
-        Number(availableAt) * 1000,
-      ).toLocaleString()}。`;
+      return t("admin.reason.sweepGracePeriod", {
+        // `interpolate` takes `string | number` only, so the Date is formatted
+        // here rather than handed over as an object to be stringified.
+        time: new Date(Number(availableAt) * 1000).toLocaleString(),
+      });
     }
 
     if (sweepTo.trim().length === 0) {
-      return "请填写接收地址。";
+      return t("admin.reason.sweepNoRecipient");
     }
 
     if (!ADDRESS_PATTERN.test(sweepTo.trim())) {
-      return "接收地址必须是 20 字节的十六进制地址。";
+      return t("admin.reason.sweepBadRecipient");
     }
 
     return undefined;
@@ -474,20 +485,21 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
   return (
     <section className="mt-6 rounded-xl border border-amber-200 bg-amber-50/40 p-5">
       <h2 className="text-sm font-semibold text-slate-900">
-        发起人管理
+        {t("admin.heading")}
         <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-normal text-amber-800">
-          仅你可见
+          {t("admin.onlyYou")}
         </span>
       </h2>
       <p className="mt-1 text-xs leading-relaxed text-slate-500">
-        你创建了这个投票，所以只有你能维护白名单、改动选项、开始与结束投票。
-        这些调用都由你的钱包签名；面板的显示与否只是界面决定，真正的权限检查在合约的{" "}
-        <code className="font-mono">onlyOwner</code> 里。
+        {t("admin.intro")} <code className="font-mono">onlyOwner</code>
+        {t("admin.introTail")}
       </p>
 
       {/* ---- lifecycle ---- */}
       <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">生命周期</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {t("admin.lifecycle")}
+        </h3>
 
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button
@@ -496,7 +508,7 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
             disabled={disabled(startReason())}
             className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
-            {writing?.kind === "start" && txBusy ? "提交中…" : "开始投票"}
+            {writing?.kind === "start" && txBusy ? ballot.busy : t("admin.startPoll")}
           </button>
           {startReason() !== undefined && (
             <span className="text-xs text-slate-400">{startReason()}</span>
@@ -510,7 +522,7 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
             disabled={disabled(endReason())}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
           >
-            {writing?.kind === "end" && txBusy ? "提交中…" : "提前结束投票"}
+            {writing?.kind === "end" && txBusy ? ballot.busy : t("admin.endPoll")}
           </button>
           {endReason() !== undefined && (
             <span className="text-xs text-slate-400">{endReason()}</span>
@@ -524,17 +536,18 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
           whose creator never called `endPoll`. Explaining that is the point.
         */}
         <p className="mt-3 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-slate-500">
-          若截止时间已过而投票仍显示「投票中」，任何人都可以调用{" "}
-          <code className="font-mono">closeAfterDeadline()</code> 正式关闭它——
-          在那之前，连你自己的押金也取不回来。
+          {t("admin.closeNote1")} <code className="font-mono">closeAfterDeadline()</code>{" "}
+          {t("admin.closeNote2")}
         </p>
       </div>
 
       {/* ---- whitelist ---- */}
       <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">白名单</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {t("admin.whitelist")}
+        </h3>
         <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-          每行一个地址，或用逗号分隔。合约按批次写入，重复地址会被幂等地设为同一状态。
+          {t("admin.whitelistHint")}
         </p>
 
         <textarea
@@ -542,17 +555,17 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
           onChange={(event) => setWhitelistText(event.target.value)}
           rows={3}
           placeholder={"0xabc…\n0xdef…"}
-          aria-label="白名单地址"
+          aria-label={t("admin.whitelistField")}
           className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs outline-none focus:border-slate-500"
         />
 
         {parsedWhitelist !== null && whitelistText.trim().length > 0 && (
           <p className="mt-1 text-[11px] text-slate-400">
-            识别到 {parsedWhitelist.length} 个地址
+            {t("admin.addressesFound", { count: parsedWhitelist.length })}
             {parsedWhitelist.length > 0 && parsedWhitelist.length <= 3
-              ? `：${parsedWhitelist.join("、")}`
+              ? t("admin.addressesList", { list: parsedWhitelist.join("、") })
               : ""}
-            。
+            {t("admin.addressesEnd")}
           </p>
         )}
 
@@ -563,7 +576,9 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
             disabled={disabled(whitelistReason())}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
           >
-            {writing?.kind === "whitelist" && writing.allowed && txBusy ? "提交中…" : "加入白名单"}
+            {writing?.kind === "whitelist" && writing.allowed && txBusy
+              ? ballot.busy
+              : t("admin.addToWhitelist")}
           </button>
           <button
             type="button"
@@ -571,7 +586,9 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
             disabled={disabled(whitelistReason())}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
           >
-            {writing?.kind === "whitelist" && !writing.allowed && txBusy ? "提交中…" : "移出白名单"}
+            {writing?.kind === "whitelist" && !writing.allowed && txBusy
+              ? ballot.busy
+              : t("admin.removeFromWhitelist")}
           </button>
           {whitelistReason() !== undefined && (
             <span className="text-xs text-slate-400">{whitelistReason()}</span>
@@ -582,10 +599,10 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
       {/* ---- options ---- */}
       <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          选项管理
+          {t("admin.options")}
           {optionCount !== undefined && (
             <span className="ml-2 font-normal normal-case tracking-normal text-slate-400">
-              当前 {optionCount} 个
+              {t("admin.optionCount", { count: optionCount })}
             </span>
           )}
         </h3>
@@ -602,7 +619,9 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
 
               return (
                 <li key={id} className="flex flex-wrap items-center gap-2">
-                  <span className="w-8 shrink-0 text-[11px] text-slate-400">#{id}</span>
+                  <span className="w-8 shrink-0 text-[11px] text-slate-400">
+                    {t("admin.optionLabel", { id })}
+                  </span>
 
                   {editing ? (
                     <>
@@ -610,7 +629,7 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
                         type="text"
                         value={editingValue}
                         onChange={(event) => setEditingValue(event.target.value)}
-                        aria-label={`选项 ${id} 的新内容`}
+                        aria-label={t("admin.optionEditField", { id })}
                         className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 font-mono text-xs outline-none focus:border-slate-500"
                       />
                       <button
@@ -619,7 +638,7 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
                         disabled={disabled(optionReason()) || editingValue.trim().length === 0}
                         className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
                       >
-                        {writing?.kind === "updateOption" && txBusy ? "提交中…" : "保存"}
+                        {writing?.kind === "updateOption" && txBusy ? ballot.busy : t("admin.save")}
                       </button>
                       <button
                         type="button"
@@ -629,7 +648,7 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
                         }}
                         className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-500 transition hover:bg-slate-50"
                       >
-                        取消
+                        {t("admin.cancel")}
                       </button>
                     </>
                   ) : (
@@ -646,7 +665,7 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
                         disabled={disabled(optionReason())}
                         className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
                       >
-                        改名
+                        {t("admin.rename")}
                       </button>
                       <button
                         type="button"
@@ -654,7 +673,9 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
                         disabled={disabled(removeReason())}
                         className="shrink-0 rounded-lg border border-rose-200 px-2.5 py-1.5 text-xs text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:text-slate-300"
                       >
-                        {writing?.kind === "removeOption" && txBusy ? "提交中…" : "删除"}
+                        {writing?.kind === "removeOption" && txBusy
+                          ? ballot.busy
+                          : t("admin.delete")}
                       </button>
                     </>
                   )}
@@ -670,9 +691,7 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
           others. Saying so before the click is cheaper than debugging it after.
         */}
         {results !== undefined && results[0].length > MIN_OPTIONS && (
-          <p className="mt-2 text-[11px] text-amber-700">
-            删除中间选项会让它后面的选项编号整体前移；投票开始后无法再改动。
-          </p>
+          <p className="mt-2 text-[11px] text-amber-700">{t("admin.removeRenumber")}</p>
         )}
 
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
@@ -680,8 +699,8 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
             type="text"
             value={newOption}
             onChange={(event) => setNewOption(event.target.value)}
-            placeholder="新的选项文字或 CID"
-            aria-label="新选项"
+            placeholder={t("admin.newOptionPlaceholder")}
+            aria-label={t("admin.newOptionLabel")}
             className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 font-mono text-xs outline-none focus:border-slate-500"
           />
           <button
@@ -690,7 +709,7 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
             disabled={disabled(optionReason()) || newOption.trim().length === 0}
             className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
           >
-            {writing?.kind === "addOption" && txBusy ? "提交中…" : "增加选项"}
+            {writing?.kind === "addOption" && txBusy ? ballot.busy : t("admin.addOption")}
           </button>
         </div>
       </div>
@@ -698,17 +717,13 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
       {/* ---- unclaimed stake ---- */}
       <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-          无人认领的押金
+          {t("admin.sweepTitle")}
         </h3>
-        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-          宽限期（7 天）过后，仍未被投票人取回的押金可以由你取走。
-          这是本项目已声明的中心化风险：押金是投票人的钱，取走前请确认宽限期确实已过。
-        </p>
+        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{t("admin.sweepIntro")}</p>
 
         {totalStaked !== undefined && (
           <p className="mt-1 text-[11px] text-slate-500">
-            合约当前记在账上的押金合计： <span className="font-mono">{totalStaked.toString()}</span>{" "}
-            wei
+            {t("admin.totalStaked")} <span className="font-mono">{totalStaked.toString()}</span> wei
           </p>
         )}
 
@@ -717,8 +732,8 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
             type="text"
             value={sweepTo}
             onChange={(event) => setSweepTo(event.target.value)}
-            placeholder="接收地址 0x…"
-            aria-label="扫款接收地址"
+            placeholder={t("admin.sweepToPlaceholder")}
+            aria-label={t("admin.sweepToLabel")}
             className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 font-mono text-xs outline-none focus:border-slate-500"
           />
           <button
@@ -728,7 +743,7 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
             }}
             className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs text-slate-500 transition hover:bg-slate-50"
           >
-            填入我的地址
+            {t("admin.useMyAddress")}
           </button>
           <button
             type="button"
@@ -736,7 +751,7 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
             disabled={disabled(sweepReason())}
             className="shrink-0 rounded-lg border border-rose-300 px-3 py-1.5 text-xs font-medium text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:text-slate-300"
           >
-            {writing?.kind === "sweep" && txBusy ? "提交中…" : "取走无人认领的押金"}
+            {writing?.kind === "sweep" && txBusy ? ballot.busy : t("admin.sweep")}
           </button>
         </div>
 
@@ -747,9 +762,9 @@ export function PollAdmin({ address, configuredTarget }: PollAdminProps) {
 
       {hash !== undefined && (
         <p className="mt-4 break-all font-mono text-[11px] text-slate-500">
-          交易 {hash}
-          {receipt.isPending && " · 等待确认…"}
-          {receipt.isSuccess && " · 已确认"}
+          {t("ballot.transaction")} {hash}
+          {receipt.isPending && t("ballot.awaitingConfirmation")}
+          {receipt.isSuccess && t("ballot.confirmed")}
         </p>
       )}
 
