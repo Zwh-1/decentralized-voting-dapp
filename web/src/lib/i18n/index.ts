@@ -126,4 +126,4 @@ export {
 } from "./locales";
 export type { Locale } from "./locales";
 export { EN_BALLOT_PHRASES, ZH_BALLOT_PHRASES, type BallotPhrases } from "./ballot-phrases";
-export { EN_MESSAGES, ZH_MESSAGES, type Messages } from "./messages";
+export { EN_MESSAGES, ZH_MESSAGES, type MessageKey, type Messages } from "./messages";

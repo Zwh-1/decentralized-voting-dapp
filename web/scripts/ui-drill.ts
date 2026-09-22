@@ -497,10 +497,15 @@ const READ_PAGE = `(() => {
     // correctly.
     rulesVerdict:
       document.querySelector('[data-rules-verdict]')?.getAttribute('data-rules-verdict') ?? null,
+    // Selected by a STABLE id, not by the row's visible label. The label is
+    // translated, so keying on it would make these two reads silently return
+    // null for a reader in English -- and while that fails loudly here (a null
+    // is compared against the chain's hash), a selector that breaks in another
+    // language is one someone eventually deletes instead of fixing.
     rulesCommitted:
-      document.querySelector('[data-fingerprint="创建时的承诺"]')?.textContent?.trim() ?? null,
+      document.querySelector('[data-fingerprint="committed"]')?.textContent?.trim() ?? null,
     rulesCurrent:
-      document.querySelector('[data-fingerprint="当前状态重算"]')?.textContent?.trim() ?? null,
+      document.querySelector('[data-fingerprint="current"]')?.textContent?.trim() ?? null,
     stakeRiskFound: document.querySelector('[data-testid="stake-risk"]') !== null,
   };
 })()`;

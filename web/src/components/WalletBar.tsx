@@ -1,5 +1,6 @@
 import { useAccount, useChainId, useConnect, useDisconnect, useSwitchChain } from "wagmi";
 
+import { useTranslator } from "@/components/LocaleProvider";
 import { CHAIN_NAMES, chainName, shortenAddress, type ChainTarget } from "../lib/voting";
 
 /**
@@ -31,6 +32,7 @@ import { CHAIN_NAMES, chainName, shortenAddress, type ChainTarget } from "../lib
  * differs, because only the surface differs.
  */
 export function WalletBar({ configuredTarget }: { configuredTarget: ChainTarget | null }) {
+  const translator = useTranslator();
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { connectors, connect, isPending, error } = useConnect();
@@ -45,7 +47,7 @@ export function WalletBar({ configuredTarget }: { configuredTarget: ChainTarget 
         <div className="flex items-center gap-2">
           {configuredTarget !== null && (
             <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-slate-300">
-              本应用指向 {chainName(configuredTarget.chainId)}
+              {translator.t("wallet.pointsTo", { chainName: chainName(configuredTarget.chainId) })}
             </span>
           )}
           <button
@@ -54,7 +56,7 @@ export function WalletBar({ configuredTarget }: { configuredTarget: ChainTarget 
             disabled={isPending || injected === undefined}
             className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-400 disabled:bg-slate-600 disabled:text-slate-400"
           >
-            {isPending ? "连接中…" : "连接钱包"}
+            {isPending ? translator.t("common.connecting") : translator.t("wallet.connect")}
           </button>
         </div>
         {error !== null && (
@@ -104,20 +106,22 @@ export function WalletBar({ configuredTarget }: { configuredTarget: ChainTarget 
           onClick={() => disconnect()}
           className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-slate-300 transition hover:bg-white/10"
         >
-          断开
+          {translator.t("wallet.disconnect")}
         </button>
       </div>
 
-      {wrongChain && switchTarget !== undefined && (
+      {wrongChain && switchTarget !== undefined && named !== undefined && (
         <div className="flex items-center gap-2">
-          <span className="text-xs text-amber-300">本应用指向 {named}</span>
+          <span className="text-xs text-amber-300">
+            {translator.t("wallet.notConnected", { chainName: named })}
+          </span>
           <button
             type="button"
             onClick={() => switchChain({ chainId: switchTarget.id })}
             disabled={isSwitching}
             className="rounded-lg border border-amber-400/40 bg-amber-500/15 px-3 py-1 text-xs text-amber-200 transition hover:bg-amber-500/25 disabled:cursor-not-allowed"
           >
-            切到{named}
+            {translator.t("wallet.switchTo", { chainName: named })}
           </button>
         </div>
       )}

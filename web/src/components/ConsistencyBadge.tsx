@@ -1,11 +1,27 @@
 import type { ReactNode } from "react";
 
+import type { Translator } from "../lib/i18n";
 import type { ResultsResponse } from "../lib/types";
 
 interface Props {
   results: ResultsResponse | undefined;
   isLoading: boolean;
   isError: boolean;
+  /**
+   * The active translator, passed in rather than read from a hook.
+   *
+   * This file has no `"use client"` and must not gain one: the point of the
+   * badge is that it renders as part of the server's answer, and the consistency
+   * verdict is one of the few claims a reader is meant to be able to check
+   * without trusting anything client-side. `useTranslator()` is a client hook, so
+   * the translator travels from whoever mounts this — a Client Component that
+   * already resolved it — as an ordinary prop.
+   *
+   * Required rather than defaulted to `translatorFor()`: a default would silently
+   * pin this badge to Chinese for every caller that forgot it, which is exactly
+   * the half-translated page this change exists to remove.
+   */
+  translator: Translator;
 }
 
 /**
@@ -21,46 +37,66 @@ interface Props {
  * behaviour as a fault, and it would make a real divergence look like the same
  * thing.
  */
-export function ConsistencyBadge({ results, isLoading, isError }: Props) {
+export function ConsistencyBadge({ results, isLoading, isError, translator }: Props) {
   if (isLoading) {
-    return <Badge tone="neutral">正在比对链上与索引结果…</Badge>;
+    return <Badge tone="neutral">{translator.t("consistency.loading")}</Badge>;
   }
 
   if (isError || results === undefined) {
-    return <Badge tone="warn">无法比对（索引 API 不可达）</Badge>;
+    return <Badge tone="warn">{translator.t("consistency.unreachable")}</Badge>;
   }
 
   switch (results.status) {
     case "unavailable":
-      return <Badge tone="neutral">未启用索引 · 数字直接来自链上</Badge>;
+      return <Badge tone="neutral">{translator.t("consistency.unavailable")}</Badge>;
 
     case "lagging":
       return (
         <Badge tone="warn">
-          索引落后 {results.unindexedBlocks} 个区块 · 链上 {results.onChainTotal} 票，暂不比对
+          {translator.t("consistency.lagging", {
+            // `indexedTotal` and `unindexedBlocks` are nullable on the wire
+            // while `status` is a string, so a malformed payload can reach these
+            // lines. `String(null)` would put a literal "null" on screen inside
+            // a sentence that reads as finished; the catalogue's own
+            // "unavailable" wording is the honest rendering of that case.
+            blocks: results.unindexedBlocks ?? "—",
+            onChain: results.onChainTotal,
+          })}
         </Badge>
       );
 
     case "divergent":
       return (
         <Badge tone="bad">
-          链上 {results.onChainTotal} 票 ≠ 索引 {results.indexedTotal} 票 ·{" "}
-          {results.discrepancies.length} 处偏差
+          {translator.t("consistency.divergent", {
+            onChain: results.onChainTotal,
+            indexed: results.indexedTotal ?? "—",
+            count: results.discrepancies.length,
+          })}
         </Badge>
       );
 
     case "consistent":
       return (
         <Badge tone="ok">
-          链上与索引一致 · {results.onChainTotal} / {results.indexedTotal} 票 · 0 处偏差
-          {results.pendingVotes > 0 ? `（已计入 ${results.pendingVotes} 票待确认）` : ""}
+          {translator.t("consistency.consistent", {
+            onChain: results.onChainTotal,
+            indexed: results.indexedTotal ?? "—",
+          })}
+          {results.pendingVotes > 0
+            ? translator.t("consistency.consistentPending", { count: results.pendingVotes })
+            : ""}
         </Badge>
       );
 
     default:
       // An unrecognised status means this bundle is older than the API it is
       // talking to. Naming that beats rendering nothing at all.
-      return <Badge tone="warn">无法比对（未知状态：{String(results.status)}）</Badge>;
+      return (
+        <Badge tone="warn">
+          {translator.t("consistency.unknownStatus", { status: String(results.status) })}
+        </Badge>
+      );
   }
 }
 

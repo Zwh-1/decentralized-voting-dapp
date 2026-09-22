@@ -6,6 +6,7 @@ import { useMemo } from "react";
 import { useAccount, useChainId, useConfig, useReadContract, useReadContracts } from "wagmi";
 
 import { Countdown } from "@/components/Countdown";
+import { useTranslator } from "@/components/LocaleProvider";
 import { EmptyState } from "@/components/ui";
 import { useMounted } from "@/hooks/useMounted";
 import {
@@ -62,6 +63,7 @@ export interface MyVotesProps {
  * from the list on the next read, which is the honest outcome.
  */
 export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
+  const translator = useTranslator();
   const mounted = useMounted();
   const config = useConfig();
   const { address, isConnected } = useAccount();
@@ -176,30 +178,31 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
   return (
     <div className="space-y-8">
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-900">我发起的投票</h2>
+        <h2 className="text-sm font-semibold text-slate-900">
+          {translator.t("myVotes.createdTitle")}
+        </h2>
         <p className="mt-1 text-xs leading-relaxed text-slate-500">
-          来自工厂的 <code className="font-mono">pollsByCreator(你)</code>
-          ，因此这份列表是完整的：链上记录了谁创建了哪个投票。
+          {translator.t("myVotes.createdDescription", { call: "pollsByCreator(你)" })}
         </p>
 
-        {!mounted && <Notice>正在读取…</Notice>}
-        {mounted && !isConnected && <Notice>请先连接钱包。</Notice>}
+        {!mounted && <Notice>{translator.t("common.loading")}</Notice>}
+        {mounted && !isConnected && <Notice>{translator.t("myVotes.connectFirst")}</Notice>}
         {mounted && isConnected && !factoryKnown && (
           <Notice>
-            当前链（{subjectChainId}，{chainName(subjectChainId)}
-            ）没有已登记的工厂合约，无法列出你发起的投票。
+            {translator.t("myVotes.noFactory", {
+              chainId: subjectChainId,
+              chainName: chainName(subjectChainId),
+            })}
           </Notice>
         )}
         {ready && created.isError && (
-          <Notice tone="danger">
-            读取 pollsByCreator 失败：链上调用没有成功。请检查 RPC 后重试。
-          </Notice>
+          <Notice tone="danger">{translator.t("myVotes.createdReadFailed")}</Notice>
         )}
         {ready && !created.isError && created.isSuccess && createdAddresses.length === 0 && (
           <div className="mt-4">
             <EmptyState
-              title="你还没有发起过投票"
-              description="在「全部投票」页可以发起新投票；创建者会成为该投票的合约所有者，负责它的白名单与结束。"
+              title={translator.t("myVotes.createdEmptyTitle")}
+              description={translator.t("myVotes.createdEmptyDescription")}
             />
           </div>
         )}
@@ -209,71 +212,75 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
             createdAddresses
               .slice()
               .reverse()
-              .map((poll) => <PollLink key={poll} address={poll} note="由你发起" />)}
+              .map((poll) => (
+                <PollLink key={poll} address={poll} note={translator.t("myVotes.createdNote")} />
+              ))}
         </div>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-900">我投过的投票</h2>
+        <h2 className="text-sm font-semibold text-slate-900">
+          {translator.t("myVotes.votedTitle")}
+        </h2>
         {indexedUsable ? (
           <p className="mt-1 text-xs leading-relaxed text-slate-500">
-            来自本应用的只读索引（<code className="font-mono">current_votes</code>{" "}
-            视图，由链上事件推导）。链上没有「某人投过哪些投票」的反查接口，
-            所以这个问题只有索引能在一次查询里答完；只有当前确实持有一票的投票会出现，
-            已经撤票的不会。
+            {translator.t("myVotes.votedFromIndex", { view: "current_votes" })}
           </p>
         ) : (
           <p className="mt-1 text-xs leading-relaxed text-slate-500">
-            没有可用的索引，所以这份列表是逐个投票读{" "}
-            <code className="font-mono">voterState(你)</code>{" "}
-            得到的：只有当前确实持有一票的投票会出现， 已经撤票的不会。
-            链上共有多少投票就要读多少次，因此下面只扫描最新的一部分。
+            {translator.t("myVotes.votedFromChain", { call: "voterState(你)" })}
           </p>
         )}
 
-        {!mounted && <Notice>正在读取…</Notice>}
-        {mounted && !isConnected && <Notice>请先连接钱包。</Notice>}
+        {!mounted && <Notice>{translator.t("common.loading")}</Notice>}
+        {mounted && !isConnected && <Notice>{translator.t("myVotes.connectFirst")}</Notice>}
 
         {ready && !indexedUsable && all.length > SCAN_LIMIT && (
           <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
-            链上共有 {all.length} 个投票，本页只扫描了最新的 {SCAN_LIMIT} 个
-            （逐票读取的代价随投票数线性增长，全部扫描会让页面变慢）。
-            更早的投票可能里也有你投过的，本页不会显示；可以直接在
-            <Link href="/" className="mx-1 underline">
-              全部投票
-            </Link>
-            里查看。
+            {translator.t("myVotes.scanTruncated", {
+              total: all.length,
+              limit: SCAN_LIMIT,
+              // `interpolate` substitutes placeholders in the template and does
+              // not scan what it substituted, so an element here is safe. The
+              // link is inside the sentence because the sentence is one clause
+              // in Chinese and splitting it would reorder the words in English.
+              link: (
+                <Link href="/" className="mx-1 underline">
+                  {translator.t("myVotes.listAllPolls")}
+                </Link>
+              ) as unknown as string,
+            })}
           </p>
         )}
 
         {ready && all.length === 0 && (
           <div className="mt-4">
             <EmptyState
-              title="工厂还没有创建过任何投票"
-              description="链上一个投票都没有，所以这里没有什么可以列举。"
+              title={translator.t("myVotes.noPollsTitle")}
+              description={translator.t("myVotes.noPollsDescription")}
             />
           </div>
         )}
 
-        {ready && indexed.isPending && <Notice>正在向索引查询你持有的票…</Notice>}
+        {ready && indexed.isPending && <Notice>{translator.t("myVotes.queryingIndex")}</Notice>}
 
-        {ready && indexed.isError && <Notice>索引查询失败，改为逐个读取链上状态。</Notice>}
+        {ready && indexed.isError && <Notice>{translator.t("myVotes.indexFailed")}</Notice>}
 
         {ready && !indexedUsable && voterStates.isPending && all.length > 0 && (
-          <Notice>正在逐个读取 {scanned.length} 个投票…（读到的第一个结果就会出现在这里）</Notice>
+          <Notice>{translator.t("myVotes.scanning", { count: scanned.length })}</Notice>
         )}
 
         {ready && !indexedUsable && voterStates.isError && (
-          <Notice tone="danger">逐个读取投票状态时链上调用失败。请检查 RPC 后重试。</Notice>
+          <Notice tone="danger">{translator.t("myVotes.scanFailed")}</Notice>
         )}
 
         {ready && !indexed.isPending && !indexed.isError && markedAddresses.length === 0 && (
           <p className="mt-4 text-sm text-slate-500">
             {indexedUsable
-              ? "你目前没有在任何投票里持有一票。"
+              ? translator.t("myVotes.holdNoneIndexed")
               : scanned.length === 0
-                ? "没有可扫描的投票。"
-                : "你在扫描到的投票里目前没有持有任何一票。"}
+                ? translator.t("myVotes.holdNoneNothingScanned")
+                : translator.t("myVotes.holdNoneScanned")}
           </p>
         )}
 
@@ -293,10 +300,13 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
                 address={poll}
                 note={
                   phase === undefined
-                    ? "我投过 · 阶段读取中…"
-                    : `我投过 · ${phaseLabel(phase)}${
-                        results === undefined ? "" : ` · ${results} 票`
-                      }`
+                    ? translator.t("myVotes.lineReading")
+                    : results === undefined
+                      ? translator.t("myVotes.line", { phase: phaseLabel(phase) })
+                      : translator.t("myVotes.lineWithVotes", {
+                          phase: phaseLabel(phase),
+                          votes: results,
+                        })
                 }
                 endsAt={endsAt}
               />
@@ -307,8 +317,11 @@ export function MyVotes({ configuredTarget, initialAddresses }: MyVotesProps) {
 
       {ready && (
         <p className="text-[11px] text-slate-400">
-          当前地址 <span className="font-mono">{shortenAddress(actor)}</span>，读取的是{" "}
-          {chainName(subjectChainId)}（{subjectChainId}）。
+          {translator.t("myVotes.currentAddress", {
+            address: shortenAddress(actor),
+            chainName: chainName(subjectChainId),
+            chainId: subjectChainId,
+          })}
         </p>
       )}
     </div>

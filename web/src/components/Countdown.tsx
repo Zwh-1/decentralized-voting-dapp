@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { useTranslator } from "@/components/LocaleProvider";
+import { translatorFor, type Translator } from "@/lib/i18n";
 import { isPastDeadline } from "@/lib/voting";
 
 const SECOND = 1000;
@@ -26,6 +28,7 @@ const DAY = 24n * HOUR;
  * the ballot uses to decide whether to offer a vote button at all.
  */
 export function Countdown({ endsAt }: { endsAt: bigint }) {
+  const translator = useTranslator();
   const [nowSeconds, setNowSeconds] = useState<bigint | null>(null);
 
   useEffect(() => {
@@ -43,7 +46,7 @@ export function Countdown({ endsAt }: { endsAt: bigint }) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs text-slate-500">
         <ClockMark />
-        截止 <span className="tabular-nums">{absolute}</span>
+        {translator.t("countdown.deadline", { time: absolute })}
       </span>
     );
   }
@@ -52,7 +55,7 @@ export function Countdown({ endsAt }: { endsAt: bigint }) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs text-slate-600">
         <ClockMark />
-        已于 <span className="tabular-nums">{absolute}</span> 截止（已关闭）
+        {translator.t("countdown.closedAt", { time: absolute })}
       </span>
     );
   }
@@ -74,8 +77,10 @@ export function Countdown({ endsAt }: { endsAt: bigint }) {
       }`}
     >
       <ClockMark />
-      还剩 <span className="tabular-nums font-medium">{remaining(endsAt - nowSeconds)}</span>
-      <span className={soon ? "text-amber-700" : "text-slate-400"}>（截止 {absolute}）</span>
+      {translator.t("countdown.remaining", {
+        remaining: remaining(endsAt - nowSeconds, translator),
+        absolute,
+      })}
     </span>
   );
 }
@@ -111,10 +116,16 @@ function ClockMark() {
  * "3 天 4 小时 17 分" reads as spurious precision on a deadline days away. Under
  * a minute it says 不到一分钟 rather than 0 分钟, which would look like it had
  * already passed.
+ *
+ * The translator is a parameter rather than a hook call, because this is a pure
+ * function with an exported name — a hook here would make a module-level call
+ * impossible, and the units are part of the copy, not of the arithmetic.
+ * `translatorFor()` (the default) keeps it callable without a provider, which is
+ * what the no-argument call sites from before this took rely on.
  */
-export function remaining(seconds: bigint): string {
+export function remaining(seconds: bigint, translator: Translator = translatorFor()): string {
   if (seconds < MINUTE) {
-    return "不到 1 分钟";
+    return translator.t("countdown.lessThanMinute");
   }
 
   const days = seconds / DAY;
@@ -122,8 +133,15 @@ export function remaining(seconds: bigint): string {
   const minutes = (seconds % HOUR) / MINUTE;
 
   if (days > 0n) {
-    return `${days} 天 ${hours} 小时`;
+    // `interpolate` accepts `string | number` only — a bigint is deliberately not
+    // accepted (see `i18n/index.ts`), so the unit counts are stringified here.
+    return translator.t("countdown.daysHours", { days: days.toString(), hours: hours.toString() });
   }
 
-  return hours > 0n ? `${hours} 小时 ${minutes} 分钟` : `${minutes} 分钟`;
+  return hours > 0n
+    ? translator.t("countdown.hoursMinutes", {
+        hours: hours.toString(),
+        minutes: minutes.toString(),
+      })
+    : translator.t("countdown.minutes", { minutes: minutes.toString() });
 }

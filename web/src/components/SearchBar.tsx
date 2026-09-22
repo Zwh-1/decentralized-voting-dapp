@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslator } from "@/components/LocaleProvider";
 import { SORT_ORDERS, type SortOrder } from "@/lib/pagination";
 
 /**
@@ -24,12 +25,22 @@ import { SORT_ORDERS, type SortOrder } from "@/lib/pagination";
  * find one poll should see the list narrow as they type.
  */
 
-/** The sort labels, in the order they appear in the control. */
-const SORT_LABELS: Record<SortOrder, string> = {
-  newest: "最新截止",
-  oldest: "最早截止",
-  "most-voted": "票数最多",
-  question: "按问题排序",
+/**
+ * Which catalogue key names each sort order.
+ *
+ * Keys rather than labels, because the label depends on the reader's language
+ * and this table is module-level: a table of translated strings would be frozen
+ * in whichever language happened to be active when it was first evaluated.
+ * `SortOrder` indexes it, so adding an order without a label is a compile error.
+ */
+const SORT_LABEL_KEYS: Record<
+  SortOrder,
+  "list.sort.newest" | "list.sort.oldest" | "list.sort.mostVoted" | "list.sort.question"
+> = {
+  newest: "list.sort.newest",
+  oldest: "list.sort.oldest",
+  "most-voted": "list.sort.mostVoted",
+  question: "list.sort.question",
 };
 
 export interface SearchBarProps {
@@ -50,17 +61,18 @@ export function SearchBar({
   matched,
   total,
 }: SearchBarProps) {
+  const translator = useTranslator();
   const searching = query.trim().length > 0;
 
   return (
     <div className="mt-4 flex flex-wrap items-center gap-3">
       <label className="relative min-w-56 flex-1">
-        <span className="sr-only">搜索投票</span>
+        <span className="sr-only">{translator.t("list.searchLabel")}</span>
         <input
           type="search"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="搜索问题、发起人或合约地址…"
+          placeholder={translator.t("list.searchInputPlaceholder")}
           // 44px minimum touch target: the same rule the PWA manifest follows,
           // and this is the control a phone reader uses most.
           className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none"
@@ -69,16 +81,16 @@ export function SearchBar({
           <button
             type="button"
             onClick={() => onQueryChange("")}
-            aria-label="清除搜索"
+            aria-label={translator.t("list.searchClearLabel")}
             className="absolute top-1/2 right-2 -translate-y-1/2 rounded px-2 py-1 text-xs text-slate-500 hover:text-slate-900"
           >
-            清除
+            {translator.t("list.searchClear")}
           </button>
         )}
       </label>
 
       <label className="flex items-center gap-2 text-xs text-slate-500">
-        <span className="sr-only sm:not-sr-only">排序</span>
+        <span className="sr-only sm:not-sr-only">{translator.t("list.sortLabel")}</span>
         <select
           value={sort}
           onChange={(event) => onSortChange(event.target.value as SortOrder)}
@@ -86,7 +98,7 @@ export function SearchBar({
         >
           {SORT_ORDERS.map((order) => (
             <option key={order} value={order}>
-              {SORT_LABELS[order]}
+              {translator.t(SORT_LABEL_KEYS[order])}
             </option>
           ))}
         </select>
@@ -100,8 +112,8 @@ export function SearchBar({
       {searching && (
         <p className="text-xs text-slate-500" role="status">
           {matched === 0
-            ? `没有匹配「${query.trim()}」的投票`
-            : `匹配 ${matched} / ${total} 个投票`}
+            ? translator.t("list.searchNoMatch", { query: query.trim() })
+            : translator.t("list.matchedOf", { matched, total })}
         </p>
       )}
     </div>

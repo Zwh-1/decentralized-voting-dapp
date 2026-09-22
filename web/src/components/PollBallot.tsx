@@ -12,11 +12,19 @@ import {
   useWriteContract,
 } from "wagmi";
 
+import { useTranslator } from "@/components/LocaleProvider";
 import { OptionRow } from "@/components/OptionRow";
 import { ResultChart } from "@/components/ResultChart";
 import { Badge, Stat } from "@/components/ui";
 import { useMounted } from "@/hooks/useMounted";
-import { describeWriteFailure, phaseText, readStatus, type ReadState } from "@/lib/ballot-labels";
+import {
+  describeWriteFailure,
+  myStatusLabels,
+  phaseText,
+  readStatus,
+  readText,
+  type ReadState,
+} from "@/lib/ballot-labels";
 import {
   changeReason,
   closeReason,
@@ -92,6 +100,7 @@ export interface PollBallotProps {
  * the one the revert would have produced.
  */
 export function PollBallot({ address, initial, configuredTarget, initialError }: PollBallotProps) {
+  const { t, ballot, locale } = useTranslator();
   const mounted = useMounted();
   const queryClient = useQueryClient();
   const config = useConfig();
@@ -325,13 +334,64 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
   // the read lands, which `phaseTone` already renders as 读取中.
   const phaseInfo = phaseTone(phaseState === "ready" ? phase : undefined, deadlinePassed);
 
+  // ---- the rows' values ----
+  //
+  // Both derivations live here rather than inline in the JSX because inline is
+  // what produced the defect this replaces. 我的状态 carried five hand-written
+  // ternary chains that each re-answered the same question — "was this read
+  // completed, and did it fail or is it still running?" — and re-answering it per
+  // row is how one row drifted out of step with the others. The 押金 row is the
+  // one that actually did: it rendered `${formatEth(myStake ?? 0n)} ETH`, so a
+  // FAILED or still-loading `stakeOf` read became a confident `0 ETH` — a
+  // statement about the reader's own money, which `sweepUnclaimed()` can hand to
+  // the poll's creator once the grace period passes.
+  //
+  // `myStatusLabels` takes each read's STATUS alongside its value, so no row can
+  // print a number it never read (see that function, and this module's header).
+  // Every read here is `voterState`'s own slot, so all four rows share
+  // `voterState` as their status: one read, one answer about whether it landed.
+  //
+  // `mounted` and `isConnected` are checked inside `myStatusLabels` rather than
+  // before the call, because "no address to ask about" is a different sentence
+  // from "the read failed" and only that function is allowed to choose between
+  // them.
+  const status = myStatusLabels(
+    {
+      mounted,
+      isConnected,
+      contractKnown,
+      hasVoted: { status: voterState, value: voter === undefined ? undefined : marked },
+      // A zero option id is the contract's "no vote", not a candidate numbered 0,
+      // and `myStatusLabels` renders it as `—` rather than as "选项 #0".
+      votedFor: { status: voterState, value: voter === undefined ? undefined : myOptionId },
+      stake: { status: voterState, value: myStake },
+      whitelisted: { status: voterState, value: voter === undefined ? undefined : whitelisted },
+    },
+    locale,
+  );
+
+  // 可投票 is not one of the four `myStatusLabels` rows — it is `canVote`, a
+  // different question from `whitelisted` (see the admission-rows note below) —
+  // but it must answer "could not read it" by the same rule, so it goes through
+  // the same helper rather than through a sixth ternary chain.
+  //
+  // The formatter ignores its argument on purpose: what this row prints is a
+  // verdict about a boolean, and `readText` still has to be the thing that
+  // decides whether there is a verdict to print at all.
+  const canVoteText = readText(
+    voterState,
+    voter === undefined ? undefined : canVote,
+    (value) => (value ? ballot.yes : ballot.no),
+    locale,
+  );
+
   return (
     <div className="space-y-6">
       {initialError !== null && (
         <section className="rounded-xl border border-rose-200 bg-rose-50 p-5">
-          <h2 className="text-sm font-medium text-rose-800">服务端读取这个投票时失败了</h2>
+          <h2 className="text-sm font-medium text-rose-800">{t("ballot.serverReadFailedTitle")}</h2>
           <p className="mt-1.5 text-xs leading-relaxed text-rose-700">
-            下面能读到的数据仍会显示：{initialError}
+            {t("ballot.serverReadFailedDetail", { error: initialError })}
           </p>
         </section>
       )}
@@ -342,7 +402,8 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 className="min-w-0 text-xl font-semibold leading-snug tracking-tight text-slate-900 sm:text-2xl">
-            {initial?.question ?? (readFailed ? "读取问题失败" : "正在读取投票…")}
+            {initial?.question ??
+              (readFailed ? t("ballot.questionReadFailed") : t("ballot.readingPoll"))}
           </h1>
           <Badge className={badgeClass(phaseInfo.tone)}>
             <span data-phase-label>{phaseInfo.label}</span>
@@ -350,40 +411,63 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
         </div>
 
         <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Stat label="阶段" value={phaseText({ contractKnown, status: phaseState, phase })} />
           <Stat
-            label="选项数"
+            label={t("poll.phase")}
+            value={phaseText({ contractKnown, status: phaseState, phase }, locale)}
+          />
+          <Stat
+            label={t("ballot.statOptionCount")}
             value={
-              initial === null ? (readFailed ? "读取失败" : "读取中…") : String(initial.optionCount)
+              initial === null
+                ? readFailed
+                  ? ballot.readFailed
+                  : ballot.reading
+                : String(initial.optionCount)
             }
           />
-          <Stat label="票数合计" value={tally === undefined ? "读取中…" : String(tally.total)} />
           <Stat
-            label="押金"
-            value={myStake === undefined ? "读取中…" : `${formatEth(myStake)} ETH`}
+            label={t("poll.totalVotes")}
+            value={tally === undefined ? ballot.reading : String(tally.total)}
+          />
+          {/*
+            The one stat whose value is the reader's own money, so it is rendered
+            from `readText` rather than from the value alone: `myStake` is
+            `undefined` both while `stakeOf` is in flight AND after it has failed,
+            and printing a zero for the second case is the defect this file's
+            header records. The status is `voterState` because `stake` is one
+            field of the same `voterState` read that answers the other three rows.
+          */}
+          <Stat
+            label={t("ballot.statStake")}
+            value={readText(voterState, myStake, (wei) => `${formatEth(wei)} ETH`, locale)}
           />
         </dl>
 
         <p className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400">
           <span>
-            发起人{" "}
+            {t("poll.creatorInline")}{" "}
             <span className="font-mono text-slate-500" title={creator ?? undefined}>
-              {creator === undefined ? (initial?.creator ?? "读取中…") : shortenAddress(creator)}
+              {creator === undefined
+                ? (initial?.creator ?? ballot.reading)
+                : shortenAddress(creator)}
             </span>
           </span>
           <Dot />
           <span>
-            合约 <span className="font-mono text-slate-500">{shortenAddress(address)}</span>
+            {t("ballot.contract")}{" "}
+            <span className="font-mono text-slate-500">{shortenAddress(address)}</span>
           </span>
           <Dot />
           <span>
             {endsAtState !== "ready"
               ? endsAtState === "failed"
-                ? "截止时间读取失败"
-                : "正在读取截止时间…"
+                ? t("ballot.deadlineReadFailed")
+                : t("ballot.readingDeadline")
               : deadlinePassed
-                ? `已过截止时间（${new Date(Number(endsAt) * 1000).toLocaleString()}）`
-                : `截止 ${new Date(Number(endsAt) * 1000).toLocaleString()}`}
+                ? t("ballot.deadlinePassed", {
+                    time: new Date(Number(endsAt) * 1000).toLocaleString(),
+                  })
+                : t("ballot.deadline", { time: new Date(Number(endsAt) * 1000).toLocaleString() })}
           </span>
         </p>
 
@@ -403,9 +487,9 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
         {phase === PollPhase.Voting && deadlinePassed && (
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
             <p>
-              已过截止时间，但合约仍处于「投票中」：投票、改投、撤票都会被合约拒绝，
-              而押金要等投票正式关闭后才能取回。这个关闭调用<strong>不需要权限</strong>
-              ，任何人都可以发起——包括你。
+              {t("ballot.pastDeadlineOpenPhase")}
+              <strong>{t("ballot.pastDeadlineOpenPhaseEmphasis")}</strong>
+              {t("ballot.pastDeadlineOpenPhaseTail")}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <button
@@ -414,7 +498,7 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
                 disabled={closeReason(reasons) !== undefined}
                 className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-medium text-amber-900 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:text-slate-300"
               >
-                {writing?.kind === "close" && txBusy ? "提交中…" : "关闭这个投票（任何人都可以）"}
+                {writing?.kind === "close" && txBusy ? ballot.busy : t("ballot.closePoll")}
               </button>
               {mounted && closeReason(reasons) !== undefined && (
                 <span className="text-slate-500">{closeReason(reasons)}</span>
@@ -426,22 +510,12 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
 
       {/* ---- my state ---- */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">我的状态</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          {t("ballot.myStatus")}
+        </h2>
 
         <dl className="mt-3 divide-y divide-slate-100 text-sm">
-          <Row label="可投票">
-            {!mounted
-              ? "—"
-              : !isConnected
-                ? "未连接"
-                : voterState === "failed"
-                  ? "读取失败"
-                  : voterState === "loading"
-                    ? "读取中…"
-                    : canVote
-                      ? "是"
-                      : "否"}
-          </Row>
+          <Row label={t("ballot.canVote")}>{canVoteText}</Row>
           {/*
             The admission rows, and why there are two of them.
 
@@ -469,57 +543,23 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
                 needs the 否 to understand why 投票 now refuses them.
           */}
           {voterState === "ready" && canVote && !whitelisted && (
-            <Row label="准入方式">
-              <span className="font-normal text-slate-500">所有人可投</span>
+            <Row label={t("ballot.admissionMode")}>
+              <span className="font-normal text-slate-500">{t("ballot.openToAll")}</span>
             </Row>
           )}
           {voterState === "ready" && !canVote && !whitelisted && (
-            <Row label="白名单">
-              <span className="text-rose-600">否</span>
+            <Row label={t("ballot.whitelist")}>
+              <span className="text-rose-600">{status.whitelisted}</span>
             </Row>
           )}
           {voterState === "ready" && whitelisted && (
-            <Row label="白名单">
-              <span className="text-emerald-600">是</span>
+            <Row label={t("ballot.whitelist")}>
+              <span className="text-emerald-600">{status.whitelisted}</span>
             </Row>
           )}
-          <Row label="已投票">
-            {!mounted
-              ? "—"
-              : !isConnected
-                ? "未连接"
-                : voterState !== "ready"
-                  ? voterState === "failed"
-                    ? "读取失败"
-                    : "读取中…"
-                  : marked
-                    ? "是"
-                    : "否"}
-          </Row>
-          <Row label="投给">
-            {!mounted
-              ? "—"
-              : !isConnected
-                ? "未连接"
-                : voterState !== "ready"
-                  ? voterState === "failed"
-                    ? "读取失败"
-                    : "读取中…"
-                  : myOptionId === 0
-                    ? "—"
-                    : `选项 #${myOptionId}`}
-          </Row>
-          <Row label="押金">
-            {!mounted
-              ? "—"
-              : !isConnected
-                ? "未连接"
-                : voterState !== "ready"
-                  ? voterState === "failed"
-                    ? "读取失败"
-                    : "读取中…"
-                  : `${formatEth(myStake ?? 0n)} ETH`}
-          </Row>
+          <Row label={t("ballot.hasVoted")}>{status.hasVoted}</Row>
+          <Row label={t("ballot.votedFor")}>{status.votedFor}</Row>
+          <Row label={t("ballot.statStake")}>{status.stake}</Row>
         </dl>
 
         <div className="mt-5 flex flex-wrap items-center gap-2">
@@ -529,7 +569,7 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
             disabled={withdrawReason(reasons) !== undefined}
             className="rounded-lg border border-slate-300 px-3.5 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300"
           >
-            {writing?.kind === "withdraw" && txBusy ? "提交中…" : "撤票（退回押金）"}
+            {writing?.kind === "withdraw" && txBusy ? ballot.busy : t("ballot.withdrawVote")}
           </button>
           {mounted && withdrawReason(reasons) !== undefined && (
             <span className="text-xs text-slate-400">{withdrawReason(reasons)}</span>
@@ -543,7 +583,7 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
             disabled={refundReason(reasons) !== undefined}
             className="rounded-lg border border-slate-300 px-3.5 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300"
           >
-            {writing?.kind === "refund" && txBusy ? "提交中…" : "取回押金"}
+            {writing?.kind === "refund" && txBusy ? ballot.busy : t("ballot.reclaimStake")}
           </button>
           {mounted && refundReason(reasons) !== undefined && (
             <span className="text-xs text-slate-400">{refundReason(reasons)}</span>
@@ -552,9 +592,9 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
 
         {hash !== undefined && (
           <p className="mt-3 break-all font-mono text-[11px] text-slate-500">
-            交易 {hash}
-            {receipt.isPending && " · 等待确认…"}
-            {receipt.isSuccess && " · 已确认"}
+            {t("ballot.transaction")} {hash}
+            {receipt.isPending && t("ballot.awaitingConfirmation")}
+            {receipt.isSuccess && t("ballot.confirmed")}
           </p>
         )}
 
@@ -593,20 +633,20 @@ export function PollBallot({ address, initial, configuredTarget, initialError }:
       {/* ---- the options ---- */}
       <section>
         <h2 className="text-sm font-semibold text-slate-900">
-          选项
-          {results === undefined ? "" : `（${results[0].length}）`}
+          {t("ballot.options")}
+          {results === undefined ? "" : t("ballot.optionsCount", { count: results[0].length })}
         </h2>
 
-        {loading && <p className="mt-4 text-sm text-slate-500">正在读取选项…</p>}
+        {loading && <p className="mt-4 text-sm text-slate-500">{t("ballot.readingOptions")}</p>}
 
         {!loading && readFailed && (
           <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-            读取选项列表失败：链上调用没有成功。请检查 RPC 后重试。
+            {t("ballot.optionsReadFailed")}
           </div>
         )}
 
         {!loading && !readFailed && results !== undefined && results[0].length === 0 && (
-          <p className="mt-4 text-sm text-slate-500">这个投票还没有任何选项。</p>
+          <p className="mt-4 text-sm text-slate-500">{t("ballot.noOptions")}</p>
         )}
 
         <div className="mt-4 grid gap-4 sm:grid-cols-2">

@@ -2,7 +2,9 @@
 
 import { useAccount, useChainId, useConfig, useReadContracts } from "wagmi";
 
+import { useTranslator } from "@/components/LocaleProvider";
 import { useMounted } from "@/hooks/useMounted";
+import type { Translator } from "@/lib/i18n";
 import { rulesCheck as compareRules, rulesSummary } from "@/lib/trust";
 import { pollAbi, resolveChainTarget, shortenAddress, type ChainTarget } from "@/lib/voting";
 
@@ -41,6 +43,7 @@ export function RulesCheck({
   address: `0x${string}`;
   configuredTarget: ChainTarget | null;
 }) {
+  const translator = useTranslator();
   const mounted = useMounted();
   const config = useConfig();
   const { isConnected } = useAccount();
@@ -92,7 +95,7 @@ export function RulesCheck({
                 : "text-slate-900"
           }`}
         >
-          {!mounted ? "正在比对规则指纹…" : summary.title}
+          {!mounted ? translator.t("trust.comparing") : summary.title}
         </h2>
         {/*
           The verdict as a machine-readable attribute, so the browser drill can
@@ -117,13 +120,23 @@ export function RulesCheck({
               : "text-slate-500"
         }`}
       >
-        {mounted ? summary.detail : "正在读取链上的规则指纹…"}
+        {mounted ? summary.detail : translator.t("trust.readingFingerprint")}
       </p>
 
       {mounted && (
         <dl className="mt-4 space-y-1.5 text-xs">
-          <Fingerprint label="创建时的承诺" value={check.committed} />
-          <Fingerprint label="当前状态重算" value={check.current} />
+          <Fingerprint
+            id="committed"
+            label={translator.t("trust.fingerprintCommitted")}
+            value={check.committed}
+            translator={translator}
+          />
+          <Fingerprint
+            id="current"
+            label={translator.t("trust.fingerprintCurrent")}
+            value={check.current}
+            translator={translator}
+          />
         </dl>
       )}
 
@@ -134,37 +147,59 @@ export function RulesCheck({
           data-rules-retry
           className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
         >
-          重试
+          {translator.t("common.retry")}
         </button>
       )}
 
       <details className="mt-4">
         <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-700">
-          这个指纹是怎么算出来的
+          {translator.t("trust.howComputedTitle")}
         </summary>
         <p className="mt-2 text-xs leading-relaxed text-slate-500">
-          创建时，合约把发起人地址、问题、截止时间、准入方式、选项列表（含每个选项的固定 ID
-          与链上字符串）以及白名单，连同合约自身地址与链 ID 一起做哈希，结果写进{" "}
-          <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">rulesHash</code>
-          ，此后永不改动。
-          <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">
-            currentRulesHash()
-          </code>{" "}
-          用同样的方式对<strong>当前</strong>
-          状态重算一次。两者相同，说明这些内容自创建以来没有变过；
-          不同，说明其中某一项在创建后被改过。
+          {translator.t("trust.howComputed", {
+            rulesHash: (
+              <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">
+                rulesHash
+              </code>
+            ) as unknown as string,
+            currentRulesHash: (
+              <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">
+                currentRulesHash()
+              </code>
+            ) as unknown as string,
+            // `interpolate` leaves an unfilled placeholder visible, so the
+            // emphasis is passed as a value rather than written into the
+            // template as markup.
+            current: translator.t("trust.howComputedEmphasis"),
+          })}
         </p>
         <p className="mt-2 text-xs leading-relaxed text-slate-500">
-          白名单在计入哈希前会先排序，所以「先加谁后加谁」不会影响结果；
-          票数不在哈希范围内——投票不是规则，否则每一个有票的投票都会显示成「被改过」。
+          {translator.t("trust.whitelistSorted")}
         </p>
       </details>
     </section>
   );
 }
 
-/** One fingerprint, shown in full so a reader can copy and compare it. */
-function Fingerprint({ label, value }: { label: string; value: string | null }) {
+/**
+ * One fingerprint, shown in full so a reader can copy and compare it.
+ *
+ * `id` is a stable machine-readable name for the row, separate from the
+ * translated `label` beside it: the browser drill selects on it, and a selector
+ * that changes with the reader's language is a selector that breaks for the
+ * readers the translation exists for.
+ */
+function Fingerprint({
+  id,
+  label,
+  value,
+  translator,
+}: {
+  id: string;
+  label: string;
+  value: string | null;
+  translator: Translator;
+}) {
   return (
     <div className="flex flex-wrap items-baseline gap-2">
       <dt className="shrink-0 text-slate-500">{label}</dt>
@@ -172,9 +207,19 @@ function Fingerprint({ label, value }: { label: string; value: string | null }) 
         className={
           value === null ? "text-slate-400" : "break-all font-mono text-[11px] text-slate-700"
         }
-        data-fingerprint={label}
+        // A STABLE id, not the translated label.
+        //
+        // This attribute exists so the browser drill can find the value, and a
+        // test hook must not be coupled to copy: keyed on `label`, switching the
+        // reader's language changes the attribute and the drill's selector finds
+        // nothing. It would fail loudly rather than silently — the drill compares
+        // the missing value against the chain's hash — but a test that breaks
+        // when someone reads in English is a test that gets deleted rather than
+        // fixed. The id is now part of the component's contract, like
+        // `data-testid` above, and the label beside it stays translatable.
+        data-fingerprint={id}
       >
-        {value ?? "未读到"}
+        {value ?? translator.t("common.notRead")}
       </dd>
     </div>
   );
@@ -209,6 +254,7 @@ export function StakeRisk({
   address: `0x${string}`;
   configuredTarget: ChainTarget | null;
 }) {
+  const translator = useTranslator();
   const mounted = useMounted();
   const config = useConfig();
   const { isConnected } = useAccount();
@@ -250,35 +296,41 @@ export function StakeRisk({
       className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
       data-testid="stake-risk"
     >
-      <h2 className="text-sm font-semibold text-slate-900">押金的去向</h2>
+      <h2 className="text-sm font-semibold text-slate-900">{translator.t("trust.stakeTitle")}</h2>
       <p className="mt-1 text-xs leading-relaxed text-slate-500">
-        投票时押金锁在合约里。投票结束后你可以随时取回；但如果一直不取，发起人有权在规定期限之后取走无人领回的押金。
+        {translator.t("trust.stakeIntro")}
       </p>
 
       <dl className="mt-4 space-y-1.5 text-xs">
         <div className="flex items-baseline justify-between gap-4">
-          <dt className="text-slate-500">当前锁在合约里的押金</dt>
+          <dt className="text-slate-500">{translator.t("trust.stakeLocked")}</dt>
           <dd className="font-medium tabular-nums text-slate-900" data-stake-total>
-            {totalStaked === null ? "读取中…" : `${formatEth(totalStaked)} ETH`}
+            {totalStaked === null
+              ? translator.t("common.loading")
+              : `${formatEth(totalStaked)} ETH`}
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-4">
-          <dt className="text-slate-500">取回押金的期限（合约常量）</dt>
+          <dt className="text-slate-500">{translator.t("trust.stakeGracePeriod")}</dt>
           <dd className="font-medium text-slate-900">
-            {gracePeriod === null ? "读取中…" : `${Number(gracePeriod) / 86400} 天`}
+            {gracePeriod === null
+              ? translator.t("common.loading")
+              : translator.t("trust.stakeGraceDays", {
+                  days: (Number(gracePeriod) / 86400).toString(),
+                })}
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-4">
-          <dt className="text-slate-500">进度</dt>
+          <dt className="text-slate-500">{translator.t("trust.stakeProgress")}</dt>
           <dd className="text-slate-600">
             {votingEndedAt === null || votingEndedAt === 0n
-              ? "投票尚未结束，期限还没开始计算"
-              : "投票已结束，期限正在计算"}
+              ? translator.t("trust.stakeNotEnded")
+              : translator.t("trust.stakeEnded")}
           </dd>
         </div>
         {creator !== null && (
           <div className="flex items-baseline justify-between gap-4">
-            <dt className="text-slate-500">有权取走的人</dt>
+            <dt className="text-slate-500">{translator.t("trust.stakeSweeper")}</dt>
             <dd className="font-mono text-[11px] text-slate-700" title={creator}>
               {shortenAddress(creator as `0x${string}`)}
             </dd>
@@ -288,19 +340,24 @@ export function StakeRisk({
 
       <details className="mt-4">
         <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-700">
-          为什么会有这条规则
+          {translator.t("trust.whyRuleTitle")}
         </summary>
         <p className="mt-2 text-xs leading-relaxed text-slate-500">
-          押金的作用是让「一人一票」有成本，从而抑制重复投票。投票结束后合约会进入「已结束」阶段，
-          此时每个人都可以调用{" "}
-          <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">refund()</code>{" "}
-          取回自己的押金。若某个地址长期不取，合约允许发起人在上述期限之后调用{" "}
-          <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">
-            sweepUnclaimed()
-          </code>{" "}
-          把剩余部分取走——这是为了不让资金永久锁死。这条规则写在合约里且不可更改，
-          时间长度可以直接调用 <code className="font-mono text-[11px]">REFUND_GRACE_PERIOD()</code>{" "}
-          核对。你随时可以取回，不取才会失去。
+          {translator.t("trust.whyRule", {
+            refund: (
+              <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">
+                refund()
+              </code>
+            ) as unknown as string,
+            sweep: (
+              <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">
+                sweepUnclaimed()
+              </code>
+            ) as unknown as string,
+            gracePeriod: (
+              <code className="font-mono text-[11px]">REFUND_GRACE_PERIOD()</code>
+            ) as unknown as string,
+          })}
         </p>
       </details>
     </section>

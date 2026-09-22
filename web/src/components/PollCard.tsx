@@ -3,10 +3,12 @@
 import Link from "next/link";
 
 import { Countdown } from "@/components/Countdown";
+import { useTranslator } from "@/components/LocaleProvider";
 import { Badge, Card, ShareBar, Skeleton, Stat } from "@/components/ui";
 import { useMounted } from "@/hooks/useMounted";
 import { usePollSummary } from "@/hooks/usePollSummary";
 import { accentClass, badgeClass, phaseTone, sharePercent } from "@/lib/presentation";
+import type { Translator } from "@/lib/i18n";
 import { PollPhase, STAKE, formatEth, isPastDeadline, shortenAddress } from "@/lib/voting";
 import type { PollSummary } from "@/lib/types";
 
@@ -36,6 +38,7 @@ export function PollCard({
   /** The chain the page resolved, or undefined when it has no usable one. */
   chainId: number | undefined;
 }) {
+  const translator = useTranslator();
   const mounted = useMounted();
   const query = usePollSummary({ chainId, address, enabled: chainId !== undefined });
 
@@ -47,7 +50,9 @@ export function PollCard({
   const summary = mounted ? (query.data ?? initial) : initial;
 
   if (summary === null) {
-    return <BrokenCard address={address} retryHint={mounted && query.isError} />;
+    return (
+      <BrokenCard address={address} retryHint={mounted && query.isError} translator={translator} />
+    );
   }
 
   // A poll past `endsAt` is already unvotable — `vote` reverts — but it stays in
@@ -81,7 +86,7 @@ export function PollCard({
 
       <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-400">
         <span>
-          发起人{" "}
+          {translator.t("poll.creatorInline")}{" "}
           <span className="font-mono text-slate-500" title={summary.creator}>
             {shortenAddress(summary.creator)}
           </span>
@@ -89,7 +94,7 @@ export function PollCard({
         {mounted && query.isFetching && (
           <span className="inline-flex items-center gap-1 text-slate-300">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate-300" />
-            刷新中
+            {translator.t("common.refreshingShort")}
           </span>
         )}
       </p>
@@ -103,8 +108,12 @@ export function PollCard({
       {summary.optionCount > 0 && (
         <div className="mt-4">
           <div className="flex items-baseline justify-between text-xs">
-            <span className="text-slate-500">已投 {summary.totalVotes} 票</span>
-            <span className="tabular-nums text-slate-400">{summary.optionCount} 个选项</span>
+            <span className="text-slate-500">
+              {translator.t("poll.votedSoFar", { count: summary.totalVotes })}
+            </span>
+            <span className="tabular-nums text-slate-400">
+              {translator.t("poll.optionCount", { count: summary.optionCount })}
+            </span>
           </div>
           <div className="mt-1.5">
             <ShareBar
@@ -116,12 +125,12 @@ export function PollCard({
       )}
 
       <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        <Stat label="选项数" value={String(summary.optionCount)} />
-        <Stat label="当前票数" value={String(summary.totalVotes)} />
+        <Stat label={translator.t("poll.statOptionCount")} value={String(summary.optionCount)} />
+        <Stat label={translator.t("poll.statTotalVotes")} value={String(summary.totalVotes)} />
         <Stat
-          label="投票押金"
+          label={translator.t("poll.statStake")}
           value={`${formatEth(STAKE)} ETH`}
-          hint={votable ? "可退回" : undefined}
+          hint={votable ? translator.t("poll.stakeRefundable") : undefined}
         />
       </dl>
 
@@ -140,7 +149,7 @@ export function PollCard({
         >
           {/* The label states what is behind the link. A reader scanning for
               somewhere to vote should not have to open every card to find one. */}
-          {votable ? "去投票 →" : "查看详情 →"}
+          {votable ? translator.t("poll.goVote") : translator.t("poll.viewDetail")}
         </Link>
       </footer>
     </Card>
@@ -156,24 +165,33 @@ export function PollCard({
  * is in reading it, not in finding it. Saying so, and keeping the link, stops the
  * reader from concluding the poll was deleted.
  */
-function BrokenCard({ address, retryHint }: { address: `0x${string}`; retryHint: boolean }) {
+function BrokenCard({
+  address,
+  retryHint,
+  translator,
+}: {
+  address: `0x${string}`;
+  retryHint: boolean;
+  translator: Translator;
+}) {
   return (
     <Card as="article" className="border-rose-200 bg-rose-50/60 p-5">
       <h3 className="flex items-center gap-2 text-sm font-medium text-rose-800">
         <span className="h-2 w-2 rounded-full bg-rose-400" />
-        这个投票的链上信息读取失败
+        {translator.t("poll.cardReadFailed")}
       </h3>
       <p className="mt-2 break-all font-mono text-[11px] text-rose-700">{address}</p>
       <p className="mt-2 text-xs leading-relaxed text-rose-700">
-        这个地址来自工厂的 <code className="font-mono">allPolls()</code>
-        ，所以投票确实存在，失败的是它的详情读取。
-        {retryHint ? "请检查钱包所在网络的 RPC 后重试。" : "请检查 RPC 后重试。"}
+        {translator.t("poll.cardReadFailedDetail", { call: "allPolls()" })}
+        {retryHint
+          ? translator.t("poll.retryAfterNetworkCheck")
+          : translator.t("poll.retryAfterRpcCheck")}
       </p>
       <Link
         href={`/poll/${address}`}
         className="mt-3 inline-block rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-medium text-rose-800 transition hover:bg-rose-100"
       >
-        仍然打开这个投票 →
+        {translator.t("poll.stillOpen")}
       </Link>
     </Card>
   );

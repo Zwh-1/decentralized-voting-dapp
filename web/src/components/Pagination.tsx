@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslator } from "@/components/LocaleProvider";
+
 /**
  * The page controls under the poll list.
  *
@@ -42,6 +44,8 @@ export function Pagination({
   pageSize,
   onPageChange,
 }: PaginationProps) {
+  const translator = useTranslator();
+
   // Nothing to navigate and nothing worth stating: one page holding everything
   // is not a paginated list, and a control that only ever says "1 of 1" is noise.
   if (pageCount <= 1 && total <= pageSize) return null;
@@ -52,10 +56,10 @@ export function Pagination({
   return (
     <nav
       className="mt-6 flex flex-wrap items-center justify-between gap-3"
-      aria-label="投票列表分页"
+      aria-label={translator.t("list.pageLabel")}
     >
       <p className="text-xs text-slate-500">
-        显示第 {first}–{last} 个，共 {total} 个
+        {translator.t("list.showing", { from: first, to: last, total })}
       </p>
 
       <div className="flex items-center gap-2">
@@ -65,11 +69,11 @@ export function Pagination({
           disabled={page <= 1}
           className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 disabled:opacity-40"
         >
-          上一页
+          {translator.t("common.previous")}
         </button>
 
         <span className="text-xs text-slate-500" aria-current="page">
-          第 {page} / {pageCount} 页
+          {translator.t("common.pageOf", { page, pageCount })}
         </span>
 
         <button
@@ -78,7 +82,7 @@ export function Pagination({
           disabled={page >= pageCount}
           className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 disabled:opacity-40"
         >
-          下一页
+          {translator.t("common.next")}
         </button>
       </div>
     </nav>

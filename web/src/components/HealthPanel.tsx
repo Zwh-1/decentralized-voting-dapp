@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { useTranslator } from "@/components/LocaleProvider";
 import { fetchHealth } from "@/lib/client-api";
 import { healthRows } from "@/lib/health-report";
 
@@ -23,6 +24,7 @@ import { healthRows } from "@/lib/health-report";
  * a pure function with its own tests. This component only lays the rows out.
  */
 export function HealthPanel() {
+  const translator = useTranslator();
   const [open, setOpen] = useState(false);
 
   const { data, error, isPending, refetch } = useQuery({
@@ -47,16 +49,18 @@ export function HealthPanel() {
       >
         <span className="flex items-center gap-2">
           <GaugeMark />
-          运行状态（索引高度 / 落后区块 / 错误）
+          {translator.t("health.toggle")}
         </span>
         <span className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-500">
-          {open ? "收起" : "展开"}
+          {open ? translator.t("common.collapse") : translator.t("common.expand")}
         </span>
       </button>
 
       {open ? (
         <div className="border-t border-slate-200 px-4 py-3">
-          {isPending ? <p className="text-sm text-slate-400">读取中…</p> : null}
+          {isPending ? (
+            <p className="text-sm text-slate-400">{translator.t("common.loading")}</p>
+          ) : null}
 
           {/*
             The panel must not claim "everything is fine" when the request
@@ -65,13 +69,13 @@ export function HealthPanel() {
           */}
           {error !== null && error !== undefined ? (
             <div className="text-sm text-amber-700">
-              <p>无法读取 /api/health，因此这里没有可展示的状态。</p>
+              <p>{translator.t("health.unreachable")}</p>
               <button
                 type="button"
                 onClick={() => void refetch()}
                 className="mt-2 rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 transition hover:text-slate-900"
               >
-                重试
+                {translator.t("common.retry")}
               </button>
             </div>
           ) : null}
