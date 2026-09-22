@@ -1,11 +1,19 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-09-22-close-known-gaps",
-  "currentTodo": "P1-6 sweepUnclaimed 收紧",
-  "completedTodos": ["coverage", "gas", "sepolia-redeploy", "sourcify-verify", "export-abi"],
-  "activeSlice": "P0-complete",
+  "currentTodo": "P1-4 四条写入路径演练（未开始）",
+  "completedTodos": [
+    "P0-1 sourcify",
+    "P0-2 coverage",
+    "P0-3 gas",
+    "P1-6 sweepUnclaimed",
+    "P2-7 health panel",
+    "P2-8-11 cleanup",
+    "README sync"
+  ],
+  "activeSlice": "P0+P1-6+P2 complete",
   "evidenceRefs": [],
   "blockedOn": null,
-  "nextStep": "P1-6",
+  "nextStep": "P1-4 或 P1-5；两者都需扩展 ui-drill",
   "updatedAt": "2026-09-22"
 }

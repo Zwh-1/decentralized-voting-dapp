@@ -2,8 +2,16 @@
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-09-22-close-known-gaps",
   "lastCheckpointRef": "docs/aegis/work/2026-09-22-close-known-gaps/todo-checkpoint-draft.json",
-  "resumeInstruction": "P0 已全部关闭，从 P1-6 sweepUnclaimed 继续；证据见 contracts/coverage、contracts/gas-stats.json、deployments/11155111.json",
-  "knownPartialWork": ["coverage", "gas", "sepolia-redeploy", "sourcify-verify", "export-abi"],
+  "resumeInstruction": "已完成 4 个提交(56a9854,0447035,0754832,b70f3bf)。剩余：P1-4 结束/白名单/清扫/选项增删改 四条写入路径无浏览器演练；P1-5 IPFS 重试按钮未在浏览器渲染过。两者均已在 README 第 8 节登记为未验证。",
+  "knownPartialWork": [
+    "P0-1 sourcify",
+    "P0-2 coverage",
+    "P0-3 gas",
+    "P1-6 sweepUnclaimed",
+    "P2-7 health panel",
+    "P2-8-11 cleanup",
+    "README sync"
+  ],
   "mustReadBeforeContinuing": [
     "docs/aegis/work/2026-09-22-close-known-gaps/10-intent.md",
     "docs/aegis/work/2026-09-22-close-known-gaps/20-checkpoint.md",
