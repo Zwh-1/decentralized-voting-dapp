@@ -7,43 +7,43 @@
 
 ## Progress
 
-| 批次 | 任务                                              | 状态     | 证据                                              |
-| ---- | ------------------------------------------------- | -------- | ------------------------------------------------- |
-| 零   | Task 0.1 修复 Docker 引擎                         | **阻塞** | 根因见 §14；解除需管理员提权 + 重启，本会话做不到 |
-| 零   | Task 0.2 服务器初始化                             | 未开始   | —                                                 |
-| 零   | Task 0.3 GitHub / Docker Hub 准备                 | 未开始   | —                                                 |
-| 零   | Task 0.4 Sepolia 工厂重新部署 + 演示投票          | 未开始   | —                                                 |
-| 零   | Task 0.5 域名与 TLS                               | 未开始   | —                                                 |
-| 零   | Task 0.6 邮件（SMTP）接收端准备                   | 未开始   | —                                                 |
-| 一   | Task 1.1 standalone 产物                          | 未开始   | —                                                 |
-| 一   | Task 1.2 Dockerfile 与 .dockerignore              | 未开始   | —                                                 |
-| 一   | Task 1.3 compose base 扩写                        | 未开始   | —                                                 |
-| 一   | Task 1.4 indexer worker 入口                      | 未开始   | —                                                 |
-| 一   | Task 1.5 migrate 一次性服务                       | 未开始   | —                                                 |
-| 一   | Task 1.6 本地 override                            | 未开始   | —                                                 |
-| 一   | Task 1.7 一键拉起验收（含负向对照）               | 未开始   | —                                                 |
-| 二   | Task 2.1 `/api/metrics`                           | 未开始   | —                                                 |
-| 二   | Task 2.2 metrics 不暴露公网                       | 未开始   | —                                                 |
-| 二   | Task 2.3 Prometheus 采集与告警规则                | 未开始   | —                                                 |
-| 二   | Task 2.4 exporters                                | 未开始   | —                                                 |
-| 二   | Task 2.5 Alertmanager 与邮件                      | 未开始   | —                                                 |
-| 二   | Task 2.6 Grafana provisioning 与看板              | 未开始   | —                                                 |
-| 二   | Task 2.7 部署版本可见性                           | 未开始   | —                                                 |
-| 二   | Task 2.8 三类故障演练                             | 未开始   | —                                                 |
-| 三   | Task 3.1 `ci.yml` 增加 `workflow_call`            | 未开始   | —                                                 |
-| 三   | Task 3.2 `release.yml`（门 → 构建 → 扫描 → 推送） | 未开始   | —                                                 |
-| 三   | Task 3.3 部署脚本三件套                           | 未开始   | —                                                 |
-| 三   | Task 3.4 SSH 部署 job                             | 未开始   | —                                                 |
-| 三   | Task 3.5 `rollback.yml`                           | 未开始   | —                                                 |
-| 三   | Task 3.6 流水线端到端验收                         | 未开始   | —                                                 |
-| 四   | Task 4.1 nginx 与上游模板                         | 未开始   | —                                                 |
-| 四   | Task 4.2 prod compose 双槽定义                    | 未开始   | —                                                 |
-| 四   | Task 4.3 `deploy.sh` 双槽流程                     | 未开始   | —                                                 |
-| 四   | Task 4.4 `rollback.sh` 秒级回滚                   | 未开始   | —                                                 |
-| 四   | Task 4.5 零停机证据与负向对照                     | 未开始   | —                                                 |
-| 四   | Task 4.6 expand-contract runbook                  | 未开始   | —                                                 |
-| 五   | Task 5.1 七条 ADR 落地                            | 未开始   | —                                                 |
-| 五   | Task 5.2 基线记录与简历材料                       | 未开始   | —                                                 |
+| 批次 | 任务                                              | 状态     | 证据                                                                                                                              |
+| ---- | ------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 零   | Task 0.1 修复 Docker 引擎                         | **阻塞** | 根因见 §14；解除需管理员提权 + 重启，本会话做不到                                                                                 |
+| 零   | Task 0.2 服务器初始化                             | 未开始   | —                                                                                                                                 |
+| 零   | Task 0.3 GitHub / Docker Hub 准备                 | 未开始   | —                                                                                                                                 |
+| 零   | Task 0.4 Sepolia 工厂重新部署 + 演示投票          | 未开始   | —                                                                                                                                 |
+| 零   | Task 0.5 域名与 TLS                               | 未开始   | —                                                                                                                                 |
+| 零   | Task 0.6 邮件（SMTP）接收端准备                   | 未开始   | —                                                                                                                                 |
+| 一   | Task 1.1 standalone 产物                          | **完成** | `.next/standalone/web/server.js` 实测存在；typecheck 与 format 退出码均为 0；负向对照成立（改动前无该目录）。产物自包含性见 §14.4 |
+| 一   | Task 1.2 Dockerfile 与 .dockerignore              | **阻塞** | 需 Linux 镜像才能验证；设计已按 §14.4 增补 `.env` 清除与自包含自检                                                                |
+| 一   | Task 1.3 compose base 扩写                        | 未开始   | —                                                                                                                                 |
+| 一   | Task 1.4 indexer worker 入口                      | 未开始   | —                                                                                                                                 |
+| 一   | Task 1.5 migrate 一次性服务                       | 未开始   | —                                                                                                                                 |
+| 一   | Task 1.6 本地 override                            | 未开始   | —                                                                                                                                 |
+| 一   | Task 1.7 一键拉起验收（含负向对照）               | 未开始   | —                                                                                                                                 |
+| 二   | Task 2.1 `/api/metrics`                           | 未开始   | —                                                                                                                                 |
+| 二   | Task 2.2 metrics 不暴露公网                       | 未开始   | —                                                                                                                                 |
+| 二   | Task 2.3 Prometheus 采集与告警规则                | 未开始   | —                                                                                                                                 |
+| 二   | Task 2.4 exporters                                | 未开始   | —                                                                                                                                 |
+| 二   | Task 2.5 Alertmanager 与邮件                      | 未开始   | —                                                                                                                                 |
+| 二   | Task 2.6 Grafana provisioning 与看板              | 未开始   | —                                                                                                                                 |
+| 二   | Task 2.7 部署版本可见性                           | 未开始   | —                                                                                                                                 |
+| 二   | Task 2.8 三类故障演练                             | 未开始   | —                                                                                                                                 |
+| 三   | Task 3.1 `ci.yml` 增加 `workflow_call`            | 未开始   | —                                                                                                                                 |
+| 三   | Task 3.2 `release.yml`（门 → 构建 → 扫描 → 推送） | 未开始   | —                                                                                                                                 |
+| 三   | Task 3.3 部署脚本三件套                           | 未开始   | —                                                                                                                                 |
+| 三   | Task 3.4 SSH 部署 job                             | 未开始   | —                                                                                                                                 |
+| 三   | Task 3.5 `rollback.yml`                           | 未开始   | —                                                                                                                                 |
+| 三   | Task 3.6 流水线端到端验收                         | 未开始   | —                                                                                                                                 |
+| 四   | Task 4.1 nginx 与上游模板                         | 未开始   | —                                                                                                                                 |
+| 四   | Task 4.2 prod compose 双槽定义                    | 未开始   | —                                                                                                                                 |
+| 四   | Task 4.3 `deploy.sh` 双槽流程                     | 未开始   | —                                                                                                                                 |
+| 四   | Task 4.4 `rollback.sh` 秒级回滚                   | 未开始   | —                                                                                                                                 |
+| 四   | Task 4.5 零停机证据与负向对照                     | 未开始   | —                                                                                                                                 |
+| 四   | Task 4.6 expand-contract runbook                  | 未开始   | —                                                                                                                                 |
+| 五   | Task 5.1 七条 ADR 落地                            | 未开始   | —                                                                                                                                 |
+| 五   | Task 5.2 基线记录与简历材料                       | 未开始   | —                                                                                                                                 |
 
 ---
 
@@ -592,21 +592,30 @@ ssh deploy@<server> 'nc -zv <smtp_host> 465; ls -l /srv/voting/.env'
 
 1. 在 `web/next.config.ts` 的 `nextConfig` 中增加 `output: "standalone"`，并写一行注释说明"仅为容器镜像瘦身，不改变行为"。
 2. `pnpm build:web`。
-3. 确认产物：`.next/standalone/` 存在；**`.next/standalone/node_modules/mysql2` 存在**（这是 `serverExternalPackages: ["mysql2"]` 的依赖性后果，见规格 §6.3）。
-4. 确认入口文件的确切路径并记录：在 pnpm workspace 下，standalone 的根目录结构会把应用放在子路径（预期为 `.next/standalone/web/server.js`）。**这个路径在 Task 1.2 的 ENTRYPOINT 里会被硬编码，必须先确认。**
-5. **负向对照**：临时移除 `output: "standalone"`，重新 build，确认 `.next/standalone` **不存在**，然后恢复。
+3. 确认入口文件的确切路径：**实测为 `.next/standalone/web/server.js`**（计划原来的预期正确）。这个路径在 Task 1.2 的 ENTRYPOINT 里被硬编码。
+4. **产出物断言已按实测修正（2026-09-22）**。原计划断言 `mysql2` 会出现在 `.next/standalone/node_modules/mysql2`——**该断言不成立**，实测结果如下：
+   - `mysql2` 的文件**确实被追踪**进 `standalone/node_modules/.pnpm/mysql2@3.24.4_@types+node@22.20.4/node_modules/mysql2/`（92 个文件，0.53 MB，含 `promise.js` 与 `lib/**`）；
+   - 但**没有任何顶层链接指向它**：`standalone/node_modules/` 下只有 `.pnpm`，`standalone/web/node_modules/` 下**只有 `next`**；
+   - 那个 `next` 还是**指向仓库绝对路径的 Junction**（`D:\桌面\实习项目\…\node_modules\.pnpm\next@…\node_modules\next`），容器内必然悬空；
+   - 把 `standalone/` 复制到仓库之外后，`require.resolve("mysql2/promise")` → **`MODULE_NOT_FOUND`**（已复现），`require.resolve("next")` 之所以仍成功，只是因为它指回了本机仓库。
+   - 另注：`mysql2/index.js` 不在追踪集内，这**不是**缺陷——应用只 `import "mysql2/promise"`，而 `promise.js` 不 require `index.js`，所以 `index.js` 确实不可达。
+5. **负向对照**：已在基线阶段自然取得——改动前 `web/.next/standalone` 不存在，改动后存在，证明该配置确实在起作用。
+
+**结论与后果**：本机（Windows）构建的 standalone **不自包含、不可移植**。这是 pnpm 在 Windows 上用 junction、而 Next 追踪器只保留了部分链接的结果。**Linux 容器内是否自包含尚未验证，需 Docker 解除后才能定论**（记录见 §14.4）。在该结论确立前，Task 1.2 的 Dockerfile 必须带一条镜像内自检，否则容器会在运行时才崩。
 
 **Verification**
 
 ```bash
 cd decentralized-voting-dapp
 pnpm build:web
-test -f web/.next/standalone/web/server.js && echo "server.js OK"
-test -d web/.next/standalone/node_modules/mysql2 && echo "mysql2 traced OK"
-pnpm typecheck && pnpm format:check
+test -f web/.next/standalone/web/server.js && echo "server.js OK"   # 实测通过
+pnpm typecheck && pnpm format:check                                  # 实测通过（退出码均为 0）
+# 自包含性质检——必须把 standalone 复制到仓库之外再解析，否则会被本机仓库“救活”：
+#   require.resolve("mysql2/promise") 在副本里必须成功
+#   Windows 本机实测：失败（MODULE_NOT_FOUND），见 §14.4；Linux 容器内待验
 ```
 
-预期：三项都存在；typecheck 与 format 干净；负向对照下 standalone 目录不产生。
+预期：`server.js` 存在；typecheck 与 format 干净；**自包含性在 Linux 容器内必须单独验证**，Windows 本机不满足。
 
 ---
 
@@ -629,10 +638,14 @@ pnpm typecheck && pnpm format:check
 2. 写 `deps` 阶段：`FROM node:24-bookworm-slim`；`corepack enable`；先 `COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./` 与 `COPY web/package.json web/`、`COPY contracts/package.json contracts/`（**只复制 manifest，源码后置**，这是层缓存的关键）；然后 `RUN pnpm install --frozen-lockfile`。
    - 注意：`--filter @voting/web...`（三点后缀）会连同其 workspace 依赖一起装，但 `contracts` 的 devDependency（Hardhat）体积巨大且运行时不需要。**做法**：deps 阶段用全量 `--frozen-lockfile` 保证 lockfile 一致性，runner 阶段只复制 standalone 输出与必要的运行时依赖，不复制 `node_modules`。
 3. 写 `builder` 阶段：`COPY . .`；声明 `ARG NEXT_PUBLIC_LOCAL_RPC_URL`、`ARG NEXT_PUBLIC_SEPOLIA_RPC_URL`、`ARG NEXT_PUBLIC_IPFS_GATEWAY` 并 `ENV` 化（理由见规格 §6.4：`NEXT_PUBLIC_*` 构建期内联）；`RUN pnpm --filter @voting/web build`。
-4. 写 `runner` 阶段：`FROM node:24-bookworm-slim`；`ENV NODE_ENV=production`、`ENV PORT=3000`、**`ENV HOSTNAME=0.0.0.0`**（不设它，standalone 会绑定到容器主机名，从容器外无法访问——这是最常见的坑）；复制 `.next/standalone` → `/app`、`.next/static` → `/app/web/.next/static`、`public` → `/app/web/public`（路径需按 Task 1.1 第 4 步确认的结果写）；`USER node`；`EXPOSE 3000`；`HEALTHCHECK` 用 `node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`；`ENTRYPOINT ["node","web/server.js"]`。
+4. 写 `runner` 阶段：`FROM node:24-bookworm-slim`；`ENV NODE_ENV=production`、`ENV PORT=3000`、**`ENV HOSTNAME=0.0.0.0`**（不设它，standalone 会绑定到容器主机名，从容器外无法访问——这是最常见的坑）；复制 `.next/standalone` → `/app`、`.next/static` → `/app/web/.next/static`、`public` → `/app/web/public`（`.next` 与 `public` 的目标路径按 Task 1.1 第 3 步实测的 `.next/standalone/web/server.js` 推出）；`USER node`；`EXPOSE 3000`；`HEALTHCHECK` 用 `node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`；`ENTRYPOINT ["node","web/server.js"]`。
+   - **必须增补（2026-09-22 实测）**：紧接着 COPY 之后执行 `RUN rm -f /app/web/.env /app/web/.env.*`。理由是实测发现 **`next build` 会把 `web/.env` 复制进 `.next/standalone/web/.env`**（本机 909 字节，含 `RPC_URL`/`CHAIN_ID`/`DATABASE_URL` 等 10 个变量名）。该文件来自**构建阶段**，所以 `.dockerignore` 对它完全无效——排除构建上下文挡不住一个由构建过程自己生成的文件。当前那份 `.env` 只含本地开发值（`RPC_URL=http://127.0.0.1:8545`、`DATABASE_URL` 指向 `127.0.0.1:3306/voting_local_e2e`），**泄漏后果有限，但机制是危险的**：一旦构建机上有生产 `.env`，镜像一推到 Docker Hub 就等于把凭据公开。这条要写进 ADR-0016/0020 的边界。
+   - **必须增补**：在 runner 阶段加一条镜像内自检 `RUN node -e "require.resolve('mysql2/promise')"`，工作目录设为 `/app/web`。理由见 §14.4：standalone 的自包含性在 Windows 上不成立，Linux 上待验；有了这条自检，不自包含的镜像会在**构建时**失败，而不是在容器运行时才崩。
 5. **indexer / migrate 角色需要运行 `scripts/*.ts`，需要 `tsx`**。这三个脚本用 `node --import tsx scripts/*.ts` 执行。runner 阶段必须提供 `tsx`，否则 indexer 与 migrate 容器会立刻失败。**做法**：在 runner 阶段额外 `RUN npm i -g tsx@<与 web devDependency 相同版本>`（或在 builder 里预编译脚本为 JS——但那会引入构建复杂度）。**记录这条选择的原因**：`tsx` 是 devDependency，`--prod` 安装不会带上它，而 migrate/indexer 是生产必需的进程角色。这是"同一镜像三角色"这个决定的直接代价，必须写进 ADR（Task 5.1）。
 6. 写 `.dockerignore`，至少包含：`.git`、`node_modules`、`**/node_modules`、`**/.next`、`**/artifacts`、`**/cache`、`**/coverage`、`**/*.log`、`.env`、`.env.*`（但保留 `.env.example`）、`docs`、`**/*.tsbuildinfo`。**`.env` 必须排除**：构建上下文会整个发给 daemon，密钥进上下文等于进构建缓存。
+   - **但这不够（2026-09-22 实测）**：`.dockerignore` 只作用于**构建上下文**，挡不住由 `next build` 自己生成在 `.next/standalone/web/.env` 里的那一份。两处都必须处理，缺一不可——见第 4 步的 `RUN rm -f`。
 7. 构建并用只读方式冒烟：以 `RPC_URL=<Sepolia RPC>` 起容器，`curl` `/api/health`，确认返回 JSON 且 `status` 合理。
+8. **确认镜像里没有 `.env`**（负向对照的另一半）：`docker run --rm --entrypoint sh voting-web:dev -c 'ls -la /app/web/.env* 2>&1 || echo "clean"'` 必须输出 `clean`。
 
 **Verification**
 
@@ -640,6 +653,11 @@ pnpm typecheck && pnpm format:check
 cd decentralized-voting-dapp
 docker build -f web/Dockerfile -t voting-web:dev .
 docker image ls voting-web:dev --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+# 自包含性：必须显式验，否则容器运行时才崩（见 §14.4）
+docker run --rm --entrypoint node -w /app/web voting-web:dev \
+  -e "require.resolve('mysql2/promise'); console.log('mysql2 resolvable')"
+# 镜像内不得残留 .env
+docker run --rm --entrypoint sh voting-web:dev -c 'ls /app/web/.env 2>/dev/null && exit 1 || echo "no .env (good)"'
 docker run --rm -d --name smoke -p 13000:3000 \
   -e RPC_URL=https://ethereum-sepolia-rpc.publicnode.com -e CHAIN_ID=11155111 voting-web:dev
 sleep 8 && curl -s localhost:13000/api/health | head -c 400
@@ -647,7 +665,7 @@ docker inspect smoke --format '{{.State.Health.Status}}'
 docker rm -f smoke
 ```
 
-预期：镜像成功构建且体积 **< 250MB**（记录实测字节数）；`/api/health` 返回 JSON；容器健康检查为 `healthy`。
+预期：镜像成功构建且体积 **< 250MB**（记录实测字节数）；`mysql2/promise` 可解析；镜像内无 `.env`；`/api/health` 返回 JSON；容器健康检查为 `healthy`。
 
 ---
 
@@ -1872,3 +1890,41 @@ git status --short            # 为空
 **恢复后的第一个动作**：Task 0.1 的收尾验证（上述三条命令留证），随后进入 Task 1.1。若本机 Docker 在重启后仍不可用，则改走 §14.1 登记的备选路线（WSL2 内装原生 Docker Engine，并把仓库移入 WSL 文件系统），并在基线记录中写明"Docker 引擎位于 WSL2"。
 
 **本计划在等待期间不做的事**：不编写无法验证的 `ops/` 配置（按 §1 的纪律，未实测不得标记完成），不提前写批五的 ADR（ADR 记录的是已执行的决策，不是待执行的设想）。
+
+### 14.4 执行 Task 1.1 时的两项实测发现（2026-09-22）
+
+执行 Task 1.1（新增 `output: "standalone"`）时逐项验证产物，得到两项计划未预见的结果。
+
+**发现一：本机构建的 standalone 不自包含**
+
+| 检查                                                          | 实测                                                                                              |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `.next/standalone/web/server.js`                              | 存在（入口路径与计划预期一致）                                                                    |
+| `standalone/node_modules/.pnpm/…/mysql2`                      | 存在，92 文件 / 0.53 MB（含 `promise.js` 与 `lib/**`）                                            |
+| 指向 `mysql2` 的顶层链接                                      | **不存在**（`standalone/node_modules/` 只有 `.pnpm`；`standalone/web/node_modules/` 只有 `next`） |
+| `standalone/web/node_modules/next`                            | **Junction，指向仓库绝对路径** `D:\桌面\实习项目\…\node_modules\.pnpm\next@…`                     |
+| standalone 复制到仓库外后 `require.resolve("mysql2/promise")` | **`MODULE_NOT_FOUND`**                                                                            |
+| 同一副本里 `require.resolve("next")`                          | 成功——但只因那个 Junction 指回了本机仓库，容器内会悬空                                            |
+
+结论：Windows 上用 pnpm + Next standalone 产出的目录**既不自包含也不可移植**。
+
+**这不等于 Linux 容器内也坏**：pnpm 在 Linux 用真实符号链接，Next 追踪器在那边大概率能建出完整链接。但**本机无法验证**，因此：
+
+- 判定为**未验证**，不得当作通过；
+- Task 1.2 已增补镜像内自检 `RUN node -e "require.resolve('mysql2/promise')"`，让不自包含的镜像在**构建时**失败，而不是运行时才崩；
+- 计划原来的断言（`standalone/node_modules/mysql2` 存在）已按实测改写。另注：`mysql2/index.js` 不在追踪集内是**正常**的——应用只 `import "mysql2/promise"`，而 `promise.js` 不 require `index.js`，故 `index.js` 确实不可达。
+
+**发现二：`next build` 会把 `web/.env` 复制进 standalone，从而烘进镜像**
+
+| 检查                        | 实测                                                                                                                                                                                |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `web/.env` 是否被 git 忽略  | 是（`.gitignore:26`）                                                                                                                                                               |
+| `.next/standalone/web/.env` | **存在**，909 字节，与仓库那份大小相同                                                                                                                                              |
+| 其中的变量名                | `RPC_URL`、`CHAIN_ID`、`DATABASE_URL`、`CONFIRMATIONS`、`CHUNK_BLOCKS`、`POLL_INTERVAL_MS`、`INDEXER_ENABLED`、`LOG_LEVEL`、`NEXT_PUBLIC_LOCAL_RPC_URL`、`NEXT_PUBLIC_IPFS_GATEWAY` |
+| 当前值的性质                | 均为本地开发值（`RPC_URL=http://127.0.0.1:8545`；`DATABASE_URL` 指向 `127.0.0.1:3306/voting_local_e2e`，无外部凭据）                                                                |
+
+**为什么计划没挡住**：Task 1.2 原第 6 步只要求 `.dockerignore` 排除 `.env`。但 `.dockerignore` 只作用于**构建上下文**，而这一份 `.env` 是 `next build` **在构建阶段自己生成**的——排除上下文挡不住它。两处必须同时处理。
+
+**当前风险有限，机制危险**：就现有内容而言，泄漏的只是本地回环地址，没有可利用凭据。但只要构建机上有生产 `.env`（带 API key 的 RPC、生产库口令），一次 `docker push` 就等于公开凭据。因此 Task 1.2 已增补 `RUN rm -f /app/web/.env /app/web/.env.*`，以及一条"镜像内不得残留 `.env`"的验证，并要求写进 ADR-0016/0020 的边界。
+
+**对计划的影响**：Task 1.1 的配置改动本身已验证通过（`server.js` 路径确认、typecheck 与 format 退出码均为 0、负向对照成立），但**批一在此停住**——Task 1.2 起的每一条验证都需要一个 Linux 镜像，而 Docker 尚未解除（§14.1）。
