@@ -7,7 +7,7 @@ Date: `2026-09-22`
 
 - `ops/deploy/` 下的脚本（计划 Task 3.3 / 4.3 / 4.4）：`lib.sh`、`deploy.sh`、`rollback.sh`、`health-gate.sh`、`probe-loop.sh`、`publish-version.sh`
 - 实测（计划 §14.11 验证表）：`bash -n` 全部 **10 个** shell 脚本，0 失败；`ops/deploy/selftest.sh` **80 项全过**（由本批的 41 项扩到 80 项，新增 39 项）
-- 实测（计划 §14.11）：`ops/deploy/selftest-controls.py`（负向对照）**6 项全过**——4 处故意破坏各被抓住，干净树通过：把流量切换提到健康门之前（**2 条**断言抓到）、成功部署后顺手停掉旧槽（**1 条**）、把 migrate 挪到起槽之后（**7 条**）、让健康门失败仍记录成功（**6 条**）
+- 实测（计划 §14.11）：`ops/deploy/selftest-controls.py`（负向对照）**7 项全过**——4 组注入故障各被抓住，加 3 项桩化环境自检（干净副本通过、移除故障后再次通过、副本运行后保持原状）：把流量切换提到健康门之前（**2 条**断言抓到）、成功部署后顺手停掉旧槽（**1 条**）、把 migrate 挪到起槽之后（**7 条**）、让健康门失败仍记录成功（**6 条**）
 - `ops/runbook/deploy.md`：事故手册直接引用同一批脚本（`./ops/deploy/rollback.sh`、`./ops/deploy/probe-loop.sh`、`cat state/active-slot state/active-tag`），并给出「按失败阶段查表」的处置流程
 - `.github/workflows/release.yml` 的 deploy job：先 `rsync` 把 `ops/` 同步到服务器，再通过 SSH 执行 `./ops/deploy/deploy.sh '<version>'`——CI 与人工执行的是同一份代码
 - 实测（计划 §14.11，三层「必须能失败」）：桩化自测（80 项）断言顺序性质本身；负向对照证明那 80 项**会失败**；真实网络层用 `health-gate.sh` 与 `probe-loop.sh` 打一个真的 node HTTP 服务器，覆盖成功 / 连接失败 / 404 三条路径

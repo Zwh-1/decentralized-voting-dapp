@@ -10,7 +10,7 @@ Date: `2026-09-22`
 - `ops/deploy/rollback.sh`：全文没有 `run --rm migrate`；第 144 行向部署日志追加 `rollback note: schema NOT rolled back (expand-contract; see ops/runbook/migrations.md)`；第 150 行**每次运行**都打印 `NOTE: the database schema was NOT rolled back, by design.`
 - `ops/deploy/rollback.sh` 第 23–38 行的文件头注释写明否掉可逆迁移的理由：「Rolling the schema backwards would also destroy whatever the version being abandoned had already written, turning a bad release into data loss」
 - 实测（计划 §14.6）：`ops/deploy/selftest.sh` 断言回滚路径**未调用 `run --rm migrate`**，且输出明说 schema 未回滚；该断言随本批从 41 项扩到 80 项
-- 实测（计划 §14.11）：`ops/deploy/selftest.sh` **80 项全过**；`ops/deploy/selftest-controls.py` **6 项全过**，其中「把 migrate 挪到起槽之后」这组注入故障被 **7 条断言**抓住
+- 实测（计划 §14.11）：`ops/deploy/selftest.sh` **80 项全过**；`ops/deploy/selftest-controls.py` **7 项全过**（4 组注入故障 + 3 项桩化环境自检），其中「把 migrate 挪到起槽之后」这组注入故障被 **7 条断言**抓住
 - `docker-compose.yml` 第 10–15 行：明确没有 `docker-entrypoint-initdb.d` 挂载、没有 seed `.sql`，schema 只有一个所有者 `web/src/lib/db/schema.ts`
 - 边界：`migrate` 从未在容器里真正跑过（Docker 引擎不可用），两次发布法**从未被真正执行过一次**
 
