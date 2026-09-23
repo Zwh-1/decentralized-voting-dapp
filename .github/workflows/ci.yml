@@ -293,11 +293,15 @@ jobs:
           # matches nothing (or a directory added later and never added here) is
           # how a script ends up unlinted while the job reports success, which is
           # exactly what happened to ops/nginx/render-upstream.sh.
-          shellcheck -x ops/deploy/*.sh ops/indexer/*.sh ops/alertmanager/*.sh ops/nginx/*.sh
+          shellcheck -x ops/deploy/*.sh ops/indexer/*.sh ops/alertmanager/*.sh ops/nginx/*.sh ops/handoff/*.sh
 
       - name: Syntax check every script
         run: |
-          for script in $(find ops -name '*.sh' | sort); do
+          # `*.rules` as well: ops/server/ufw.rules is a runnable shell script
+          # that happens not to be named .sh. Selecting by suffix alone would let
+          # a syntax error in it reach a production host, where the failure is a
+          # half-applied firewall.
+          for script in $(find ops \( -name '*.sh' -o -name '*.rules' \) | sort); do
             echo "bash -n $script"
             bash -n "$script"
           done
@@ -307,6 +311,14 @@ jobs:
 
       - name: Prove the self-test can fail
         run: python ops/deploy/selftest-controls.py
+
+      # The handoff scripts transmit to a real server and a real repository.
+      # Both refuse to act when they find a credential in what they are about to
+      # send, and both refuse to act without arguments. Those refusals are the
+      # entire value of the scripts, so they are exercised here rather than
+      # trusted.
+      - name: Prove the handoff scripts refuse what they should refuse
+        run: python ops/handoff/selftest.py
 
   # The development overlay must not be able to reach production. Every failure
   # this catches is silent from the outside: a published application port bypasses
