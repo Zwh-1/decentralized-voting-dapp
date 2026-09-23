@@ -27,6 +27,20 @@ NEXT_PUBLIC_IPFS_GATEWAY=https://ipfs.io/ipfs/
 # 但不能留空：留空会让 bundle 与其它环境不一致，而"不同环境 bundle 不一致"
 # 正是"按环境重建镜像"这条设计要暴露出来的漂移。
 
+# 下面两项是发布用的：deploy.sh 与 rollback.sh 都读它们，CI 从 Variables 传进去。
+#
+# PUBLIC_HEALTH_URL：用户实际打开的那个地址（观察窗要打它）。
+#   本部署是 https://106.14.239.194:8443/api/health —— 端口是 8443，因为生产
+#   compose 只发布 8443:443（这台机器上 80/443 已被另一个项目占用）。
+#   不填的话脚本会退回默认的 https://localhost/api/health，观察窗必然失败，
+#   CI 会把一个正常的发布回滚掉，而且是在流量已经切过去之后。
+#
+# INSECURE_TLS=1：证书是自签的，curl 校验不过。它等同于 ops/blackbox/blackbox.yml
+#   里 http_2xx_insecure 那个模块：只证明"能连通"，不再证明"对面是谁"，
+#   并且会写进探测摘要的 "insecureTls":true。换上受信任的证书后删掉这一项。
+PUBLIC_HEALTH_URL=https://106.14.239.194:8443/api/health
+INSECURE_TLS=1
+
 # -----------------------------------------------------------------------------
 # 第 2 组：Secrets
 #   页面：Settings → Secrets and variables → Actions → Secrets 标签

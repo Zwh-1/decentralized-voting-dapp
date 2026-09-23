@@ -216,20 +216,44 @@ jobs:
 
       - name: Deploy
         id: deploy
+        # PUBLIC_HEALTH_URL and INSECURE_TLS come from repository Variables
+        # because they are deployment facts, not secrets: the address users
+        # actually open, and whether the certificate is one curl can verify.
+        #
+        # Without them the job cannot succeed on a host that serves on a
+        # non-standard port or with a self-signed certificate: deploy.sh's
+        # built-in default is https://localhost/api/health, the observation
+        # window then fails on a certificate or a port that was never there, and
+        # a release that works is rolled back. Unset Variables expand to empty
+        # strings, and both scripts treat empty as "not set" -- so the safe
+        # default (verify the certificate, use localhost) is what an unconfigured
+        # repository gets.
         run: |
           ssh -o StrictHostKeyChecking=yes \
               "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-              "cd /srv/voting && WEB_IMAGE='${{ env.IMAGE }}' WEB_IMAGE_TAG='${{ needs.build.outputs.version }}' ./ops/deploy/deploy.sh '${{ needs.build.outputs.version }}'"
+              "cd /srv/voting && \
+               PUBLIC_HEALTH_URL='${{ vars.PUBLIC_HEALTH_URL }}' \
+               INSECURE_TLS='${{ vars.INSECURE_TLS }}' \
+               WEB_IMAGE='${{ env.IMAGE }}' WEB_IMAGE_TAG='${{ needs.build.outputs.version }}' \
+               ./ops/deploy/deploy.sh '${{ needs.build.outputs.version }}'"
 
       # A failed health gate leaves the previous release serving, so recovery is
       # a rollback rather than an emergency. The job still fails -- an automatic
       # recovery that reports success would hide how often deploys break.
+      #
+      # rollback.sh observes the public URL too, so it needs the same two values:
+      # a rollback that switches the upstream and then fails its own observation
+      # window would switch back, leaving the operator with a rollback that did
+      # nothing and a red pipeline.
       - name: Roll back after a failed deploy
         if: failure() && steps.deploy.outcome == 'failure'
         run: |
           ssh -o StrictHostKeyChecking=yes \
               "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-              "cd /srv/voting && ./ops/deploy/rollback.sh"
+              "cd /srv/voting && \
+               PUBLIC_HEALTH_URL='${{ vars.PUBLIC_HEALTH_URL }}' \
+               INSECURE_TLS='${{ vars.INSECURE_TLS }}' \
+               ./ops/deploy/rollback.sh"
 
       - name: Summary
         if: always()

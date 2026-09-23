@@ -56,10 +56,17 @@ jobs:
 
       - name: Roll back
         id: rollback
+        # Same two deployment facts as release.yml's deploy step, for the same
+        # reason: rollback.sh observes the public URL, and its built-in default
+        # (https://localhost/api/health) does not match a host that serves on
+        # another port or with a self-signed certificate.
         run: |
           ssh -o StrictHostKeyChecking=yes \
               "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-              "cd /srv/voting && ./ops/deploy/rollback.sh '${{ inputs.tag }}'"
+              "cd /srv/voting && \
+               PUBLIC_HEALTH_URL='${{ vars.PUBLIC_HEALTH_URL }}' \
+               INSECURE_TLS='${{ vars.INSECURE_TLS }}' \
+               ./ops/deploy/rollback.sh '${{ inputs.tag }}'"
 
       - name: Summary
         if: always()
