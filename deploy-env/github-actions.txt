@@ -1,0 +1,55 @@
+# =============================================================================
+# GitHub 仓库 → Settings → Secrets and variables → Actions
+# =============================================================================
+#
+# 【重要】这份文件是给人看的抄写清单，不是能 source 的文件。
+# GitHub 上没有"导入 .env"这回事，只能一项一项在网页上填。
+#
+# 有一条很容易踩的坑：下面第 1 组必须填在 **Variables** 页，
+# 第 2 组必须填在 **Secrets** 页。两页是分开的。
+# 把 DOCKERHUB_USERNAME 填进 Secrets 会让镜像 namespace 变空、构建直接失败。
+#
+# -----------------------------------------------------------------------------
+# 第 1 组：Variables（不是 Secrets！）
+#   页面：Settings → Secrets and variables → Actions → Variables 标签
+#   这些不是机密，是配置。release.yml 里以 vars. 引用。
+# -----------------------------------------------------------------------------
+
+DOCKERHUB_USERNAME=【你的 Docker Hub 用户名】
+
+# 下面三项在**构建镜像时**被内联进前端 bundle。
+# 改任何一项都必须重新构建镜像，重启容器不起作用。
+NEXT_PUBLIC_LOCAL_RPC_URL=http://127.0.0.1:8545
+NEXT_PUBLIC_SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
+NEXT_PUBLIC_IPFS_GATEWAY=https://ipfs.io/ipfs/
+
+# NEXT_PUBLIC_LOCAL_RPC_URL 在生产里看起来没用（部署的不是 31337 链），
+# 但不能留空：留空会让 bundle 与其它环境不一致，而"不同环境 bundle 不一致"
+# 正是"按环境重建镜像"这条设计要暴露出来的漂移。
+
+# -----------------------------------------------------------------------------
+# 第 2 组：Secrets
+#   页面：Settings → Secrets and variables → Actions → Secrets 标签
+#   这些是真机密，填进去之后网页上再也看不到明文。
+# -----------------------------------------------------------------------------
+
+# Docker Hub 的 Access Token，不是登录密码。
+# 生成：hub.docker.com → Account Settings → Security → New Access Token
+# 权限给 Read & Write 即可。
+DOCKERHUB_TOKEN=【粘贴 Access Token】
+
+SSH_HOST=【服务器公网 IP】
+SSH_USER=【服务器 SSH 用户名，建议 deploy】
+
+# 私钥**全文**，含首尾两行：
+#   -----BEGIN OPENSSH PRIVATE KEY-----
+#   ...
+#   -----END OPENSSH PRIVATE KEY-----
+# 末尾的换行也要保留。
+SSH_KEY=【粘贴私钥全文】
+
+# 服务器 host key，用来防止中间人。
+# 生成命令（在你自己机器上跑，不要连上服务器）：
+#   ssh-keyscan -p <端口> <服务器IP> 2>/dev/null
+# 把整段输出原样粘进来。
+SSH_KNOWN_HOSTS=【粘贴 ssh-keyscan 的输出】
