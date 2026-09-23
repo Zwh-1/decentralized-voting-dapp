@@ -1,0 +1,9 @@
+=== start cp 936 ===
+  upload-to-server.cmd   -          exit=255  parse_err=True  usage_cn=False
+  push-to-github.cmd     -          exit=255  parse_err=True  usage_cn=False
+  upload-to-server.cmd   deploy@h --bogus exit=255  parse_err=True  usage_cn=False
+
+=== start cp 65001 ===
+  upload-to-server.cmd   -          exit=255  parse_err=True  usage_cn=False
+  push-to-github.cmd     -          exit=255  parse_err=True  usage_cn=False
+  upload-to-server.cmd   deploy@h --bogus exit=255  parse_err=True  usage_cn=False

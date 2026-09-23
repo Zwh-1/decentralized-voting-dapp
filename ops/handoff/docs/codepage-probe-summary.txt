@@ -1,0 +1,7 @@
+=== start code page 936 ===
+  upload (no args) -> usage    exit=255 parse_errors=False chinese_ok=False
+  push (no args) -> usage      exit=255 parse_errors=False chinese_ok=False
+
+=== start code page 65001 ===
+  upload (no args) -> usage    exit=255 parse_errors=False chinese_ok=False
+  push (no args) -> usage      exit=255 parse_errors=False chinese_ok=False

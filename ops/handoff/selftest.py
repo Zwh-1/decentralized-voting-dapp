@@ -357,12 +357,30 @@ def main() -> int:
         print("\nWindows launchers (.cmd)")
 
         cmd_dir = REPO / "ops" / "handoff"
-        cmd_files = sorted(cmd_dir.glob("*.cmd"))
+        # An EXPLICIT list, not glob("*.cmd"). The earlier glob counted
+        # _q.cmd -- a throwaway probe whose only job was to measure how
+        # cmdcmdline looks under different invocation forms -- as a shipped
+        # launcher, so the suite reported "5 launchers" and checked the BOM and
+        # line endings of a file no user ever runs. Counting files that happen
+        # to share an extension is not the same as checking the files that
+        # matter; the list is written out so adding a launcher is a deliberate
+        # act rather than a side effect of dropping a file in the directory.
+        launcher_names = [
+            "_bash-path.cmd",
+            "_pause-if-doubleclicked.cmd",
+            "push-to-github.cmd",
+            "upload-to-server.cmd",
+        ]
+        cmd_files = [cmd_dir / n for n in launcher_names]
+        missing_cmd = [p.name for p in cmd_files if not p.exists()]
         r.check(
-            len(cmd_files) >= 3,
-            f"the .cmd launchers are present ({len(cmd_files)} found)",
+            not missing_cmd,
+            f"the {len(launcher_names)} .cmd launchers are present"
+            + (f" (missing: {', '.join(missing_cmd)})" if missing_cmd else ""),
         )
         for f in cmd_files:
+            if not f.exists():
+                continue
             raw = f.read_bytes()
             r.check(
                 raw[:3] != b"\xef\xbb\xbf",
@@ -374,12 +392,84 @@ def main() -> int:
                 f"{f.name}: every line ends CRLF, {lf_only} bare LF found "
                 f"(LF-only makes cmd.exe execute comment text)",
             )
+            # PURE ASCII, and this one is not cosmetic. The committed revision
+            # of these launchers carried Chinese in REM lines and echo text.
+            # cmd.exe decodes a .cmd with the console's OEM code page (936
+            # here), so the UTF-8 bytes were misread and the tail of each line
+            # was executed as a command:
+            #
+            #   'F' is not recognized as an internal or external command
+            #   'ps\handoff\' is not recognized ...
+            #
+            # Every run died with exit 255 before printing anything usable.
+            # Decoding as UTF-8 -- the old assertion -- PASSES on that file, so
+            # the suite stayed green while the launcher was completely broken.
+            # ASCII is the only encoding that parses identically under cp936
+            # and cp65001, which is why all Chinese output lives in the .sh.
             try:
-                raw.decode("utf-8")
-                decoded = True
-            except UnicodeDecodeError:
-                decoded = False
-            r.check(decoded, f"{f.name}: decodes as UTF-8 (the console here is cp65001)")
+                raw.decode("ascii")
+                is_ascii = True
+            except UnicodeDecodeError as exc:
+                is_ascii = False
+                ascii_detail = f"first non-ASCII byte at offset {exc.start}"
+            r.check(
+                is_ascii,
+                f"{f.name}: is pure ASCII (non-ASCII in a .cmd is decoded as the "
+                f"OEM code page and executed as commands)"
+                + ("" if is_ascii else f" -- {ascii_detail}"),
+            )
+
+        # ---------------------------------------------------- native .bat files
+        # These are NOT held to the ASCII rule the .cmd files are held to. They
+        # carry Chinese output by design, and that is safe only because each one
+        # runs `chcp 65001` before any Chinese line is parsed. What must hold
+        # instead:
+        #
+        #   * UTF-8 WITHOUT a BOM -- a BOM makes cmd.exe print nothing, exit 0.
+        #   * CRLF -- LF-only makes cmd.exe execute comment text as commands.
+        #   * the chcp appears before the first non-ASCII byte.
+        #
+        # The last one is the actual invariant the ASCII rule was protecting.
+        # Asserting it directly is more honest than asserting "ASCII" on a file
+        # that deliberately is not ASCII, and it catches the real failure: a
+        # .bat that prints Chinese under a cp936 console comes out as mojibake,
+        # or worse, with the tail of each line executed as a command.
+        print("\nNative .bat scripts")
+        bat_names = ["push-to-github.bat", "upload-to-server.bat"]
+        for name in bat_names:
+            f = cmd_dir / name
+            r.check(f.exists(), f"{name}: present")
+            if not f.exists():
+                continue
+            raw = f.read_bytes()
+            r.check(
+                raw[:3] != b"\xef\xbb\xbf",
+                f"{name}: no BOM (a BOM makes cmd.exe print nothing and exit 0)",
+            )
+            lf_only = raw.count(b"\n") - raw.count(b"\r\n")
+            r.check(
+                lf_only == 0,
+                f"{name}: every line ends CRLF, {lf_only} bare LF found",
+            )
+            text = raw.decode("utf-8", errors="replace")
+            chcp_at = text.find("chcp 65001")
+            # First non-ASCII character, as an index into the decoded text.
+            first_non_ascii = next(
+                (i for i, ch in enumerate(text) if ord(ch) > 127), None
+            )
+            if chcp_at == -1:
+                r.check(False, f"{name}: switches the console to UTF-8 with chcp 65001")
+            elif first_non_ascii is None:
+                r.check(
+                    True,
+                    f"{name}: chcp 65001 present (no non-ASCII output to order it against)",
+                )
+            else:
+                r.check(
+                    chcp_at < first_non_ascii,
+                    f"{name}: chcp 65001 runs before the first non-ASCII character "
+                    f"(chcp at {chcp_at}, first non-ASCII at {first_non_ascii})",
+                )
 
         # The launchers must not carry their own argument validation. An earlier
         # version duplicated the usage text and the two copies disagreed: the
@@ -417,6 +507,127 @@ def main() -> int:
                     cmd_code == sh_code,
                     f"{launcher} {label}: agrees with the .sh (both {sh_code}, launcher gave {cmd_code})",
                 )
+
+            # ------------------------------------------- native .bat variants
+            # push-to-github.bat and upload-to-server.bat are standalone
+            # reimplementations for Windows, not wrappers: they call git, tar,
+            # ssh and scp directly and never invoke bash. That is the point of
+            # them -- the .cmd launchers had to reach into Git for Windows for a
+            # bash, and every cmd/bash boundary detail (code page, BOM, line
+            # endings, %~dp0 expansion order) was a place to get it wrong.
+            #
+            # Two implementations of the same rules WILL drift, so the drift is
+            # what gets asserted: for each case the .bat must produce the same
+            # exit code as the .sh. This is the same technique already used for
+            # the .cmd launchers, and the same reason: an earlier revision had
+            # the .cmd return 0 on a usage error where the .sh returned 2.
+            #
+            # Same restriction as above -- argument-validation cases only, so
+            # nothing here touches the network or transmits anything.
+            bat_cases = [
+                ("push-to-github", [], 2),
+                ("push-to-github", ["https://github.com/x/y.git"], 1),
+                ("push-to-github", ["garbage"], 1),
+                ("upload-to-server", [], 2),
+                ("upload-to-server", ["noat"], 1),
+                ("upload-to-server", ["deploy@h", "--port", "abc"], 1),
+                ("upload-to-server", ["deploy@h", "--dest", "rel/path"], 1),
+                ("upload-to-server", ["deploy@h", "--bogus"], 1),
+                ("upload-to-server", ["deploy@h", "--dry-run"], 0),
+            ]
+            for stem, args, expected in bat_cases:
+                sh_code, _ = bash(f"ops/handoff/{stem}.sh", args, REPO)
+                bat_code = subprocess.run(
+                    ["cmd.exe", "/c", f"{stem}.bat", *args],
+                    cwd=REPO / "ops" / "handoff",
+                    capture_output=True,
+                ).returncode
+                label = " ".join(args) or "(no args)"
+                r.check(
+                    sh_code == expected,
+                    f"{stem}.sh {label}: gives {expected} (got {sh_code})",
+                )
+                r.check(
+                    bat_code == sh_code,
+                    f"{stem}.bat {label}: agrees with the .sh (both {sh_code}, .bat gave {bat_code})",
+                )
+
+            # ---------------------------------------------------- pause probe
+            # The launchers must pause for a double-click and NOT pause for a
+            # programmatic call. Only the second half is testable here: a real
+            # double-click cannot be manufactured from a test process, which is
+            # exactly why the previous cmdcmdline-matching probe shipped
+            # unverified.
+            #
+            # What IS covered: PAUSE_ALWAYS forces the pause path, so the
+            # decision variable and the `pause` call are exercised. The
+            # detection itself is measured separately (see the note printed
+            # below); a wrong answer there means a missing or spurious pause,
+            # never a wrong upload.
+            probe = REPO / "ops" / "handoff" / "_pause-if-doubleclicked.cmd"
+            r.check(
+                probe.exists(),
+                "the pause probe exists (the launchers call it by name)",
+            )
+
+            # Run through `call` with a separate `echo` statement rather than one
+            # long `cmd /c a & echo %VAR%` line. cmd expands %VAR% while parsing
+            # the whole line, which happens BEFORE the probe runs, so the naive
+            # form always printed the literal "%PAUSE_NEEDED%" and could never
+            # observe the result. Nested via a temporary .cmd instead, where the
+            # echo is its own line and expands after the call returns.
+            probe_script = REPO / "ops" / "handoff" / "_pause-probe-test.cmd"
+            probe_script.write_text(
+                "@echo off\r\n"
+                "call \"%~dp0_pause-if-doubleclicked.cmd\"\r\n"
+                "echo RESULT=[%PAUSE_NEEDED%]\r\n",
+                encoding="ascii",
+                newline="",
+            )
+            try:
+                forced = subprocess.run(
+                    ["cmd.exe", "/c", probe_script.name],
+                    cwd=REPO / "ops" / "handoff",
+                    capture_output=True,
+                    text=True,
+                    errors="replace",
+                    env={**os.environ, "PAUSE_ALWAYS": "1"},
+                )
+                r.check(
+                    "RESULT=[1]" in forced.stdout,
+                    "PAUSE_ALWAYS=1 makes the probe ask for a pause (the pause path is reachable)",
+                    forced.stdout,
+                )
+
+                # A programmatic call must not pause, or every automated caller of
+                # these launchers hangs forever. This is the failure mode that
+                # matters most, so it is asserted rather than assumed.
+                #
+                # The timeout turns a regression into a readable failure rather
+                # than a hung suite: if the probe ever asks for a pause here, the
+                # real launcher's `pause` would block on stdin forever.
+                not_forced = subprocess.run(
+                    ["cmd.exe", "/c", probe_script.name],
+                    cwd=REPO / "ops" / "handoff",
+                    capture_output=True,
+                    text=True,
+                    errors="replace",
+                    env={k: v for k, v in os.environ.items() if k != "PAUSE_ALWAYS"},
+                    timeout=120,
+                )
+                r.check(
+                    "RESULT=[]" in not_forced.stdout,
+                    "a programmatic call does NOT request a pause (automation cannot hang)",
+                    not_forced.stdout,
+                )
+            finally:
+                probe_script.unlink(missing_ok=True)
+
+            print(
+                "  note  the double-click detection itself is verified by hand, not here:\n"
+                "        a real double-click puts explorer.exe as this cmd.exe's parent,\n"
+                "        measured with a launcher left on the desktop and started by Explorer."
+            )
         else:
             print("  skip  launcher exit-code agreement (not Windows)")
 
