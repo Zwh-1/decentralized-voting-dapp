@@ -85,6 +85,19 @@ fi
 # the path nginx's configuration includes. So the file is moved into place first
 # and restored on failure -- there is no way to test a file at a path nginx is
 # not reading.
+#
+# The test runs in a throwaway container rather than by `exec` into the running
+# one. `exec` cannot work on the first deploy of a host: nginx is not running
+# then, and it cannot be running, because `nginx.conf` includes the very file
+# this script is about to write -- with an exact path, not a glob, so a missing
+# file makes nginx refuse to start. With `exec`, the first `deploy.sh` on a fresh
+# host died at the switch step with "nginx -t failed after rendering", and so did
+# every retry: a deadlock with no way out that did not involve hand-writing the
+# generated file.
+#
+# A throwaway container gets the same image and the same mounts, so it reads the
+# same rendered configuration: the check is exactly as strong, and it works
+# whether or not the stack has been started yet.
 backup=""
 if [ -f "$UPSTREAM_FILE" ]; then
   backup="$(mktemp)"
@@ -96,7 +109,7 @@ chmod 0644 "$UPSTREAM_FILE"
 
 log "rendered upstream -> web-$slot"
 
-if ! docker compose $COMPOSE_FILES exec -T "$NGINX_SERVICE" nginx -t >/dev/null 2>&1; then
+if ! docker compose $COMPOSE_FILES run --rm --no-deps -T "$NGINX_SERVICE" nginx -t >/dev/null 2>&1; then
   if [ -n "$backup" ]; then
     cp "$backup" "$UPSTREAM_FILE"
     log "nginx rejected the rendered upstream; restored the previous one"
@@ -113,8 +126,17 @@ fi
 # `reload` and not `restart`. Reload starts new workers and lets old ones finish
 # the requests they have already accepted; restart drops every connection in
 # flight. This single word is what "zero downtime" rests on.
-if ! docker compose $COMPOSE_FILES exec -T "$NGINX_SERVICE" nginx -s reload; then
-  die "nginx reload failed; the previous workers are still serving web-$(read_state active-slot)"
+#
+# Reloading is the one step that needs nginx to be *running*, so it is the one
+# step that has to ask. On a host's first render there is no nginx process yet:
+# the file written above is what lets it start. Failing there would put the
+# deadlock back, one step later.
+if docker compose $COMPOSE_FILES ps --status running --services 2>/dev/null |
+  grep -qx "$NGINX_SERVICE"; then
+  if ! docker compose $COMPOSE_FILES exec -T "$NGINX_SERVICE" nginx -s reload; then
+    die "nginx reload failed; the previous workers are still serving web-$(read_state active-slot)"
+  fi
+  log "nginx reloaded, traffic now goes to web-$slot"
+else
+  log "nginx is not running yet; it will read this upstream when it starts"
 fi
-
-log "nginx reloaded, traffic now goes to web-$slot"

@@ -58,6 +58,31 @@ fi
 
 expected=${EXPECTED_STATUS:-200}
 timeout_per_request=${REQUEST_TIMEOUT:-5}
+
+# Whether curl verifies the certificate. It does, by default: a probe that
+# accepts any certificate is not evidence of anything.
+#
+# The exception is real and predictable, though. A deployment reachable only at a
+# bare IP address -- or at a domain whose certificate has not been issued yet --
+# has no trusted chain to verify against, so EVERY request fails verification and
+# the observation window reports an outage that is not happening. That failure is
+# worse than the one the check guards against: it fires after traffic has already
+# moved, and deploy.sh treats it as a failed release and rolls back. The result is
+# a deployment that can never succeed for a reason that has nothing to do with
+# the release.
+#
+# Set INSECURE_TLS=1 for those deployments. The probe then proves reachability
+# and nothing about identity -- the same trade `http_2xx_insecure` in
+# ops/blackbox/blackbox.yml documents for the external scrape. Unset it once a
+# trusted certificate is in place; the summary says when it was set.
+#
+# An array rather than a string so the flag cannot be split or dropped by
+# word-splitting, and so `set -u` has nothing to complain about: it always holds
+# at least the -s below.
+curl_args=(-s)
+if [ "${INSECURE_TLS:-}" = "1" ]; then
+  curl_args+=(-k)
+fi
 started=$(date +%s)
 deadline=$((started + duration))
 
@@ -73,7 +98,7 @@ while :; do
   [ "$now" -ge "$deadline" ] && break
 
   total=$((total + 1))
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time "$timeout_per_request" "$url" || true)
+  code=$(curl "${curl_args[@]}" -o /dev/null -w '%{http_code}' --max-time "$timeout_per_request" "$url" || true)
 
   if [ "$code" = "$expected" ]; then
     succeeded=$((succeeded + 1))
@@ -107,6 +132,13 @@ printf '{"event":"probe","url":"%s","total":%d,"succeeded":%d,"failed":%d,"maxCo
   "$url" "$total" "$succeeded" "$failed" "$max_consecutive" "$elapsed"
 if [ -n "$first_failure_at" ]; then
   printf ',"firstFailureAtSeconds":%d' "$first_failure_at"
+fi
+# Recorded in the artifact, not just in the caller's shell: a measurement made
+# with certificate verification off is a weaker claim, and the summary is what
+# gets pasted into the runbook and read months later by someone who did not run
+# it. Absent means verification was on.
+if [ "${INSECURE_TLS:-}" = "1" ]; then
+  printf ',"insecureTls":true'
 fi
 printf '}\n'
 

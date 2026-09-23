@@ -25,6 +25,19 @@
 #   resource caps  a container with no memory limit can take the host down with
 #                  it, and the OOM killer does not consult anyone first.
 
+# ---------------------------------------------------------------------------
+# The same scrub as `docker-compose.yml`'s `x-app-env-scrub`, repeated because a
+# YAML anchor belongs to the file that defines it: `web-blue` and `web-green` are
+# declared here, so they cannot reach the anchor in the base file. Keep the two
+# lists identical -- a key added to one and not the other is a credential riding
+# into a container that has no use for it.
+# ---------------------------------------------------------------------------
+x-app-env-scrub: &app-env-scrub
+  MYSQL_ROOT_PASSWORD: ""
+  MYSQLD_EXPORTER_PASSWORD: ""
+  GRAFANA_ADMIN_PASSWORD: ""
+  SMTP_PASSWORD: ""
+
 services:
   # ---------------------------------------------------------------------------
   # The two slots. Identical except for their name.
@@ -38,12 +51,42 @@ services:
   web-blue:
     image: ${WEB_IMAGE:?WEB_IMAGE must be set to the registry image, e.g. user/voting-web}
     restart: unless-stopped
+    # -------------------------------------------------------------------------
+    # `web-blue` and `web-green` are new service names, so they do NOT inherit
+    # the base file's `web` service: compose merges by service name, and
+    # `web-blue` is not `web`. Without this line both slots that serve every
+    # production request started with no RPC_URL, no CHAIN_ID and no
+    # DATABASE_URL -- the app fell back to 127.0.0.1:8545 and chain 31337, which
+    # renders a complete-looking page with zero polls, and /api/health answered
+    # 200 with status "degraded", so the health gate passed and the deploy
+    # reported success.
+    #
+    # `required: false` only so that `compose config` still validates on a fresh
+    # clone with no .env, which is what the CI isolation check does. The two
+    # `${...:?}` entries below are what turn a genuinely missing .env into a
+    # hard failure instead of that silent half-working state.
+    # -------------------------------------------------------------------------
+    env_file:
+      - path: .env
+        required: false
     environment:
+      <<: *app-env-scrub
       # Written explicitly rather than left to the image default. Both slots must
       # have it off: the indexer is a single cursor over one chain, and three
       # processes advancing it independently would interleave writes and corrupt
       # the index. In production exactly one `indexer` service owns that cursor.
       INDEXER_ENABLED: "false"
+      # Listed only to be required. The values themselves arrive through
+      # `env_file`, so this asserts at interpolation time rather than becoming a
+      # second owner of the settings: `${VAR:?}` makes `compose config` refuse to
+      # render when /srv/voting/.env is absent, which is the loud failure the
+      # `env_file` line cannot produce on its own.
+      #
+      # DATABASE_URL is deliberately NOT required: running without an index is a
+      # documented, supported mode -- reads fall back to the chain and the
+      # consistency badge says so -- and requiring it would break that.
+      RPC_URL: ${RPC_URL:?RPC_URL must be set in /srv/voting/.env}
+      CHAIN_ID: ${CHAIN_ID:?CHAIN_ID must be set in /srv/voting/.env}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -60,8 +103,17 @@ services:
   web-green:
     image: ${WEB_IMAGE:?WEB_IMAGE must be set to the registry image, e.g. user/voting-web}
     restart: unless-stopped
+    # Identical to `web-blue`, and it has to be: the two slots are swapped by
+    # traffic, so a setting present on one and missing on the other is a bug that
+    # only appears after the next deploy moves the upstream.
+    env_file:
+      - path: .env
+        required: false
     environment:
+      <<: *app-env-scrub
       INDEXER_ENABLED: "false"
+      RPC_URL: ${RPC_URL:?RPC_URL must be set in /srv/voting/.env}
+      CHAIN_ID: ${CHAIN_ID:?CHAIN_ID must be set in /srv/voting/.env}
     depends_on:
       migrate:
         condition: service_completed_successfully

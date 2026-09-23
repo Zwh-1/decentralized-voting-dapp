@@ -21,7 +21,22 @@ ORIGINALS = {p: p.read_text(encoding="utf-8") for p in (CI, REL, ROLL)}
 
 def restore() -> None:
     for path, text in ORIGINALS.items():
-        path.write_text(text, encoding="utf-8")
+        write_lf(path, text)
+
+
+def write_lf(path: pathlib.Path, text: str) -> None:
+    """Write workflow text back with LF endings, whatever the platform default is.
+
+    These cases mutate the REAL workflow files (the checker reads them from the
+    repository, so a copy would not exercise it) and restore them afterwards.
+    Without `newline="\n"`, Python's text mode translates every `\\n` to `\\r\\n`
+    on Windows, so the restore does not restore: the tree comes back dirty with
+    CRLF where `.gitattributes` says `eol=lf`, `git diff` shows nothing while
+    `git status` shows three modified files, and the next `prettier --check`
+    fails on files this test touched but nobody edited. A test that leaves the
+    tree in a state it cannot explain is worse than no test.
+    """
+    path.write_text(text, encoding="utf-8", newline="\n")
 
 
 def check() -> tuple[int, list[str]]:
@@ -38,7 +53,7 @@ def check() -> tuple[int, list[str]]:
 def rewrite(path: pathlib.Path, old: str, new: str) -> None:
     text = ORIGINALS[path].replace(old, new)
     assert text != ORIGINALS[path], f"no change made to {path.name}: {old!r} not found"
-    path.write_text(text, encoding="utf-8")
+    write_lf(path, text)
 
 
 def drop_deploy_lock() -> None:
@@ -60,7 +75,7 @@ def drop_deploy_lock() -> None:
     del lines[start : start + 3]
     mutated = "".join(lines)
     assert mutated != ORIGINALS[REL], "the deploy lock block was not found"
-    REL.write_text(mutated, encoding="utf-8")
+    write_lf(REL, mutated)
 
 
 CASES = [

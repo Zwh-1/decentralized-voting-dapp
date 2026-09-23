@@ -34,9 +34,14 @@ readonly EXIT_USAGE=2
 # deploy-env 只传 server.env 这一个文件，不传整个目录：同目录下的
 # github-actions.txt 是"在 GitHub 网页上填什么"的清单，与服务器无关，
 # 传上去只会让人在服务器上看到一份用不上的文档。目录放什么、传什么是两件事。
+#
+# docker-compose.external-db.yml 在里面，因为它是"用服务器上已有的 MySQL"那条路
+# 要用的覆盖文件。不上传的话，选了那条路的人会从提示里读到一个服务器上不存在的
+# 文件名——而那是他唯一拿到的包。
 readonly PAYLOAD=(
   docker-compose.yml
   docker-compose.prod.yml
+  docker-compose.external-db.yml
   ops
   deploy-env/server.env
   .env.example
@@ -119,21 +124,39 @@ repo_root=$(git rev-parse --show-toplevel 2>/dev/null) ||
   die "当前目录不是一个 git 仓库。请在仓库内运行本脚本。"
 cd "$repo_root"
 
-# --- 1. 这些路径都存在吗 ----------------------------------------------------
+# --- 1. 这些路径都存在吗，而且都会被 git 打包吗 ------------------------------
 # 先收集，缺任何一个就一次全报出来，而不是传一半才发现。
+#
+# 两个问题必须一起问，因为传输用的是 `git archive HEAD`，它只看**已提交**内容。
+# 只问"磁盘上存在吗"会漏掉一种情况：路径在工作区里但从未提交。那时 git archive
+# 会以 128 退出，打印 "fatal: pathspec ... did not match any files" —— 一句完全
+# 没提到真正原因（忘了 git add）的话，而且退出码也不是本脚本自己的 1。
+# 这里用与打包相同的口径再问一遍，把那个原因直接说出来。
 missing=()
+uncommitted=()
 present=()
 for item in "${PAYLOAD[@]}"; do
-  if [ -e "$item" ]; then
-    present+=("$item")
-  else
+  if [ ! -e "$item" ]; then
     missing+=("$item")
+  elif [ -z "$(git ls-tree -r --name-only HEAD -- "$item")" ]; then
+    uncommitted+=("$item")
+  else
+    present+=("$item")
   fi
 done
 
 if [ ${#missing[@]} -gt 0 ]; then
   printf '仓库里缺少下列路径：\n' >&2
   printf '  %s\n' "${missing[@]}" >&2
+fi
+
+if [ ${#uncommitted[@]} -gt 0 ]; then
+  printf '下列路径还没有提交，因此不会被打包：\n' >&2
+  printf '  %s\n' "${uncommitted[@]}" >&2
+  printf '  git archive 只打包已提交内容：先 git add 并提交，再重试。\n' >&2
+fi
+
+if [ ${#missing[@]} -gt 0 ] || [ ${#uncommitted[@]} -gt 0 ]; then
   die "无法继续。"
 fi
 
@@ -213,6 +236,16 @@ printf '\n完成。包已传到 %s:/tmp/voting-upload.tar\n' "$target"
 
 # --- 5. 告诉人下一步 --------------------------------------------------------
 # 刻意把这部分做成"给人看的提示"而不是"自动执行"。脚本到此为止。
+#
+# 这段文字里的每一步都在服务器上被验证过，包括失败的那两种做法：
+#   * 原来写的 `docker compose ... build` 在这台主机上什么也不建——包里没有
+#     web/ 源码，compose 文件里也没有 build: 段，它只打印 No services to build；
+#   * 原来写的 `cp .env.example .env` 会缺 WEB_IMAGE 与 MYSQL_*，生产 compose
+#     因此拒绝渲染（${WEB_IMAGE:?}），照做的人看到的是一个看不懂的报错。
+# 提示文字是这套交付里唯一会被人照抄的东西，所以它必须等于真的能跑通的那条路。
+#
+# 注意：这里是未加引号的 heredoc，$dest 会被展开。正文里不要出现反引号、
+# $( ) 或 ${ }，否则会被 shell 执行或报 bad substitution。
 cat <<EOF
 
 下一步（请自己登录服务器执行）：
@@ -226,22 +259,53 @@ cat <<EOF
   2. 创建生产 .env（**这个文件不走上传**，里面有真实口令）：
 
        cd $dest
-       cp .env.example .env
+       cp deploy-env/server.env .env        # 不是 .env.example
        chmod 600 .env
-       # 然后编辑 .env，填上数据库口令等。字段说明见 deploy-env/server.env
+       # 把 .env 里每个「你定」换成真值。RPC_URL / CHAIN_ID / WEB_IMAGE 必须填：
+       # 生产 compose 把前两个声明成必填变量，缺一个就拒绝渲染整份配置。
+       # .env.example 只是仓库内的最小示例，没有 WEB_IMAGE 与 MYSQL_*，照它填起不来。
 
-  3. 构建镜像并启动：
+  3. 镜像：**不要在服务器上构建**。
+
+       这个包里没有 web/ 源码，两个 compose 文件里也没有 build: 段，所以
+       docker compose build 什么都不建（只会打印 No services to build）。
+       镜像只有两个来源：
+
+         a) CI 推送：release.yml 成功后打的是 sha-<12位> 这种不可变标签；
+         b) 在另一台有完整检出的机器上构建并推送：
+
+              docker build -f web/Dockerfile -t <仓库>/voting-web:<tag> .
+              docker push <仓库>/voting-web:<tag>
+
+  4. 第一次起栈（顺序不能反）：
+
+       nginx 的配置用精确路径 include upstream.conf，该文件不存在时 nginx 直接
+       拒绝启动，而它由渲染脚本产生。所以先渲染，再起栈：
 
        cd $dest
-       docker compose -f docker-compose.yml -f docker-compose.prod.yml build
-       docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+       ./ops/nginx/render-upstream.sh blue
+       WEB_IMAGE=<仓库>/voting-web WEB_IMAGE_TAG=<tag> \\
+         docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
-  4. 看状态：
+  5. 之后每次发布都走发布脚本（状态文件与上游文件都由它在服务器上写，
+     不要再手动 up -d 绕过它）：
+
+       cd $dest
+       PUBLIC_HEALTH_URL=https://<域名>/api/health \\
+         WEB_IMAGE=<仓库>/voting-web ./ops/deploy/deploy.sh <tag>
+
+       PUBLIC_HEALTH_URL 必须给：默认探的是 https://localhost/api/health，而你
+       证书上的名字是域名，curl 过不了校验，部署会在切完流量之后报观察窗失败。
+       它只从 shell 环境读，不读 .env。
+
+  6. 看状态：
 
        docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
-       curl -sS localhost/api/health
+       curl -sS localhost/api/health        # 期望 200；索引不可用时状态为 degraded
 
 注意：**不要**使用 docker-compose.override.yml，它只用于本地开发。
 生产命令必须显式写出 -f docker-compose.yml -f docker-compose.prod.yml 两个文件。
+要用服务器上已有的 MySQL（不起 mysql 容器），再加上
+-f docker-compose.external-db.yml，并按该文件头部列出的三条前提先把 MySQL 配好。
 
 EOF

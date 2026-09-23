@@ -14,9 +14,22 @@
 真实口令必须由你在服务器上就地创建，不经过聊天记录、不经过 scp。
 原因见 `ops/handoff/upload-to-server.sh` 里那段凭据检查的注释。
 
-字段名以 `docker-compose.yml` 实际读取的为准，21 个字段全部验证过：
-把占位符换成真值后跑 `docker compose config`，渲染结果里**没有一个字段落空**，
-而且故意去掉 `WEB_IMAGE` 会让它报错——证明检查不是空转。
+字段名以 `docker-compose.yml` / `docker-compose.prod.yml` 实际读取的为准，20 个字段
+全部验证过：把占位符换成真值后跑
+`docker compose -f docker-compose.yml -f docker-compose.prod.yml config`，
+渲染出的容器环境里**每个字段都带着这里的值**（20/20），而故意去掉 `WEB_IMAGE` 会让
+它直接报错——证明这个检查不是空转。
+
+验证记录（2026-09-23，改掉两处空转字段之后重跑）：
+
+- `MYSQL_ROOT_PASSWORD` / `MYSQL_DATABASE` / `MYSQL_USER` / `MYSQL_PASSWORD`
+  在这之前是**空转**的：compose 里写死了 root/voting/voting，模块怎么填都不生效。
+  现在它们由 `${...}` 插值进 mysql 服务，填什么就是什么，mysql 健康检查也读同一个值。
+- `LOG_LEVEL` 已从模板里删除：`web/` 下没有任何一处读它（同样理由删过旧的
+  `VOTING_OWNER`）。模板里留一个不生效的字段，等于让人以为自己配上了。
+- `RPC_URL` / `CHAIN_ID` / `WEB_IMAGE` 是**必填**：生产 compose 写成
+  `${VAR:?}`，缺任何一个都拒绝渲染。这是刻意的——否则一个丢了 .env 的服务器会安静
+  退回 127.0.0.1:8545 与 chain 31337，页面照常打开而投票数恒为 0。
 
 ## 为什么单独放一个目录
 

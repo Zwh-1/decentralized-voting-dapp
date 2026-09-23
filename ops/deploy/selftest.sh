@@ -73,6 +73,10 @@ assert_contains() {
   if printf '%s' "$3" | grep -qF -- "$2"; then ok "$1"; else bad "$1 (no match for [$2] in output)"; fi
 }
 
+assert_lacks_in_output() {
+  if printf '%s' "$3" | grep -qF -- "$2"; then bad "$1 (found [$2] in output)"; else ok "$1"; fi
+}
+
 # Captures a script's exit code and combined output without letting `set -e`
 # abort the harness on the failures we are deliberately provoking.
 RC=0
@@ -101,6 +105,18 @@ case "$*" in
   *" up -d"*)            [ "${FAKE_FAIL_UP:-0}" = "1" ] && exit 1 || exit 0 ;;
   *" stop "*)            [ "${FAKE_FAIL_STOP:-0}" = "1" ] && exit 1 || exit 0 ;;
   *" stop"*)             [ "${FAKE_FAIL_STOP:-0}" = "1" ] && exit 1 || exit 0 ;;
+  # `compose ps --status running --services` asks which services are up. It is how
+  # render-upstream.sh decides whether there is a running nginx to reload: on a
+  # host's first render there is none, and the render must still succeed.
+  # `${VAR+x}` again, so a case can say "nothing is running" rather than "unset".
+  *" ps --status running --services"*)
+    if [ -n "${FAKE_RUNNING_SERVICES+x}" ]; then
+      printf '%s\n' "${FAKE_RUNNING_SERVICES}"
+    else
+      printf 'nginx\n'
+    fi
+    exit 0
+    ;;
   # `compose ps -q <svc>` asks whether the slot is running at all. Empty output
   # means "not running", which is how rollback.sh decides between its fast path
   # and starting the slot.
@@ -161,7 +177,7 @@ FAKE_CURL
 
   unset FAKE_FAIL_PULL FAKE_FAIL_MIGRATE FAKE_FAIL_UP FAKE_FAIL_STOP \
     FAKE_HEALTH FAKE_PS_ID FAKE_RUNNING_IMAGE FAKE_NGINX_TEST_FAIL \
-    FAKE_NGINX_RELOAD_FAIL || true
+    FAKE_NGINX_RELOAD_FAIL FAKE_RUNNING_SERVICES || true
 }
 
 upstream_points_at() {
@@ -302,7 +318,26 @@ assert_eq "exit 2 for a slot that is not blue or green" "2" "$RC"
 assert_lacks "nginx was never touched" "nginx -t" "$FAKE_LOG"
 
 # ---------------------------------------------------------------------------
-printf '\ncase 9: the health gate on its own\n'
+printf '\ncase 9: the first render on a host where nginx has never started\n'
+new_case
+# The deadlock this covers: nginx.conf includes upstream.conf by an exact path, so
+# nginx cannot start before that file exists -- and this script is the only thing
+# that writes it. Validating through `exec` into a running nginx therefore made
+# the first deploy on a fresh host impossible, and every retry failed the same
+# way. The render has to succeed with nothing running, and must not claim to have
+# reloaded anything.
+export FAKE_RUNNING_SERVICES=""
+run "$here/../nginx/render-upstream.sh" blue
+unset FAKE_RUNNING_SERVICES
+assert_eq "it exits 0 with no nginx running" "0" "$RC"
+if upstream_points_at blue; then ok "the upstream was written for web-blue"; else bad "the upstream was not written"; fi
+assert_has "the config was still validated, in a throwaway container" "nginx -t" "$FAKE_LOG"
+assert_has "it validated via run, not by exec into a live server" "run --rm --no-deps" "$FAKE_LOG"
+assert_lacks "it did not reload a server that is not running" "nginx -s reload" "$FAKE_LOG"
+assert_contains "it says so instead of pretending" "not running yet" "$OUT"
+
+# ---------------------------------------------------------------------------
+printf '\ncase 10: the health gate on its own\n'
 new_case
 export FAKE_HEALTH=ok
 run "$here/health-gate.sh" "http://stub.invalid/api/health" 1
@@ -321,7 +356,7 @@ assert_eq "exit 2 when the budget is not a number" "2" "$RC"
 assert_has "the gate discards the response body" "-o /dev/null" "$FAKE_LOG"
 
 # ---------------------------------------------------------------------------
-printf '\ncase 10: the in-network probe path\n'
+printf '\ncase 11: the in-network probe path\n'
 new_case
 # PROBE_VIA makes the gate run the request inside the target container, because
 # `web-blue`/`web-green` do not resolve from the host. The default stub already
@@ -344,7 +379,7 @@ assert_has "it probed inside the target container" "exec -T" "$FAKE_LOG"
 unset FAKE_EXEC_STATUS
 
 # ---------------------------------------------------------------------------
-printf '\ncase 11: probe-loop counts failures and gates on them\n'
+printf '\ncase 12: probe-loop counts failures and gates on them\n'
 new_case
 # No failures: the whole window succeeds. Run directly rather than in a subshell,
 # so the harness captures the exit code and output it is about to assert on.
@@ -369,8 +404,27 @@ assert_eq "exit 2 when the duration is not a number" "2" "$RC"
 run "$here/probe-loop.sh"
 assert_eq "exit 2 when called without arguments" "2" "$RC"
 
+# The certificate exception. A deployment reachable only at a bare IP has no
+# trusted chain to verify against, so verification fails on every request and the
+# window reports an outage that is not happening -- after traffic has moved, which
+# makes deploy.sh roll back a release that was working. INSECURE_TLS=1 is the way
+# out, and it must be visible in the artifact rather than only in the caller's
+# shell, so the summary says so.
+assert_lacks "curl verifies the certificate by default" "curl -s -k " "$FAKE_LOG"
+export FAKE_HEALTH=ok
+run env INSECURE_TLS=1 "$here/probe-loop.sh" "http://stub.invalid/api/health" 2 1
+assert_eq "exit 0 with verification disabled" "0" "$RC"
+assert_has "curl is told to accept the certificate" "curl -s -k " "$FAKE_LOG"
+assert_contains "the summary records that the measurement was weakened" \
+  '"insecureTls":true' "$OUT"
+# And a normal run must not carry that field, or "weakened" stops meaning
+# anything: the point of recording it is that its absence is informative too.
+run "$here/probe-loop.sh" "http://stub.invalid/api/health" 2 1
+assert_lacks_in_output "a verified run carries no insecureTls field" '"insecureTls"' "$OUT"
+unset FAKE_HEALTH
+
 # ---------------------------------------------------------------------------
-printf '\ncase 12: publish-version escapes a hostile label value\n'
+printf '\ncase 13: publish-version escapes a hostile label value\n'
 new_case
 run "$here/publish-version.sh" 'ab"c' 'we"b'
 assert_eq "exits 0" "0" "$RC"
@@ -378,7 +432,7 @@ assert_has "the quote is escaped, keeping the payload parseable" \
   'voting_deploy_info{tag="ab\"c",slot="we\"b"} 1' "$STATE_DIR/textfile/voting_deploy.prom"
 
 # ---------------------------------------------------------------------------
-printf '\ncase 13: the two publish modes write different files\n'
+printf '\ncase 14: the two publish modes write different files\n'
 new_case
 run "$here/publish-version.sh" --expected attempted tried
 assert_eq "the expected mode exits 0" "0" "$RC"

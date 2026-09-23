@@ -49,7 +49,11 @@ REM deploy-env sends server.env ALONE, not the whole directory: the sibling
 REM github-actions.txt is a checklist for the GitHub web UI, irrelevant to the
 REM server, and shipping it only puts an unusable document on the box. What a
 REM directory holds and what gets transmitted are two different questions.
-set "PAYLOAD=docker-compose.yml docker-compose.prod.yml ops deploy-env/server.env .env.example"
+REM
+REM docker-compose.external-db.yml is in the payload because it is the overlay
+REM that the "use the MySQL already on this host" path needs. Without it, the
+REM instructions name a file the operator does not have.
+set "PAYLOAD=docker-compose.yml docker-compose.prod.yml docker-compose.external-db.yml ops deploy-env/server.env .env.example"
 
 REM --- arguments -------------------------------------------------------------
 if "%~1"=="" goto :usage
@@ -235,6 +239,8 @@ if exist "%TMPTAR%" del "%TMPTAR%" >nul 2>&1
 git archive --format=tar --output="%TMPTAR%" HEAD -- %PRESENT%
 if errorlevel 1 (
   echo 错误：git archive 失败。>&2
+  echo 最常见的原因是某个 payload 路径还没有提交：git archive 只打包已提交内容，>&2
+  echo 所以先 git add 并提交，再重试。>&2
   set "RC=1"
   goto :end
 )
@@ -289,6 +295,14 @@ echo 完成。包已传到 %TARGET%:/tmp/voting-upload.tar
 
 REM --- 5. tell the operator what to do next ----------------------------------
 REM Kept as instructions rather than auto-executed. The script stops here.
+REM
+REM Keep this identical to the .sh side: the two implementations of one handoff
+REM must not drift, and this text is the only part of the delivery people copy
+REM verbatim. Both failures that were fixed here were reproduced on the server:
+REM `docker compose build` builds nothing in this payload (no web\ source, no
+REM build: key -- it prints "No services to build"), and `cp .env.example .env`
+REM leaves out WEB_IMAGE and MYSQL_*, which makes the production compose file
+REM refuse to render at all.
 echo.
 echo 下一步（请自己登录服务器执行）：
 echo.
@@ -301,23 +315,54 @@ echo.
 echo   2. 创建生产 .env（这个文件不走上传，里面有真实口令）：
 echo.
 echo        cd %DEST%
-echo        cp .env.example .env
+echo        cp deploy-env/server.env .env        # 不是 .env.example
 echo        chmod 600 .env
-echo        # 然后编辑 .env，填上数据库口令等。字段说明见 deploy-env/server.env
+echo        # 把 .env 里每个「你定」换成真值。RPC_URL / CHAIN_ID / WEB_IMAGE 必须填：
+echo        # 生产 compose 把前两个声明成必填变量，缺一个就拒绝渲染整份配置。
+echo        # .env.example 只是最小示例，没有 WEB_IMAGE 与 MYSQL_*，照它填起不来。
 echo.
-echo   3. 构建镜像并启动：
+echo   3. 镜像：不要在服务器上构建。
+echo.
+echo        这个包里没有 web\ 源码，两个 compose 文件里也没有 build: 段，所以
+echo        docker compose build 什么都不建（只会打印 No services to build）。
+echo        镜像只有两个来源：
+echo.
+echo          a）CI 推送：release.yml 成功后打的是 sha-^<12位^> 这种不可变标签；
+echo          b）在另一台有完整检出的机器上构建并推送：
+echo.
+echo               docker build -f web/Dockerfile -t ^<仓库^>/voting-web:^<tag^> .
+echo               docker push ^<仓库^>/voting-web:^<tag^>
+echo.
+echo   4. 第一次起栈（顺序不能反）：
+echo.
+echo        nginx 的配置用精确路径 include upstream.conf，该文件不存在时 nginx
+echo        直接拒绝启动，而它由渲染脚本产生。所以先渲染，再起栈：
 echo.
 echo        cd %DEST%
-echo        docker compose -f docker-compose.yml -f docker-compose.prod.yml build
-echo        docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+echo        ./ops/nginx/render-upstream.sh blue
+echo        WEB_IMAGE=^<仓库^>/voting-web WEB_IMAGE_TAG=^<tag^> \
+echo          docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 echo.
-echo   4. 看状态：
+echo   5. 之后每次发布都走发布脚本（状态文件与上游文件都由它在服务器上写，
+echo      不要再手动 up -d 绕过它）：
+echo.
+echo        cd %DEST%
+echo        PUBLIC_HEALTH_URL=https://^<域名^>/api/health \
+echo          WEB_IMAGE=^<仓库^>/voting-web ./ops/deploy/deploy.sh ^<tag^>
+echo.
+echo        PUBLIC_HEALTH_URL 必须给：默认探的是 https://localhost/api/health，而
+echo        你证书上的名字是域名，curl 过不了校验，部署会在切完流量之后报观察窗
+echo        失败。它只从 shell 环境读，不读 .env。
+echo.
+echo   6. 看状态：
 echo.
 echo        docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
-echo        curl -sS localhost/api/health
+echo        curl -sS localhost/api/health        # 期望 200；索引不可用时为 degraded
 echo.
 echo 注意：不要使用 docker-compose.override.yml，它只用于本地开发。
 echo 生产命令必须显式写出 -f docker-compose.yml -f docker-compose.prod.yml 两个文件。
+echo 要用服务器上已有的 MySQL（不起 mysql 容器），再加上
+echo -f docker-compose.external-db.yml，并按该文件头部列出的三条前提先把 MySQL 配好。
 goto :end
 
 :usage

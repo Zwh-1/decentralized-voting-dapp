@@ -40,6 +40,22 @@ PROD = ["docker", "compose", "-f", "docker-compose.yml", "-f", "docker-compose.p
 
 PROD_SERVICES = {"mysql", "migrate", "web-blue", "web-green", "nginx", "indexer"}
 
+# Values the production file set demands at interpolation time.
+#
+# `docker-compose.prod.yml` writes `${RPC_URL:?}` and `${CHAIN_ID:?}` on both web
+# slots, so compose refuses to render at all when they are absent. That is
+# deliberate -- a server whose .env went missing would otherwise start a slot
+# that reads 127.0.0.1:8545 on chain 31337 and still passes its health gate.
+# The checker therefore has to supply them, exactly as a real host's .env does.
+#
+# They are obviously fake on purpose: this checker asserts the SHAPE of the
+# rendered config and must never depend on, or encode, a real endpoint.
+REQUIRED_ENV = {
+    "WEB_IMAGE": "example/voting-web",
+    "RPC_URL": "https://rpc.invalid",
+    "CHAIN_ID": "11155111",
+}
+
 
 def render(args: list[str]) -> str:
     """Render the effective configuration for the given file set."""
@@ -49,7 +65,7 @@ def render(args: list[str]) -> str:
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env={**__import__("os").environ, "WEB_IMAGE": "example/voting-web"},
+        env={**__import__("os").environ, **REQUIRED_ENV},
     )
     if result.returncode != 0:
         raise SystemExit(f"compose config failed for {' '.join(args)}:\n{result.stderr}")
@@ -63,7 +79,7 @@ def services(args: list[str]) -> set[str]:
         capture_output=True,
         text=True,
         encoding="utf-8",
-        env={**__import__("os").environ, "WEB_IMAGE": "example/voting-web"},
+        env={**__import__("os").environ, **REQUIRED_ENV},
     )
     if result.returncode != 0:
         raise SystemExit(f"compose config --services failed:\n{result.stderr}")

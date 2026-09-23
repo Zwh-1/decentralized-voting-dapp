@@ -1,1 +1,6 @@
-[]
+[
+  {
+    "targets": ["https://106.14.239.194/api/health"],
+    "labels": { "scope": "external" }
+  }
+]

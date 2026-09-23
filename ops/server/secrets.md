@@ -71,25 +71,44 @@ old one, because there is nothing left in the bundle that reads the environment.
 Read by compose for both `env_file:` and `${VAR}` interpolation. Never committed;
 `ops/server/README.md` creates it.
 
-| Name                                                            | Purpose                                                                                                                                                                  |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `RPC_URL`                                                       | Server-side RPC. **Not** the same value as `NEXT_PUBLIC_SEPOLIA_RPC_URL` — see the distinction in `docker-compose.override.yml`.                                         |
-| `CHAIN_ID`                                                      | 11155111 for Sepolia.                                                                                                                                                    |
-| `CONFIRMATIONS`                                                 | How far behind the head the indexer stays.                                                                                                                               |
-| `CHUNK_BLOCKS`                                                  | Blocks per `eth_getLogs` call.                                                                                                                                           |
-| `POLL_INTERVAL_MS`                                              | The indexer's loop interval.                                                                                                                                             |
-| `INDEXER_ENABLED`                                               | `false` on every container. The `indexer` service is the single drainer; a second one races the same cursor.                                                             |
-| `LOG_LEVEL`                                                     | —                                                                                                                                                                        |
-| `DATABASE_URL`                                                  | `mysql://voting:<password>@mysql:3306/voting` — the compose service name, not a hostname.                                                                                |
-| `MYSQL_ROOT_PASSWORD`                                           | Consumed by the `mysql` image to initialise the database.                                                                                                                |
-| `MYSQL_DATABASE`                                                | `voting`.                                                                                                                                                                |
-| `MYSQL_USER`                                                    | `voting`.                                                                                                                                                                |
-| `MYSQL_PASSWORD`                                                | The application's password. Must match the one in `DATABASE_URL`.                                                                                                        |
-| `MYSQLD_EXPORTER_PASSWORD`                                      | For the read-only `exporter` account. Deliberately a separate, narrower credential than the application's — see below.                                                   |
-| `SMTP_SMARTHOST`, `SMTP_FROM`, `SMTP_USERNAME`, `SMTP_PASSWORD` | Alertmanager's mail relay. `alertmanager.yml.tmpl` is rendered by `ops/alertmanager/entrypoint.sh`, which fails immediately if any of these is empty.                    |
-| `ALERT_EMAIL_TO`                                                | Where alerts go.                                                                                                                                                         |
-| `GRAFANA_ADMIN_PASSWORD`                                        | Grafana's admin login.                                                                                                                                                   |
-| `WEB_IMAGE`                                                     | `<registry>/voting-web`. Required — `docker-compose.prod.yml` uses `${WEB_IMAGE:?}`, so a missing value is a startup error rather than a silent pull of a wrong default. |
+| Name                                                            | Purpose                                                                                                                                                                                                                                                               |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RPC_URL`                                                       | Server-side RPC. **Not** the same value as `NEXT_PUBLIC_SEPOLIA_RPC_URL` — see the distinction in `docker-compose.override.yml`.                                                                                                                                      |
+| `CHAIN_ID`                                                      | 11155111 for Sepolia.                                                                                                                                                                                                                                                 |
+| `CONFIRMATIONS`                                                 | How far behind the head the indexer stays.                                                                                                                                                                                                                            |
+| `CHUNK_BLOCKS`                                                  | Blocks per `eth_getLogs` call.                                                                                                                                                                                                                                        |
+| `POLL_INTERVAL_MS`                                              | The indexer's loop interval.                                                                                                                                                                                                                                          |
+| `INDEXER_ENABLED`                                               | `false` on every container. The `indexer` service is the single drainer; a second one races the same cursor.                                                                                                                                                          |
+| `DATABASE_URL`                                                  | `mysql://voting:<password>@mysql:3306/voting` — the compose service name, not a hostname.                                                                                                                                                                             |
+| `MYSQL_ROOT_PASSWORD`                                           | Consumed by the `mysql` image to initialise the database, and by nothing else: `docker-compose.yml` interpolates it, and every service that would otherwise receive it through `env_file:` blanks it out (the app services and Alertmanager — see the anchors below). |
+| `MYSQL_DATABASE`                                                | `voting`.                                                                                                                                                                                                                                                             |
+| `MYSQL_USER`                                                    | `voting`.                                                                                                                                                                                                                                                             |
+| `MYSQL_PASSWORD`                                                | The application's password. Must match the one in `DATABASE_URL` — it is the same account.                                                                                                                                                                            |
+| `MYSQLD_EXPORTER_PASSWORD`                                      | For the read-only `exporter` account. Deliberately a separate, narrower credential than the application's — see below.                                                                                                                                                |
+| `SMTP_SMARTHOST`, `SMTP_FROM`, `SMTP_USERNAME`, `SMTP_PASSWORD` | Alertmanager's mail relay. `alertmanager.yml.tmpl` is rendered by `ops/alertmanager/entrypoint.sh`, which fails immediately if any of these is empty.                                                                                                                 |
+| `ALERT_EMAIL_TO`                                                | Where alerts go.                                                                                                                                                                                                                                                      |
+| `GRAFANA_ADMIN_PASSWORD`                                        | Grafana's admin login.                                                                                                                                                                                                                                                |
+| `WEB_IMAGE`                                                     | `<registry>/voting-web`. Required — `docker-compose.prod.yml` uses `${WEB_IMAGE:?}`, so a missing value is a startup error rather than a silent pull of a wrong default.                                                                                              |
+
+### `env_file:` hands the whole file to every service that names it
+
+`.env` holds credentials belonging to four different owners. Any service that lists
+it under `env_file:` receives **all** of them, so `docker-compose.yml` defines two
+scrub anchors that blank what each service has no use for:
+
+| Anchor                     | Services                                      | Keeps                                                      | Blanks                                            |
+| -------------------------- | --------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------- |
+| `x-app-env-scrub`          | `web-blue`, `web-green`, `migrate`, `indexer` | `MYSQL_PASSWORD` (they connect with it)                    | root, exporter, Grafana and SMTP passwords        |
+| `x-alertmanager-env-scrub` | `alertmanager`                                | the five `SMTP_*` values (its entrypoint substitutes them) | root, application, exporter and Grafana passwords |
+
+`environment:` takes precedence over `env_file:` key by key, so an empty string
+there is a removal, not a second copy of a value.
+
+Verified against a rendered `docker compose config --profile observability` with
+every field filled in `.env`: Alertmanager's environment has
+`MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `MYSQLD_EXPORTER_PASSWORD` and
+`GRAFANA_ADMIN_PASSWORD` empty, while `SMTP_SMARTHOST`, `SMTP_FROM` and
+`SMTP_PASSWORD` arrive intact.
 
 ### The MySQL exporter account is deliberately narrower
 

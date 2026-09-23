@@ -104,7 +104,17 @@ scrape_configs:
   - job_name: blackbox-external
     metrics_path: /probe
     params:
-      module: [http_2xx]
+      # `http_2xx_insecure`, not `http_2xx`, for the same reason probe-loop.sh has
+      # INSECURE_TLS: this deployment answers at a bare IP address with a
+      # self-signed certificate, so verification can only ever fail. A probe that
+      # cannot pass is an alert that always fires, and an alert that always fires
+      # is one people learn to ignore -- which is how a real outage gets missed.
+      #
+      # The cost is stated in ops/blackbox/blackbox.yml: this module proves
+      # reachability and nothing about identity. Switch it back to `http_2xx` in
+      # the same change that installs a certificate something trusts (a domain
+      # plus Let's Encrypt), and not before.
+      module: [http_2xx_insecure]
     file_sd_configs:
       - files:
           - /etc/prometheus/targets/external.json

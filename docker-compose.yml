@@ -17,16 +17,70 @@
 # Port 3307 on the host is used on purpose so this never collides with an existing
 # local MySQL on 3306.
 
+# ---------------------------------------------------------------------------
+# Secrets that arrive through `env_file: .env` but belong to a service the
+# application containers never talk to.
+#
+# `env_file:` hands every app container the whole file, so without this the web,
+# migrate and indexer containers would each carry the database root password, the
+# monitoring account's password, the Grafana admin password and the SMTP
+# password -- four credentials with no use inside them.
+#
+# `environment:` takes precedence over `env_file:` key by key, so listing them
+# here as empty strings is a real removal, not a second copy of the value. The
+# services that DO need them (mysql, mysqld-exporter, grafana) read the same file
+# and are unaffected; alertmanager needs its own set, see the anchor below.
+#
+# Keys only, no values: this must never become a place a credential is written.
+# ---------------------------------------------------------------------------
+x-app-env-scrub: &app-env-scrub
+  MYSQL_ROOT_PASSWORD: ""
+  MYSQLD_EXPORTER_PASSWORD: ""
+  GRAFANA_ADMIN_PASSWORD: ""
+  SMTP_PASSWORD: ""
+
+# ---------------------------------------------------------------------------
+# The same idea for Alertmanager, with a different set -- which is why it is a
+# second anchor and not a reuse of the first.
+#
+# Alertmanager needs `env_file:` for exactly one thing: the five SMTP_* values
+# its entrypoint substitutes into alertmanager.yml. Reading the whole file also
+# handed it the database root password in the clear (verified against a rendered
+# `docker compose config`: MYSQL_ROOT_PASSWORD, MYSQL_PASSWORD,
+# MYSQLD_EXPORTER_PASSWORD and GRAFANA_ADMIN_PASSWORD all arrived with real
+# values). A container that only sends mail has no use for any of them.
+#
+# It must KEEP SMTP_PASSWORD -- that is the one credential it exists to use -- so
+# it cannot use `*app-env-scrub` above. It also drops MYSQL_PASSWORD, which the
+# app containers legitimately need to reach the database and this one does not.
+# ---------------------------------------------------------------------------
+x-alertmanager-env-scrub: &alertmanager-env-scrub
+  MYSQL_ROOT_PASSWORD: ""
+  MYSQL_PASSWORD: ""
+  MYSQLD_EXPORTER_PASSWORD: ""
+  GRAFANA_ADMIN_PASSWORD: ""
+
 services:
   mysql:
     image: mysql:8.4
     container_name: voting-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: voting
-      MYSQL_USER: voting
-      MYSQL_PASSWORD: voting
+      # Interpolated, not literal.
+      #
+      # These four were hardcoded until 2026-09-23, which silently reduced every
+      # `MYSQL_*` line in /srv/voting/.env to decoration: the server initialised
+      # the database as root/voting regardless of what the operator wrote, so a
+      # DATABASE_URL carrying the password they *did* set failed to
+      # authenticate, and the index reported itself unavailable with no hint
+      # that the password had been ignored.
+      #
+      # The defaults are the development credentials and exist so that
+      # `docker compose up -d` still works on a fresh clone with no .env.
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-voting}
+      MYSQL_USER: ${MYSQL_USER:-voting}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-voting}
     ports:
       # Bound to loopback, not to every interface. The documented way to reach it
       # is 127.0.0.1:3307, which this preserves exactly, while a database that is
@@ -39,7 +93,10 @@ services:
     volumes:
       - voting-mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      # `$$` escapes compose interpolation, so the check reads the password from
+      # the container's own environment. The previous `-proot` was correct only
+      # for as long as the password above stayed literal, which it no longer is.
+      test: ["CMD-SHELL", 'mysqladmin ping -h 127.0.0.1 -uroot -p"$$MYSQL_ROOT_PASSWORD"']
       interval: 5s
       timeout: 5s
       retries: 20
@@ -67,6 +124,7 @@ services:
       - path: .env
         required: false
     environment:
+      <<: *app-env-scrub
       INDEXER_ENABLED: "false"
     networks:
       - backend
@@ -90,6 +148,7 @@ services:
       - path: .env
         required: false
     environment:
+      <<: *app-env-scrub
       # It is the worker; the server's own loop must stay off in this service.
       INDEXER_ENABLED: "false"
     networks:
@@ -109,6 +168,7 @@ services:
       - path: .env
         required: false
     environment:
+      <<: *app-env-scrub
       # Indexing belongs to the indexer service. Two drains on one cursor is a
       # race, and the loser's work is silently discarded.
       INDEXER_ENABLED: "false"
@@ -153,8 +213,12 @@ services:
     volumes:
       - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./ops/prometheus/rules:/etc/prometheus/rules:ro
-      # Empty by default: the public URL is written here during server setup, so
-      # that a probe of a domain that does not exist yet cannot fire an alert.
+      # The `blackbox-external` target, written by the deployment's own setup
+      # step (ops/server/README.md). An empty file is a valid state -- "nothing
+      # to probe from outside" -- and is what this ships as until then. It is
+      # filled in by hand rather than generated because a probe of a hostname
+      # that does not exist yet alerts forever, and an alert nobody can clear is
+      # one people learn to ignore.
       - ./ops/prometheus/targets:/etc/prometheus/targets:ro
       - prometheus-data:/prometheus
     healthcheck:
@@ -182,6 +246,10 @@ services:
       - path: .env
         required: false
     environment:
+      # Keeps the five SMTP_* values, drops everything else that came in through
+      # the file above. See x-alertmanager-env-scrub for why it is not
+      # `*app-env-scrub`.
+      <<: *alertmanager-env-scrub
       SMTP_SMARTHOST: ${SMTP_SMARTHOST:-}
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
@@ -273,7 +341,17 @@ services:
       - ./ops/blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
     mem_limit: 128m
     networks:
+      # `backend` is internal: no route off the host. The `blackbox-external` job
+      # probes the PUBLIC URL -- that is the whole point of it, "can a user reach
+      # this" as opposed to `blackbox-internal`'s "is the process serving" -- and
+      # a target on the public internet is unreachable from a network with no
+      # gateway. Without `egress` that probe can only ever fail, which is a
+      # permanent critical alert rather than a signal.
+      #
+      # This is the only exporter on `egress`; the other three observe things
+      # inside the network and have no reason to leave it.
       - backend
+      - egress
 
   grafana:
     image: grafana/grafana:11.4.0

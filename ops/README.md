@@ -70,8 +70,17 @@ make the served bundle and the visible source disagree.
 
 `migrate` and `indexer` are different — they run TypeScript through `tsx`, so the
 override does mount source for them, and an edited script takes effect on the
-next run with no rebuild. For UI work the loop is `pnpm dev` on the host, or
-`docker compose up -d --build web`.
+next run with no rebuild. For UI work the loop is `pnpm dev` on the host, or a
+build followed by a start:
+
+```bash
+docker build -f web/Dockerfile -t voting-web:dev .   # no build: key in any compose file
+docker compose up -d web
+```
+
+`docker compose up -d --build web` looks like it does the same thing and does not:
+with no `build:` section compose builds nothing and then tries to pull
+`voting-web:dev`, which exists only if you built it yourself.
 
 The observability services are behind a profile on purpose: the application runs
 without them, and keeps running when they are stopped. Monitoring that the

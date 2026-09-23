@@ -79,6 +79,7 @@ def make_repo(root: pathlib.Path) -> pathlib.Path:
     (work / ".env.example").write_text("RPC_URL=\n", encoding="utf-8")
     (work / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
     (work / "docker-compose.prod.yml").write_text("services: {}\n", encoding="utf-8")
+    (work / "docker-compose.external-db.yml").write_text("services: {}\n", encoding="utf-8")
     (work / "deploy-env").mkdir()
     # git does not track empty directories, so `git archive` would not find
     # `deploy-env` at all. This mirrors the real repository, where the directory

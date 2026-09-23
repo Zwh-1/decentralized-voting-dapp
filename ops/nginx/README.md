@@ -32,6 +32,31 @@ echo green > /srv/voting/state/active-slot
 ./ops/nginx/render-upstream.sh
 ```
 
+## The first render, before nginx has ever started
+
+`nginx.conf` includes the upstream by **exact path** (`include
+/etc/nginx/upstream/upstream.conf;`), and nginx treats a missing include target as
+a startup failure. So:
+
+- nginx cannot start until the upstream file exists;
+- the upstream file is written by `render-upstream.sh`.
+
+For the render to be runnable first, it validates the rendered file in a
+**throwaway container** (`docker compose run --rm --no-deps nginx nginx -t`)
+rather than by `exec`ing into the running one. That is not a style choice: with
+`exec`, the first `deploy.sh` on a fresh host failed at the switch step -- every
+time -- because there was no running nginx to exec into, and there could not be
+one. The reload is skipped, with a line saying so, when nothing is running yet;
+nginx reads the file when it starts.
+
+Bootstrap order on a new host (full sequence in `ops/server/README.md`):
+
+```bash
+./ops/nginx/render-upstream.sh blue    # works with nothing running
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+./ops/deploy/deploy.sh <tag>           # from here on, the normal path
+```
+
 ## Why only one upstream server
 
 The obvious alternative is to list both slots and let nginx balance between them.

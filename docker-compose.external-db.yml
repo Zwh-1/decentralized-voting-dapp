@@ -1,0 +1,102 @@
+# Optional overlay: use a MySQL that already exists (the host's, or another
+# machine's) instead of the bundled mysql:8.4 container.
+#
+# Nothing loads this automatically -- compose only auto-loads
+# `docker-compose.override.yml` -- so having it in the repository changes no
+# existing command and no CI check.
+#
+# Usage. All three `-f` arguments, in this order:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#                  -f docker-compose.external-db.yml up -d
+#
+# For a release, keep using the deploy script, with the same file set:
+#
+#   COMPOSE_FILES="-f docker-compose.yml -f docker-compose.prod.yml \
+#                  -f docker-compose.external-db.yml" \
+#     WEB_IMAGE=<registry>/voting-web ./ops/deploy/deploy.sh <tag>
+#
+# This overlay is for the production file set. It names `web-blue`/`web-green`
+# (they need the host mapping below), and those services exist only in
+# `docker-compose.prod.yml`; applied to the base file alone, compose would treat
+# them as new services and refuse: "neither an image nor a build context".
+#
+# Three prerequisites. Miss one and the connection fails without saying which:
+#
+#   1. MySQL must listen on an address a container can reach. A host install
+#      defaults to bind-address=127.0.0.1, and 127.0.0.1 inside a container is the
+#      container itself. Bind it to the docker bridge address or to 0.0.0.0,
+#      restricted to the docker subnet.
+#   2. The grant must cover the container's source subnet --
+#      'voting'@'172.17.%', not 'voting'@'localhost'.
+#   3. The database must exist; the `migrate` service creates the tables, not the
+#      database:
+#        CREATE DATABASE voting CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+#
+# Then point DATABASE_URL at it in /srv/voting/.env, for example:
+#   DATABASE_URL=mysql://voting:<password>@host.docker.internal:3306/voting
+# and keep MYSQL_USER / MYSQL_PASSWORD equal to the account named there. The
+# `MYSQL_*` entries are still read by the compose file, but with the bundled
+# database gone they only matter to whatever creates the account on the external
+# server.
+#
+# `host.docker.internal:host-gateway` below is what lets a container resolve the
+# host. If MySQL lives on another machine instead, delete those `extra_hosts`
+# blocks and write that machine's IP in DATABASE_URL -- the overlay then also
+# works with the base file set alone.
+
+services:
+  # ---------------------------------------------------------------------------
+  # The bundled database and its exporter step behind a profile.
+  #
+  # `profiles` rather than deleting the services: `migrate` and `indexer` have
+  # `depends_on` entries naming `mysql`, and compose rejects a dependency on an
+  # undefined service. Keeping the definitions, without activating the profile,
+  # leaves them inert while `docker compose config` still parses. Going back to
+  # the bundled database means dropping this one `-f` -- no repository change.
+  # ---------------------------------------------------------------------------
+  mysql:
+    profiles: ["bundled-db"]
+
+  mysqld-exporter:
+    profiles: ["bundled-db"]
+
+  # ---------------------------------------------------------------------------
+  # migrate: the base file puts it on `backend` alone, and `backend` is
+  # `internal: true` -- no route out, so it could not reach a MySQL on the host
+  # even with the right password. Hence `egress` here.
+  #
+  # `!reset` clears the inherited `depends_on: mysql: service_healthy`; without
+  # it compose reports "depends on undefined service mysql".
+  # ---------------------------------------------------------------------------
+  migrate:
+    depends_on: !reset null
+    networks: [backend, egress]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ---------------------------------------------------------------------------
+  # indexer: base gives it a `depends_on` on mysql, and compose merges
+  # `depends_on` key by key -- so the whole mapping has to be replaced, not
+  # extended. `!override` is what replaces it instead of merging into it.
+  # ---------------------------------------------------------------------------
+  indexer:
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ---------------------------------------------------------------------------
+  # The two web slots: they read the index, so they need the same host mapping.
+  # Nothing else about them changes here. Their `env_file` and their required
+  # RPC_URL / CHAIN_ID come from docker-compose.prod.yml; repeating them in an
+  # overlay would be a second owner of the same settings.
+  # ---------------------------------------------------------------------------
+  web-blue:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  web-green:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
