@@ -339,6 +339,87 @@ def main() -> int:
             out,
         )
 
+        # ------------------------------------------------- windows launchers
+        # The .cmd files wrap the .sh ones so this works on Windows, where the
+        # plain `bash` on PATH is the WSL entry point and fails with a kernel
+        # error that has nothing to do with this project.
+        #
+        # cmd.exe has two traps that are invisible in an editor, both hit while
+        # writing these files:
+        #
+        #   * **LF-only line endings.** cmd.exe then mis-parses the file and
+        #     executes comment text as commands, producing "'...' is not
+        #     recognized" errors for lines that look like ordinary REM text.
+        #   * **A UTF-8 BOM.** cmd.exe emits *nothing at all* -- no error, no
+        #     output, exit 0. Measured: identical file, BOM added, empty stdout.
+        #
+        # Neither is visible in a diff or an editor, so they are asserted here.
+        print("\nWindows launchers (.cmd)")
+
+        cmd_dir = REPO / "ops" / "handoff"
+        cmd_files = sorted(cmd_dir.glob("*.cmd"))
+        r.check(
+            len(cmd_files) >= 3,
+            f"the .cmd launchers are present ({len(cmd_files)} found)",
+        )
+        for f in cmd_files:
+            raw = f.read_bytes()
+            r.check(
+                raw[:3] != b"\xef\xbb\xbf",
+                f"{f.name}: no BOM (a BOM makes cmd.exe print nothing and exit 0)",
+            )
+            lf_only = raw.count(b"\n") - raw.count(b"\r\n")
+            r.check(
+                lf_only == 0,
+                f"{f.name}: every line ends CRLF, {lf_only} bare LF found "
+                f"(LF-only makes cmd.exe execute comment text)",
+            )
+            try:
+                raw.decode("utf-8")
+                decoded = True
+            except UnicodeDecodeError:
+                decoded = False
+            r.check(decoded, f"{f.name}: decodes as UTF-8 (the console here is cp65001)")
+
+        # The launchers must not carry their own argument validation. An earlier
+        # version duplicated the usage text and the two copies disagreed: the
+        # .cmd returned 0 on a usage error where the .sh returned 2.
+        #
+        # Run against the REAL repository, not the synthetic fixtures: those hold
+        # only the .sh files, so cmd.exe would fail with "file not found" and the
+        # comparison would be meaningless. The real tree is also the environment
+        # the launcher is actually for.
+        #
+        # Only argument-validation cases appear here. They fail before any
+        # network or filesystem work, so this needs no remote and transmits
+        # nothing. cmd.exe is what is under test, so this is Windows-only.
+        if os.name == "nt":
+            cases = [
+                ("push-to-github.sh", "push-to-github.cmd", [], 2),
+                ("push-to-github.sh", "push-to-github.cmd", ["https://github.com/x/y.git"], 1),
+                ("upload-to-server.sh", "upload-to-server.cmd", [], 2),
+                ("upload-to-server.sh", "upload-to-server.cmd", ["deploy@h", "--bogus"], 1),
+                ("upload-to-server.sh", "upload-to-server.cmd", ["deploy@h", "--dry-run"], 0),
+            ]
+            for script, launcher, args, expected in cases:
+                sh_code, _ = bash(f"ops/handoff/{script}", args, REPO)
+                cmd_code = subprocess.run(
+                    ["cmd.exe", "/c", launcher, *args],
+                    cwd=REPO / "ops" / "handoff",
+                    capture_output=True,
+                ).returncode
+                label = " ".join(args) or "(no args)"
+                r.check(
+                    sh_code == expected,
+                    f"{script} {label}: the .sh itself gives {expected} (got {sh_code})",
+                )
+                r.check(
+                    cmd_code == sh_code,
+                    f"{launcher} {label}: agrees with the .sh (both {sh_code}, launcher gave {cmd_code})",
+                )
+        else:
+            print("  skip  launcher exit-code agreement (not Windows)")
+
     print(f"\n{r.passed} passed, {r.failed} failed")
     return 1 if r.failed else 0
 

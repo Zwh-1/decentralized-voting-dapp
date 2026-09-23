@@ -2,13 +2,65 @@
 
 各自只需要一份输入，做一件事，做完就停。
 
-| 脚本                  | 你需要提供             | 它做什么                           |
-| --------------------- | ---------------------- | ---------------------------------- |
-| `push-to-github.sh`   | GitHub 仓库的 SSH 地址 | 把本仓库推上去                     |
-| `upload-to-server.sh` | 服务器 IP + SSH 用户名 | 把部署所需文件传上去（不远程执行） |
+| 脚本                           | 你需要提供             | 它做什么                           |
+| ------------------------------ | ---------------------- | ---------------------------------- |
+| `push-to-github.cmd` / `.sh`   | GitHub 仓库的 SSH 地址 | 把本仓库推上去                     |
+| `upload-to-server.cmd` / `.sh` | 服务器 IP + SSH 用户名 | 把部署所需文件传上去（不远程执行） |
 
-两个都不需要你先装什么。本机 `ssh` / `scp` / `ssh-keygen` / `ssh-keyscan` 已确认可用
-（`rsync` 没有，所以传输用 `scp` + `tar`）。
+## 在 Windows 上：用 `.cmd`
+
+```powershell
+ops\handoff\push-to-github.cmd git@github.com:你的用户名/decentralized-voting-dapp.git
+ops\handoff\upload-to-server.cmd deploy@你的服务器IP --dry-run
+ops\handoff\upload-to-server.cmd deploy@你的服务器IP
+```
+
+`.cmd` 也可以**双击运行**（会自动暂停，否则窗口一闪就没了）。不带参数双击会打印用法。
+
+### 为什么必须用 `.cmd` 而不是直接 `bash xxx.sh`
+
+这台机器上 PATH 里的 `bash` 是 **WSL 的入口**（`C:\Windows\system32\bash.exe`），
+而 WSL 因为 `VirtualMachinePlatform` 未启用是坏的。实测：
+
+```
+bash -c 'echo hello'   → WSL2 内核错误，退出码 -1
+Git 的 bash            → hello，退出码 0
+```
+
+直接打 `bash ops/handoff/push-to-github.sh` 会报一个 WSL 内核错误，与本项目毫无关系，
+很容易让人去排查一个不存在的问题。`.cmd` 启动器因此**显式定位 Git for Windows 的
+bash**（`C:\Program Files\Git\bin\bash.exe` 等几处），并主动跳过 System32 那个。
+
+需要装 [Git for Windows](https://git-scm.com/download/win)。找不到时启动器会直接说明。
+
+### `.cmd` 文件必须是 UTF-8 无 BOM + CRLF
+
+这不是风格问题，是 cmd.exe 的两个隐形陷阱，两个都实际踩到了：
+
+| 变体                   | 结果                               |
+| ---------------------- | ---------------------------------- |
+| UTF-8 + **LF**         | 解析失败，中文行被**当命令执行**   |
+| UTF-8 + CRLF           | 正常                               |
+| UTF-8 + **BOM** + CRLF | **什么都不输出**，无报错，退出码 0 |
+| GBK + CRLF             | 乱码                               |
+
+两者在编辑器和 diff 里都看不出来。`ops/handoff/selftest.py` 有断言盯着这两点，
+并在 Windows 上比对启动器与脚本的退出码是否一致。
+
+## 在 Linux / macOS / Git Bash 里：用 `.sh`
+
+```bash
+ops/handoff/push-to-github.sh git@github.com:你的用户名/decentralized-voting-dapp.git
+ops/handoff/upload-to-server.sh deploy@你的服务器IP --dry-run
+```
+
+`.sh` 是唯一实现：CI 上跑的、shellcheck 检查的、有单元测试覆盖的都是它。
+`.cmd` 只做三件事——找到 Git 的 bash、切到仓库根、把参数原样转交。
+**刻意不在 `.cmd` 里重写一份逻辑**：初版复制了一份用法文本，结果无参数时
+`.cmd` 返回 0 而 `.sh` 返回 2，同一个错误的两种答案。
+
+传输用 `scp` + `tar`（本机没有 `rsync`）。`ssh` / `scp` / `ssh-keygen` /
+`ssh-keyscan` 均已确认可用。
 
 ---
 
