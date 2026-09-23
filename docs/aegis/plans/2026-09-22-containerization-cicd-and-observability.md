@@ -7,43 +7,43 @@
 
 ## Progress
 
-| 批次 | 任务                                              | 状态                 | 证据                                                                                                                                                                    |
-| ---- | ------------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 零   | Task 0.1 修复 Docker 引擎                         | **阻塞**             | 根因见 §14；解除需管理员提权 + 重启，本会话做不到                                                                                                                       |
-| 零   | Task 0.2 服务器初始化                             | 未开始               | —                                                                                                                                                                       |
-| 零   | Task 0.3 GitHub / Docker Hub 准备                 | 未开始               | —                                                                                                                                                                       |
-| 零   | Task 0.4 Sepolia 工厂重新部署 + 演示投票          | 未开始               | —                                                                                                                                                                       |
-| 零   | Task 0.5 域名与 TLS                               | 未开始               | —                                                                                                                                                                       |
-| 零   | Task 0.6 邮件（SMTP）接收端准备                   | 未开始               | —                                                                                                                                                                       |
-| 一   | Task 1.1 standalone 产物                          | **完成**             | `.next/standalone/web/server.js` 实测存在；typecheck 与 format 退出码均为 0；负向对照成立（改动前无该目录）。产物自包含性见 §14.4                                       |
-| 一   | Task 1.2 Dockerfile 与 .dockerignore              | **已写，构建未验**   | stdlib 外的四阶段 Dockerfile + `.dockerignore`；**构建需 Linux 引擎**。执行中发现计划三处会导致容器启动即失败，见 §14.8                                                 |
-| 一   | Task 1.3 compose base 扩写                        | **完成**             | 四服务；`docker compose config` 退出码 0；mysql 兼容字段原样。**3307 在 internal 网络上能否发布未验证**，§14.8 记了应急方案                                             |
-| 一   | Task 1.4 indexer worker 入口                      | **已写，运行未验**   | `bash -n` 通过；循环/退避语义需容器才能验。写作时自己写出一个 `set -e` 死代码 bug，已修，见 §14.8                                                                       |
-| 一   | Task 1.5 migrate 一次性服务                       | **部分**（静态通过） | compose 内已定义且结构正确；「跑两遍幂等」需引擎。静态项已验：全仓库无 `entrypoint-initdb` 挂载、无 `MYSQL_INITDB_*` 配置（10 处命中全在正文注释里，无一处是实际配置）  |
-| 一   | Task 1.6 本地 override                            | 未开始               | —                                                                                                                                                                       |
-| 一   | Task 1.7 一键拉起验收（含负向对照）               | **阻塞**             | 需引擎                                                                                                                                                                  |
-| 二   | Task 2.1 `/api/metrics`                           | **完成**             | 24 个新测试通过（全量 711 通过）；typecheck 0；构建含 `ƒ /api/metrics`；端到端 HTTP 200；lag 不可读时序列缺席已用真实数据验证；null→0 负向对照红了 2 个测试。详见 §14.5 |
-| 二   | Task 2.2 metrics 不暴露公网                       | 未开始               | —                                                                                                                                                                       |
-| 二   | Task 2.3 Prometheus 采集与告警规则                | **已写，加载未验**   | 9 条规则 + 抓取配置；YAML 可解析；**来源校验通过**（23 条序列全部有出处，负向对照会失败）。`promtool check` 需引擎                                                      |
-| 二   | Task 2.4 exporters                                | **已写，运行未验**   | 四服务进 compose；黑盒模块已写；**刻意不建 `.my.cnf`**（密码只走环境变量）。指标端点能否取到需引擎                                                                      |
-| 二   | Task 2.5 Alertmanager 与邮件                      | **已写，投递未验**   | 模板 + entrypoint；`bash -n` 通过；缺变量时启动即失败已实测。**邮件是否真的送达需 SMTP 凭据与引擎**                                                                     |
-| 二   | Task 2.6 Grafana provisioning 与看板              | **已写，渲染未验**   | 数据源与三块看板入库并 provisioned；JSON 可解析；**来源校验通过**（14 个面板的每条序列都有出处）。图能否渲染出数据需引擎                                                |
-| 二   | Task 2.7 部署版本可见性                           | **已写，采集未验**   | `publish-version.sh` 拆成「预期/在跑」两种模式；自测新增用例覆盖。node-exporter 读到 textfile 需引擎                                                                    |
-| 二   | Task 2.8 三类故障演练                             | 未开始               | —                                                                                                                                                                       |
-| 三   | Task 3.1 `ci.yml` 增加 `workflow_call`            | **完成**             | 一行加法；三个既有触发器与 5 个 job 均原样保留（不变量校验会检查 job 是否被删）。`actionlint` 本机不可用                                                                |
-| 三   | Task 3.2 `release.yml`（门 → 构建 → 扫描 → 推送） | **已写，运行未验**   | 四 job；不变量校验通过（gate 真的引用 `ci.yml`、deploy 依赖 build+scan、无 `ssh-keyscan`/`pull_request_target`）。**需 GitHub 仓库与 5 个 secret 才能真跑**             |
-| 三   | Task 3.3 部署脚本三件套                           | **完成**             | 新增 `ops/deploy/` 六个脚本；`bash -n` 全过；`selftest.sh` **41 项全过**。`shellcheck` 本机未安装——已加进 CI，见 Task 3.1 行                                            |
-| 三   | Task 3.4 SSH 部署 job                             | **已写，运行未验**   | 主机密钥钉在 secret（**不用 `ssh-keyscan`**，有机械检查把关）；失败自动回滚。需服务器与 secret                                                                          |
-| 三   | Task 3.5 `rollback.yml`                           | **已写，运行未验**   | 入口 + `environment: production` 审批；与部署**共用 `deploy-production` 锁**（此处发现一个真 bug，见 §14.10）                                                           |
-| 三   | Task 3.6 流水线端到端验收                         | **阻塞**             | 需 GitHub 仓库；README 已记录「未 push 过」                                                                                                                             |
-| 四   | Task 4.1 nginx 与上游模板                         | 未开始               | —                                                                                                                                                                       |
-| 四   | Task 4.2 prod compose 双槽定义                    | 未开始               | —                                                                                                                                                                       |
-| 四   | Task 4.3 `deploy.sh` 双槽流程                     | 未开始               | —                                                                                                                                                                       |
-| 四   | Task 4.4 `rollback.sh` 秒级回滚                   | 未开始               | —                                                                                                                                                                       |
-| 四   | Task 4.5 零停机证据与负向对照                     | 未开始               | —                                                                                                                                                                       |
-| 四   | Task 4.6 expand-contract runbook                  | 未开始               | —                                                                                                                                                                       |
-| 五   | Task 5.1 七条 ADR 落地                            | 未开始               | —                                                                                                                                                                       |
-| 五   | Task 5.2 基线记录与简历材料                       | 未开始               | —                                                                                                                                                                       |
+| 批次 | 任务                                              | 状态                     | 证据                                                                                                                                                                    |
+| ---- | ------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 零   | Task 0.1 修复 Docker 引擎                         | **阻塞**                 | 根因见 §14；解除需管理员提权 + 重启，本会话做不到                                                                                                                       |
+| 零   | Task 0.2 服务器初始化                             | 未开始                   | —                                                                                                                                                                       |
+| 零   | Task 0.3 GitHub / Docker Hub 准备                 | 未开始                   | —                                                                                                                                                                       |
+| 零   | Task 0.4 Sepolia 工厂重新部署 + 演示投票          | 未开始                   | —                                                                                                                                                                       |
+| 零   | Task 0.5 域名与 TLS                               | 未开始                   | —                                                                                                                                                                       |
+| 零   | Task 0.6 邮件（SMTP）接收端准备                   | 未开始                   | —                                                                                                                                                                       |
+| 一   | Task 1.1 standalone 产物                          | **完成**                 | `.next/standalone/web/server.js` 实测存在；typecheck 与 format 退出码均为 0；负向对照成立（改动前无该目录）。产物自包含性见 §14.4                                       |
+| 一   | Task 1.2 Dockerfile 与 .dockerignore              | **已写，构建未验**       | stdlib 外的四阶段 Dockerfile + `.dockerignore`；**构建需 Linux 引擎**。执行中发现计划三处会导致容器启动即失败，见 §14.8                                                 |
+| 一   | Task 1.3 compose base 扩写                        | **完成**                 | 四服务；`docker compose config` 退出码 0；mysql 兼容字段原样。**3307 在 internal 网络上能否发布未验证**，§14.8 记了应急方案                                             |
+| 一   | Task 1.4 indexer worker 入口                      | **已写，运行未验**       | `bash -n` 通过；循环/退避语义需容器才能验。写作时自己写出一个 `set -e` 死代码 bug，已修，见 §14.8                                                                       |
+| 一   | Task 1.5 migrate 一次性服务                       | **部分**（静态通过）     | compose 内已定义且结构正确；「跑两遍幂等」需引擎。静态项已验：全仓库无 `entrypoint-initdb` 挂载、无 `MYSQL_INITDB_*` 配置（10 处命中全在正文注释里，无一处是实际配置）  |
+| 一   | Task 1.6 本地 override                            | 未开始                   | —                                                                                                                                                                       |
+| 一   | Task 1.7 一键拉起验收（含负向对照）               | **阻塞**                 | 需引擎                                                                                                                                                                  |
+| 二   | Task 2.1 `/api/metrics`                           | **完成**                 | 24 个新测试通过（全量 711 通过）；typecheck 0；构建含 `ƒ /api/metrics`；端到端 HTTP 200；lag 不可读时序列缺席已用真实数据验证；null→0 负向对照红了 2 个测试。详见 §14.5 |
+| 二   | Task 2.2 metrics 不暴露公网                       | 未开始                   | —                                                                                                                                                                       |
+| 二   | Task 2.3 Prometheus 采集与告警规则                | **已写，加载未验**       | 9 条规则 + 抓取配置；YAML 可解析；**来源校验通过**（23 条序列全部有出处，负向对照会失败）。`promtool check` 需引擎                                                      |
+| 二   | Task 2.4 exporters                                | **已写，运行未验**       | 四服务进 compose；黑盒模块已写；**刻意不建 `.my.cnf`**（密码只走环境变量）。指标端点能否取到需引擎                                                                      |
+| 二   | Task 2.5 Alertmanager 与邮件                      | **已写，投递未验**       | 模板 + entrypoint；`bash -n` 通过；缺变量时启动即失败已实测。**邮件是否真的送达需 SMTP 凭据与引擎**                                                                     |
+| 二   | Task 2.6 Grafana provisioning 与看板              | **已写，渲染未验**       | 数据源与三块看板入库并 provisioned；JSON 可解析；**来源校验通过**（14 个面板的每条序列都有出处）。图能否渲染出数据需引擎                                                |
+| 二   | Task 2.7 部署版本可见性                           | **已写，采集未验**       | `publish-version.sh` 拆成「预期/在跑」两种模式；自测新增用例覆盖。node-exporter 读到 textfile 需引擎                                                                    |
+| 二   | Task 2.8 三类故障演练                             | 未开始                   | —                                                                                                                                                                       |
+| 三   | Task 3.1 `ci.yml` 增加 `workflow_call`            | **完成**                 | 一行加法；三个既有触发器与 5 个 job 均原样保留（不变量校验会检查 job 是否被删）。`actionlint` 本机不可用                                                                |
+| 三   | Task 3.2 `release.yml`（门 → 构建 → 扫描 → 推送） | **已写，运行未验**       | 四 job；不变量校验通过（gate 真的引用 `ci.yml`、deploy 依赖 build+scan、无 `ssh-keyscan`/`pull_request_target`）。**需 GitHub 仓库与 5 个 secret 才能真跑**             |
+| 三   | Task 3.3 部署脚本三件套                           | **完成**                 | 新增 `ops/deploy/` 六个脚本；`bash -n` 全过；`selftest.sh` **41 项全过**。`shellcheck` 本机未安装——已加进 CI，见 Task 3.1 行                                            |
+| 三   | Task 3.4 SSH 部署 job                             | **已写，运行未验**       | 主机密钥钉在 secret（**不用 `ssh-keyscan`**，有机械检查把关）；失败自动回滚。需服务器与 secret                                                                          |
+| 三   | Task 3.5 `rollback.yml`                           | **已写，运行未验**       | 入口 + `environment: production` 审批；与部署**共用 `deploy-production` 锁**（此处发现一个真 bug，见 §14.10）                                                           |
+| 三   | Task 3.6 流水线端到端验收                         | **阻塞**                 | 需 GitHub 仓库；README 已记录「未 push 过」                                                                                                                             |
+| 四   | Task 4.1 nginx 与上游模板                         | **已写，加载未验**       | nginx.conf + 上游模板 + 站点配置；上游是**派生物**（`active-slot` 唯一真相），由脚本渲染。`nginx -t` 需引擎                                                             |
+| 四   | Task 4.2 prod compose 双槽定义                    | **完成**                 | `config` 退出码 0；服务清单正确（单槽 `web` 被 profile 停用）；**3307 在生产出现 0 次**；两槽均 `INDEXER_ENABLED=false`                                                 |
+| 四   | Task 4.3 `deploy.sh` 双槽流程                     | **完成**（语义经桩验证） | 顺序：migrate → 起目标槽 → **直连目标槽**健康门 → 切上游 → 观察 → 记录。自测 **80 项全过**，负向对照 6 项全过                                                           |
+| 四   | Task 4.4 `rollback.sh` 秒级回滚                   | **完成**（语义经桩验证） | 快路径（目标槽仍在跑且 tag 匹配）**不重启任何容器**，已由自测断言锁住。**「秒级」这个数字需真实服务器测量**                                                             |
+| 四   | Task 4.5 零停机证据与负向对照                     | **部分**                 | `probe-loop.sh` 已用**真实 HTTP 服务器**验证（全成功 0 失败；全失败 3/3、最大连续 3）。**实验组/对照组需真实服务器**                                                    |
+| 四   | Task 4.6 expand-contract runbook                  | **完成**                 | `ops/runbook/migrations.md`；`CONTRIBUTING.md` 增第 6 条不变量，并说明它是第 3 条在发布维度的延伸                                                                       |
+| 五   | Task 5.1 七条 ADR 落地                            | 未开始                   | —                                                                                                                                                                       |
+| 五   | Task 5.2 基线记录与简历材料                       | 未开始                   | —                                                                                                                                                                       |
 
 ---
 
@@ -2200,3 +2200,45 @@ Docker 仍未解除，但批二几乎全部是 YAML 与 POSIX sh，可以静态�
 真正的成因是作用域：`core.autocrlf=true` 设在 **system** 作用域。仓库级设 `git config core.autocrlf false` 后，`.gitattributes` 才成为权威，工作区按 LF 检出。三者现已实测：磁盘 `CRLF=0`、索引 `CRLF=0`（`LF=342/249/79`）、`pnpm format:check` 退出码 0。
 
 排查过程中还有一次**干扰值得记**：我几次观察到文件在 `format:check` 前后于 LF/CRLF 之间反复横跳，一度怀疑有 git hook 在改写（实测 `core.hooksPath` 为空、`.git/hooks` 无启用脚本）。实际原因是**另一个会话在并发做 i18n，它执行了 `git checkout`**，把我刚检出的工作区按当时的配置重写了。确认方法是在同一次调用里「检出 → 立即读字节 → 跑 prettier → 再读字节」：两次都是 LF 且检查通过。**在多写者环境下，观察到的状态可能是别人的副作用**——记下来，以免下次误判成自己的 bug 去乱改配置。
+
+### 14.11 批四执行记录：双槽零停机，以及「测试必须能失败」的三层证据（2026-09-22）
+
+**新增**：`docker-compose.prod.yml`、`ops/nginx/{nginx.conf,README.md}`、`ops/nginx/templates/upstream.conf.tmpl`、`ops/nginx/conf.d/10-app.conf`、`ops/nginx/render-upstream.sh`、`ops/deploy/probe-loop.sh`、`ops/deploy/selftest-controls.py`、`ops/runbook/{deploy,migrations}.md`、`ops/server/README.md`、`ops/README.md`。
+**改写**：`ops/deploy/{deploy.sh,rollback.sh,health-gate.sh,selftest.sh}`；`CONTRIBUTING.md` 增第 6 条不变量。
+
+**已实测**
+
+| 验证项                                                          | 结果                                                                                                                                                                    |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bash -n` 全部 10 个 shell 脚本                                 | 0 失败                                                                                                                                                                  |
+| `ops/deploy/selftest.sh`                                        | **80 项全过**（原 41 → 80，本批新增 39 项）                                                                                                                             |
+| `ops/deploy/selftest-controls.py`（负向对照）                   | **6 项全过**：4 处故意破坏各被抓住，干净树通过                                                                                                                          |
+| `docker compose -f … -f docker-compose.prod.yml config --quiet` | 退出码 **0**                                                                                                                                                            |
+| 生产服务清单                                                    | `mysql, migrate, web-blue, web-green, nginx, indexer`——单槽 `web` 被 profile 正确停用                                                                                   |
+| 生产 3307 出现次数                                              | **0**（`ports: !reset []` 生效，数据库不发布）                                                                                                                          |
+| 健康门打**真实 HTTP 服务器**                                    | 200 → 退出 0；死端口 → 退出 1（`status 000`）；404 → 退出 1（`status 404`）                                                                                             |
+| 健康门预算精度（真实计时）                                      | 1s→**1.4s**、3s→**3.4s**、5s→**5.2s**（超出部分是最后一次响应自身的延迟，受 1s 下限约束）                                                                               |
+| `probe-loop.sh` 打真实服务器                                    | 6s：`{"total":5,"succeeded":5,"failed":0,"maxConsecutiveFailures":0}` 退出 0；404：`{"total":3,"failed":3,"maxConsecutiveFailures":3,"firstFailureAtSeconds":0}` 退出 1 |
+
+**未验证**（需引擎或真实服务器）：`nginx -t` 从未真正跑过；`nginx -s reload` 的 graceful 行为未观察；两个槽的容器从未同时起过；`render-upstream.sh` 的 `envsubst` 渲染未在 Linux 上跑过；**零停机的实验组与对照组都未做**；「秒级回滚」这个具体数字未测。
+
+**本批的验证方法：三层「必须能失败」**
+
+本批的产物几乎全是「顺序」和「不重启」这类**从外部看不见的性质**——一个把流量切早了的部署，日志上只写着「部署成功」。所以本批的主要工作不是写脚本，而是造出能证明脚本**错**的证据，共三层：
+
+1. **桩化自测**（80 项）断言顺序性质本身：目标槽健康门通过**之前**没有 `nginx -s reload`；成功部署**之后**没有 `stop web-blue`（旧槽必须留着当回滚目标）；migrate 只在起槽之前跑一次。
+2. **负向对照**（`selftest-controls.py`）证明上面那 80 项**会失败**。四组注入故障各自被抓住：把流量切换提到健康门之前（2 条断言抓到）、成功部署后顺手停掉旧槽（1 条）、把 migrate 挪到起槽之后（7 条）、让健康门失败仍记录成功（6 条）。**一个不能失败的测试不是证据。**
+3. **真实网络**：`health-gate.sh` 与 `probe-loop.sh` 直接打一个真的 node HTTP 服务器，覆盖成功、连接失败、404 三条路径。这是本批唯一不依赖桩的运行时证据。
+
+其中第 2 层里「成功部署后停掉旧槽」这一条特别值得留：这个错误会让所有关于 `active-tag`、`active-slot`、日志的断言**继续全绿**，而它恰好摧毁了整个设计的核心主张——回滚从「改配置」退化成「冷启动」。**能通过全部既有断言的错误，只能靠一条专门为它写的断言抓住。**
+
+**本批发现并修掉的六个真实缺陷**
+
+1. **健康门无法探测目标槽。** 槽名 `web-blue`/`web-green` 只在 compose 网络内解析，宿主机 `curl` 根本够不到——而门必须在切流量**之前**打目标槽。若经 nginx 探测，测的就是**旧槽**，无论新槽多坏都会通过。改为 `PROBE_VIA=<svc>` 让请求在目标容器内执行；探测可插拔，但预算、重试节奏、计时三者复用同一份代码（复制一份重试循环就是第二个「等多久」的答案，两者必然漂移）。
+2. **容器内用 node 的 `fetch` 而不是 curl/wget。** 运行时镜像是 `node:24-bookworm-slim`，只保证有 node。依赖一个镜像里没有的工具，失败形态与「服务不健康」**完全一样**——对健康检查来说这是最糟的失败模式。
+3. **`envsubst` 在宿主机上可能不存在。** 它来自 `gettext-base`，精简云镜像不带。而没有它会失败在部署中途（槽已起、流量未切），所以 `render-upstream.sh` 现在开头就检查，并在 `ops/server/README.md` 里安装。
+4. **渲染被拒绝时必须回滚渲染文件。** nginx 读到坏配置会**继续用旧配置运行**并只记一条错误——于是部署看起来成功、实际还在服务旧版本。现在先 `nginx -t`，失败就把旧文件恢复回去。
+5. **`!reset []` 清空继承的端口映射。** 生产要移除 base 里为本地方便而留的 `127.0.0.1:3307:3306`。若只写「不添加」，继承的映射仍在，数据库照样监听着宿主机——实测确认生产配置里 `3307` 出现 **0** 次。
+6. **自测里我自己造的 15 个失败**，全部是测试的 bug 而非脚本的 bug：默认 docker 桩没有 `exec` 分支（导致门正确地拒绝了空输出）、`${VAR:-200}` 把「容器什么都没说」当成 200、子 shell 吞掉了 `RC`/`OUT`、断言查错了文件（`deploy.log` 而不是 stdout）。其中第二条最值得记：**它会让「空输出」这个必须被拒绝的情形变成通过**，这正是本批在防的那类假绿灯。
+
+**一处刻意的设计取舍**：`deploy.sh` 成功后有 30 秒观察窗，失败则切回旧槽并停止新槽。这看起来是「多余的一步」，但它抓的是健康门抓不到的东西——**健康门只证明新版本能应答，没证明它在 nginx 后面、在真实请求下、持续一段时间能应答**。而这段时间里旧槽仍在运行，切回去仍然只要一秒。观察窗的失败路径也已进自测。
