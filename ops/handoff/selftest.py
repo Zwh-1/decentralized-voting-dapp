@@ -552,6 +552,101 @@ def main() -> int:
                     f"{stem}.bat {label}: agrees with the .sh (both {sh_code}, .bat gave {bat_code})",
                 )
 
+            # ------------------------------------------- .bat credential guard
+            # The guard is the entire value of both scripts, and until now only
+            # the .sh side had it exercised. That gap shipped a real bug: the
+            # first actual `push-to-github.bat` run against the real repository
+            # REFUSED to push, because `findstr /e /c:".example"` treats "." as
+            # a wildcard and so flagged .env.example, contracts/.env.example and
+            # web/.env.example -- three files that are supposed to be committed.
+            # A guard that blocks its own intended action trains people to
+            # bypass it, so both directions are asserted here, against a real
+            # git repository built by the same fixture the .sh tests use.
+            #
+            # Both directions matter and they fail differently:
+            #   * a *.example template wrongly blocked -> the script cannot do
+            #     its job at all;
+            #   * a real .env wrongly allowed -> credentials get pushed.
+            guard_root = tmp_path / "bat-guard"
+            guard_root.mkdir()
+            guard_work = make_repo(guard_root)
+            # The .bat files under test, plus their helpers, into the fixture.
+            for name in (
+                "push-to-github.bat",
+                "upload-to-server.bat",
+                "_pause-if-doubleclicked.cmd",
+                "_parent-name.ps1",
+                "push-to-github.sh",
+                "upload-to-server.sh",
+            ):
+                shutil.copy2(REPO / "ops" / "handoff" / name, guard_work / "ops" / "handoff" / name)
+            sh(["git", "add", "-A"], guard_work)
+            sh(["git", "commit", "-q", "-m", "add bat"], guard_work)
+
+            def run_bat(stem, args, work):
+                return subprocess.run(
+                    ["cmd.exe", "/c", f"{stem}.bat", *args],
+                    cwd=work / "ops" / "handoff",
+                    capture_output=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+
+            # (a) template present, no real .env: the guard must NOT fire.
+            #     --dry-run keeps this off the network entirely.
+            ok = run_bat("upload-to-server", ["deploy@h", "--dry-run"], guard_work)
+            r.check(
+                ok.returncode == 0,
+                "upload-to-server.bat: .env.example / server.env are NOT treated as "
+                f"credentials (exit 0 expected, got {ok.returncode})",
+                ok.stdout + ok.stderr,
+            )
+
+            # (b) a real .env inside the payload must stop the upload. Placed at
+            #     ops/.env so it is genuinely inside what gets packed -- a .env at
+            #     the repository root would not be transmitted anyway, so
+            #     blocking it would prove nothing.
+            (guard_work / "ops" / ".env").write_text("SECRET=real\n", encoding="utf-8")
+            sh(["git", "add", "-f", "ops/.env"], guard_work)
+            sh(["git", "commit", "-q", "-m", "leak"], guard_work)
+            bad = run_bat("upload-to-server", ["deploy@h", "--dry-run"], guard_work)
+            r.check(
+                bad.returncode != 0,
+                "upload-to-server.bat: a tracked .env inside the payload STOPS the upload",
+                bad.stdout + bad.stderr,
+            )
+            r.check(
+                "ops/.env" in (bad.stdout + bad.stderr),
+                "upload-to-server.bat: ...and names the offending path",
+                bad.stdout + bad.stderr,
+            )
+
+            # (c) same two directions for the push guard. The fixture's
+            #     .env.example is tracked and must not block; then a real .env
+            #     must block.
+            (guard_work / "ops" / ".env").unlink()
+            sh(["git", "rm", "-q", "--cached", "ops/.env"], guard_work)
+            (guard_work / ".gitignore").write_text("", encoding="utf-8")
+            sh(["git", "add", "-A"], guard_work)
+            sh(["git", "commit", "-q", "-m", "clean"], guard_work)
+
+            push_ok = run_bat("push-to-github", ["git@example.invalid:x/y.git"], guard_work)
+            r.check(
+                ".env.example" not in (push_ok.stdout + push_ok.stderr),
+                "push-to-github.bat: a tracked .env.example is NOT reported as a credential",
+                push_ok.stdout + push_ok.stderr,
+            )
+
+            (guard_work / ".env").write_text("SECRET=real\n", encoding="utf-8")
+            sh(["git", "add", "-f", ".env"], guard_work)
+            sh(["git", "commit", "-q", "-m", "leak"], guard_work)
+            push_bad = run_bat("push-to-github", ["git@example.invalid:x/y.git"], guard_work)
+            r.check(
+                push_bad.returncode != 0,
+                "push-to-github.bat: a tracked .env STOPS the push",
+                push_bad.stdout + push_bad.stderr,
+            )
+
             # ---------------------------------------------------- pause probe
             # The launchers must pause for a double-click and NOT pause for a
             # programmatic call. Only the second half is testable here: a real
