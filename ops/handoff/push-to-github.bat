@@ -138,22 +138,29 @@ REM --- 4. credential files must never be committed ---------------------------
 REM Checked against `git ls-files` -- what git would actually push -- rather
 REM than the filesystem: .gitignore making a file exist but stay untracked is
 REM exactly the desired state, so scanning the disk would produce false alarms.
+REM
+REM The rule, matching the .sh: a file is a credential file when its NAME is
+REM exactly ".env", or begins with ".env." and is not a ".example" template.
+REM
+REM Plain string comparison, NOT findstr. findstr treats "." as a wildcard, so
+REM an earlier revision's `findstr /i /e /c:".example"` did not let the
+REM templates through and this guard flagged .env.example, contracts/.env.example
+REM and web/.env.example -- all three of which are SUPPOSED to be committed.
+REM It stopped a real push of this repository. A guard that refuses to do the
+REM thing it was written to do is worse than no guard: it trains people to
+REM bypass it. The .sh version of this check had the same bug once, in the
+REM other direction, which is exactly why the two are asserted to agree.
 set "LEAKED=0"
 for /f "usebackq delims=" %%F in (`git ls-files`) do (
   set "F=%%F"
-  REM Match the FILENAME, and let .example templates through. `!F!` needs
-  REM delayed expansion, hence EnableDelayedExpansion above.
+  REM `!F!` needs delayed expansion, hence EnableDelayedExpansion above.
   for %%B in ("!F!") do set "FBASE=%%~nxB"
-  if /i "!FBASE!"==".env" (
+  set "CRED=0"
+  if /i "!FBASE!"==".env" set "CRED=1"
+  if /i "!FBASE:~0,5!"==".env." if /i not "!FBASE:~-8!"==".example" set "CRED=1"
+  if "!CRED!"=="1" (
     echo   被跟踪的凭据文件: !F!>&2
     set "LEAKED=1"
-  )
-  if /i "!FBASE:~0,5!"==".env." (
-    echo "!FBASE!" | findstr /i /e /c:".example" >nul 2>&1
-    if errorlevel 1 (
-      echo   被跟踪的凭据文件: !F!>&2
-      set "LEAKED=1"
-    )
   )
 )
 if "%LEAKED%"=="1" (
