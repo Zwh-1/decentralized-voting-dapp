@@ -1079,10 +1079,13 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 # 之后每一次发布都走发布脚本，不要在服务器上敲 up -d 绕过它：
 # 用自签证书（例如只有一个公网 IP）时还要 INSECURE_TLS=1，见下面。
-PUBLIC_HEALTH_URL=https://<域名或IP>/api/health \
+# 端口是 8443：生产 compose 发布的是 8443:443，不占 80/443（见下）。
+PUBLIC_HEALTH_URL=https://<域名或IP>:8443/api/health \
   INSECURE_TLS=1 \
   WEB_IMAGE=<registry>/voting-web ./ops/deploy/deploy.sh sha-<12 hex>
 ```
+
+**对外端口是 8443，不是 443。** `docker-compose.prod.yml` 里 nginx 发布的是 `8443:443`，只发布 HTTPS：这台主机上可能已经有别的项目用系统 nginx 占着 80/443，抢过来会把它打掉；而容器内 80 端口那个跳转用的是 `return 301 https://$host$request_uri`，**丢端口**——一旦把宿主 8080 映射到容器 80，访问者会被导到宿主 443，也就是导到**另一个**项目去。所以 HTTP 干脆不发布，对外地址就是 `https://<IP>:8443/`。
 
 **`PUBLIC_HEALTH_URL` 必须给。** 它的默认值是 `https://localhost/api/health`，而 `localhost` 不在你为域名签发的证书里，curl 过不了校验——部署会在**已经切完流量之后**报观察窗失败。它从 shell 环境读，不读 `.env`，所以只能像上面那样在命令行上传。
 

@@ -170,14 +170,23 @@ SQL
 # ---------------------------------------------------------------------------
 # 8. Firewall
 # ---------------------------------------------------------------------------
-# Only SSH and HTTP(S). Everything else -- MySQL, Prometheus, Grafana -- is
-# reachable solely over the compose network, and Grafana is reached through an
-# SSH tunnel. The network topology already enforces this; these rules are the
-# second layer, for the host itself.
+# Only SSH and the published HTTPS port. Everything else -- MySQL, Prometheus,
+# Grafana -- is reachable solely over the compose network, and Grafana is reached
+# through an SSH tunnel. The network topology already enforces this; these rules
+# are the second layer, for the host itself.
+#
+# 8443, not 443: `docker-compose.prod.yml` publishes `8443:443` so that a host
+# already serving something else from 80/443 can run this stack alongside it.
+# Change both places together if that ever stops being true.
 sudo ufw allow OpenSSH
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
+sudo ufw allow 8443/tcp
 sudo ufw --force enable
+
+# A cloud host has a second firewall in front of this one, and ufw does not touch
+# it: on Aliyun that is the instance's security group, on AWS the security group,
+# on GCP the VPC firewall rule. Opening 8443 here has no effect until it is also
+# allowed there -- and the symptom is a connection that times out rather than a
+# refusal, which reads like the application is down.
 ```
 
 ## Verifying the preparation
@@ -206,10 +215,12 @@ probe from outside" — and it is filled in by hand rather than generated, becau
 probe of a hostname that does not exist yet alerts forever, and an alert nobody can
 clear is one people learn to ignore.
 
-This deployment is reached at `https://106.14.239.194/api/health`, which is what the
-file now contains. Use the **public** URL a user would open, not a container
-address — `blackbox-internal` already covers `http://web:3000/api/health`. The label
-matches the internal job's, so the two views can be told apart by `scope` even
+This deployment is reached at `https://106.14.239.194:8443/api/health`, which is what
+the file now contains. Use the **public** URL a user would open, not a container
+address — `blackbox-internal` already covers `http://web:3000/api/health`. The port
+is `8443` because `docker-compose.prod.yml` publishes `8443:443`: this host already
+serves another project from nginx on 80/443, so this stack does not claim those. The
+label matches the internal job's, so the two views can be told apart by `scope` even
 though the alert rule (`probe_success == 0`) covers both.
 
 Two things about it are easy to get wrong:
@@ -238,7 +249,7 @@ there is a second one:
 
 ```bash
 cd /srv/voting
-PUBLIC_HEALTH_URL=https://106.14.239.194/api/health \
+PUBLIC_HEALTH_URL=https://106.14.239.194:8443/api/health \
   INSECURE_TLS=1 \
   WEB_IMAGE=<registry>/voting-web ./ops/deploy/deploy.sh <tag>
 ```
@@ -254,7 +265,7 @@ Drop `INSECURE_TLS=1` in the same change that installs a trusted certificate.
 
 ```bash
 # The window by itself, if it needs to be run separately:
-INSECURE_TLS=1 ./ops/deploy/probe-loop.sh https://106.14.239.194/api/health 30 2
+INSECURE_TLS=1 ./ops/deploy/probe-loop.sh https://106.14.239.194:8443/api/health 30 2
 ```
 
 ## The first deploy

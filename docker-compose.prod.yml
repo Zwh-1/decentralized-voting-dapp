@@ -149,8 +149,26 @@ services:
     image: nginx:1.27-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      # Published on 8443, not on 80/443.
+      #
+      # This host already serves another project from nginx on 80/443 (a system
+      # nginx with its own vhost). Two things would go wrong if this stack claimed
+      # those ports: the container could not bind them at all while the other
+      # nginx holds them, and if it somehow did, it would take that project down.
+      #
+      # Only the HTTPS port is published. The container's port-80 server block
+      # exists to redirect to HTTPS, and it does that with
+      # `return 301 https://$host$request_uri` -- which drops the port. Mapping
+      # host 8080 to container 80 would therefore send every visitor to
+      # https://<ip>/ (port 443), i.e. straight to the *other* project. A redirect
+      # to the wrong application is worse than no redirect, so HTTP is simply not
+      # published; the intended URL is https://<ip>:8443/.
+      #
+      # The URL appears in three other places and they must agree:
+      # PUBLIC_HEALTH_URL (shell env, passed to deploy.sh), the blackbox-external
+      # target in ops/prometheus/targets/external.json, and the certificate's
+      # subjectAltName (the port is not part of a SAN, so only the IP is).
+      - "8443:443"
     volumes:
       - ./ops/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./ops/nginx/conf.d:/etc/nginx/conf.d:ro
