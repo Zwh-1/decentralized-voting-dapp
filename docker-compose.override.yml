@@ -1,0 +1,89 @@
+# Local development overlay.
+#
+# `docker compose up` picks this file up automatically. That is the whole point:
+# a developer gets a working stack from the base file without knowing this file
+# exists.
+#
+# It is NOT loaded when files are named explicitly:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Naming any `-f` replaces the default file set, so production never inherits
+# anything from here. That is the property this arrangement depends on, and it is
+# the reason the dev-only conveniences below are safe to be unconditional.
+
+services:
+  migrate:
+    # The migration script is TypeScript executed directly by tsx, so it reads the
+    # source at the moment it runs. Mounting it means an edited migration takes
+    # effect on the next `docker compose run --rm migrate` with no rebuild.
+    #
+    # Read-only: this container writes to the database, never to the source tree.
+    # A writable mount would let a stray path in the script corrupt the host's
+    # working copy, and nothing here needs to write.
+    volumes:
+      - ./web/src:/app/web/src:ro
+      - ./web/scripts:/app/web/scripts:ro
+
+  indexer:
+    # Same reasoning as `migrate`: the drain loop runs TypeScript through tsx.
+    volumes:
+      - ./web/src:/app/web/src:ro
+      - ./web/scripts:/app/web/scripts:ro
+    # `unless-stopped` in the base file is right for a server and wrong on a
+    # laptop: a crash loop hides the error behind a restart every few seconds,
+    # and the logs a developer needs scroll away. Letting the container exit
+    # keeps the failure where it happened.
+    restart: "no"
+
+  web:
+    # Reachable at http://localhost:3000. The base file deliberately publishes no
+    # port -- locally the port comes from here, in production it comes from nginx.
+    ports:
+      - "127.0.0.1:3000:3000"
+
+    # ---------------------------------------------------------------------------
+    # Two different ideas of "the chain's address", and they are not
+    # interchangeable. Getting this wrong produces the single most confusing
+    # local failure in this project: a page that renders fine and shows no polls.
+    #
+    #   RPC_URL                      -- read by the SERVER, inside the container.
+    #                                   So it must be an address the container can
+    #                                   reach: host.docker.internal.
+    #   NEXT_PUBLIC_LOCAL_RPC_URL    -- read by the BROWSER, which runs on the
+    #                                   host. So it must be 127.0.0.1, because
+    #                                   "localhost" inside the container is the
+    #                                   container itself.
+    #
+    # The same distinction is why `host.docker.internal` appears below and must
+    # not appear in the browser variable.
+    # ---------------------------------------------------------------------------
+    extra_hosts:
+      # `host-gateway` resolves to the host as seen from the container. On Linux
+      # this mapping is not automatic (unlike Docker Desktop), so it has to be
+      # declared. Declaring it on every platform costs nothing.
+      - "host.docker.internal:host-gateway"
+    environment:
+      RPC_URL: ${RPC_URL:-http://host.docker.internal:8545}
+    restart: "no"
+
+    # ---------------------------------------------------------------------------
+    # Why the source is deliberately NOT mounted over the app here
+    # ---------------------------------------------------------------------------
+    # The runtime stage of web/Dockerfile is a Next.js `standalone` build: the
+    # image runs `node web/server.js`, which serves the `.next` output baked in at
+    # build time. Mounting ./web/src over it would therefore change nothing about
+    # what the server serves -- there is no watcher and no build step in that
+    # image.
+    #
+    # Worse than useless: the served bundle would come from the image while the
+    # mounted source showed the working tree, so the two would disagree the moment
+    # there were uncommitted edits. Debugging that costs more than it saves.
+    #
+    # The honest development loop for the UI is one of:
+    #
+    #   pnpm dev                 # next dev on the host; real hot reload
+    #   docker compose up -d --build web   # rebuild when you want the real image
+    #
+    # `migrate` and `indexer` above are different: they execute TypeScript
+    # directly, so for them the mount does exactly what it looks like it does.

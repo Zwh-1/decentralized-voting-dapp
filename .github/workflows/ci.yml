@@ -269,8 +269,16 @@ jobs:
   # quoting bug it does not exercise. shellcheck is the missing check, and it runs
   # here because it was not available on the development machine when those
   # scripts were written.
-  shellcheck:
-    name: Shell scripts
+  #
+  # The self-test and its negative controls run here too, and that placement is
+  # the point of the whole job. The self-test asserts the deploy *ordering* --
+  # migrate before the new slot, health gate before traffic moves, the old slot
+  # left running as the rollback target. Those are properties nothing else in this
+  # repository can observe: a deploy that moved traffic too early would report
+  # success. Keeping the assertions in a script nobody runs would make them
+  # documentation rather than a gate.
+  deploy-scripts:
+    name: Deploy scripts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -280,7 +288,43 @@ jobs:
           shellcheck --version
           # -x follows sourced files, so lib.sh is checked in the context of each
           # script that sources it rather than standing alone.
-          shellcheck -x ops/deploy/*.sh ops/indexer/*.sh ops/alertmanager/*.sh
+          #
+          # Every script directory is listed explicitly. A glob that quietly
+          # matches nothing (or a directory added later and never added here) is
+          # how a script ends up unlinted while the job reports success, which is
+          # exactly what happened to ops/nginx/render-upstream.sh.
+          shellcheck -x ops/deploy/*.sh ops/indexer/*.sh ops/alertmanager/*.sh ops/nginx/*.sh
+
+      - name: Syntax check every script
+        run: |
+          for script in $(find ops -name '*.sh' | sort); do
+            echo "bash -n $script"
+            bash -n "$script"
+          done
+
+      - name: The deploy scripts stop where they claim to
+        run: bash ops/deploy/selftest.sh
+
+      - name: Prove the self-test can fail
+        run: python ops/deploy/selftest-controls.py
+
+  # The development overlay must not be able to reach production. Every failure
+  # this catches is silent from the outside: a published application port bypasses
+  # nginx (and with it the rule that refuses /api/metrics), and a host-gateway
+  # RPC_URL gives a server that renders and shows no polls. `docker compose config`
+  # validates syntax and would report all of it as perfectly fine.
+  compose-isolation:
+    name: Compose isolation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Development must not leak into production
+        run: python ops/ci/check-compose.py
 
   # The provenance check for alert rules and dashboards. It answers a question
   # promtool does not: whether the series a rule or panel names is one that

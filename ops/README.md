@@ -21,13 +21,30 @@ what turns those into a running, observable deployment.
 
 ## Bringing it up
 
-Development, building locally, single `web` container:
+Three commands, three purposes. The differences are not cosmetic — they decide
+which files compose reads, and therefore which of the two `web` topologies you
+get.
+
+### 1. Local development — `docker-compose.override.yml` is auto-loaded
 
 ```bash
+pnpm --filter @voting/contracts exec hardhat node   # the chain, on the host
 docker compose up -d
 ```
 
-Production, pulling an immutable image, two slots behind nginx:
+`docker compose up` with no `-f` reads `docker-compose.yml` **and**
+`docker-compose.override.yml`, in that order. The override publishes
+`127.0.0.1:3000`, points the server's `RPC_URL` at `host.docker.internal:8545` so
+containers can reach the host's `hardhat node`, and sets `restart: "no"` so a
+crash does not hide itself behind a restart loop.
+
+### 2. Local, plus monitoring
+
+```bash
+docker compose --profile observability up -d
+```
+
+### 3. Production — both files named explicitly
 
 ```bash
 export WEB_IMAGE=<registry>/voting-web
@@ -35,18 +52,26 @@ export WEB_IMAGE_TAG=sha-<12 hex>
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
-**Both `-f` flags, always, in that order.** Compose also auto-loads
-`docker-compose.override.yml`; production must not depend on a file meant for
-development, so each environment names its own files instead of relying on the
-automatic overlay. (This repository has no such file — the point is that the
-command does not rely on its absence.)
+**Naming any `-f` replaces the default file set**, so this command does _not_
+load the override. That is not a coincidence to be relied on loosely: it is the
+reason the dev conveniences above are safe to leave unconditional. Passing only
+one `-f` (or none) in production would silently give you the development
+topology, with a published app port and no nginx.
 
-Adding observability to either:
+`docker-compose.override.yml` therefore must never be named explicitly in a
+production command, and must never acquire a `web-blue`/`web-green` key.
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml \
-  --profile observability up -d
-```
+### Why the UI does not hot-reload in a container
+
+The runtime stage of `web/Dockerfile` is a Next.js `standalone` build: the image
+runs `node web/server.js`, serving the `.next` output baked in at build time.
+Mounting `./web/src` over it would change nothing about what is served, and would
+make the served bundle and the visible source disagree.
+
+`migrate` and `indexer` are different — they run TypeScript through `tsx`, so the
+override does mount source for them, and an edited script takes effect on the
+next run with no rebuild. For UI work the loop is `pnpm dev` on the host, or
+`docker compose up -d --build web`.
 
 The observability services are behind a profile on purpose: the application runs
 without them, and keeps running when they are stopped. Monitoring that the
