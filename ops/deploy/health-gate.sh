@@ -6,6 +6,21 @@
 #   usage: health-gate.sh <url> <timeout-seconds> [interval-seconds]
 #   exit:  0 = became healthy, 1 = budget exhausted, 2 = wrong arguments
 #
+# Two probe modes, because the endpoint is not always reachable from the host:
+#
+#   default            curl from this shell
+#   PROBE_VIA=<svc>    run the request inside the named compose service
+#
+# The second mode exists for the dual-slot deploy. The slots are named
+# `web-blue` and `web-green`, and those names resolve only on the compose
+# network -- from the host they do not exist. Probing the target slot has to
+# happen inside the network, and it has to happen before traffic moves, which is
+# the entire point of the gate.
+#
+# Only the probe is pluggable; the budget, the retry cadence, and the timing are
+# shared. A second copy of the retry loop would be a second answer to "how long
+# do we wait for", and the two would drift.
+#
 # ---------------------------------------------------------------------------
 # Why the response body is discarded instead of logged
 # ---------------------------------------------------------------------------
@@ -25,6 +40,9 @@ url=${1:-}
 budget=${2:-}
 interval=${3:-2}
 
+probe_via=${PROBE_VIA:-}
+compose_files=${COMPOSE_FILES:--f docker-compose.yml -f docker-compose.prod.yml}
+
 if [ -z "$url" ] || [ -z "$budget" ]; then
   printf 'usage: %s <url> <timeout-seconds> [interval-seconds]\n' "$0" >&2
   exit 2
@@ -36,6 +54,40 @@ esac
 
 log() {
   printf '%s health-gate: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
+}
+
+# The in-network probe uses node's global fetch rather than curl or wget. The
+# runtime image is node:24-bookworm-slim, which ships node and not much else, so
+# node is the one HTTP client guaranteed to be present. A probe that depends on a
+# tool the image lacks fails in a way that looks exactly like an unhealthy
+# service -- the worst possible failure mode for a health check.
+#
+# The script prints the status and always exits 0; the caller reads the printed
+# code. Exit code 9 is emitted when the request outlives its own timeout, and it
+# is mapped to a non-200 so a timeout can never be read as success.
+probe_in_container() {
+  # shellcheck disable=SC2086 # deliberately split into separate -f arguments
+  docker compose $compose_files exec -T \
+    -e PROBE_URL="$url" \
+    -e PROBE_TIMEOUT="$1" \
+    "$probe_via" \
+    node -e '
+      const timer = setTimeout(() => {
+        console.log(9);
+        process.exit(0);
+      }, Number(process.env.PROBE_TIMEOUT) * 1000);
+      fetch(process.env.PROBE_URL)
+        .then((response) => {
+          clearTimeout(timer);
+          console.log(response.status);
+          process.exit(0);
+        })
+        .catch(() => {
+          clearTimeout(timer);
+          console.log(0);
+          process.exit(0);
+        });
+    ' 2>/dev/null || true
 }
 
 started=$(date +%s)
@@ -62,7 +114,15 @@ while :; do
   [ "$per_attempt" -lt 1 ] && per_attempt=1
   [ "$per_attempt" -gt 5 ] && per_attempt=5
 
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time "$per_attempt" "$url" || true)
+  if [ -n "$probe_via" ]; then
+    code=$(probe_in_container "$per_attempt")
+    # The container may print nothing at all (a dead container, a compose error),
+    # and may print surrounding whitespace. Normalise before comparing, so that
+    # "no output" is a non-200 rather than an accidental match.
+    code=$(printf '%s' "$code" | tr -d '[:space:]')
+  else
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time "$per_attempt" "$url" || true)
+  fi
   elapsed=$(($(date +%s) - started))
 
   if [ "$code" = "200" ]; then

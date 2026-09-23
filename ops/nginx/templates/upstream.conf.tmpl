@@ -1,0 +1,30 @@
+# GENERATED FILE -- do not edit.
+#
+# Rendered from upstream.conf.tmpl by ops/nginx/render-upstream.sh, which reads
+# the active slot from /srv/voting/state/active-slot. That file is the single
+# source of truth for which release is serving. An edit made here will work until
+# the next deploy replaces this file, which is the worst kind of change: one that
+# appears to succeed and then quietly reverts.
+#
+# Exactly one server is listed, deliberately.
+#
+# The obvious alternative -- listing both slots and letting nginx balance between
+# them -- cannot express "only send traffic to the new version after it has
+# passed its health check". Passive balancing has no notion of readiness, so it
+# would start sending live traffic to a slot the moment it starts, which is
+# precisely the window that produces 5xx during a deploy. Switching the upstream
+# by rewriting this file is what keeps the health gate authoritative.
+#
+# max_fails/fail_timeout: if the active slot stops answering, nginx stops sending
+# to it for 10s rather than piling up requests against a dead backend. This is a
+# backstop for the case where a slot dies between deploys, not part of the deploy
+# mechanism -- the health gate is what decides when traffic moves.
+#
+# keepalive 32 matches the `proxy_http_version 1.1` and `Connection ""` headers
+# in 10-app.conf. Without all three, nginx opens a new upstream connection per
+# request and the setting does nothing.
+
+upstream voting_app {
+    server ${ACTIVE_SLOT}:3000 max_fails=3 fail_timeout=10s;
+    keepalive 32;
+}

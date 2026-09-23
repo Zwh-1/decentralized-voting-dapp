@@ -1,0 +1,159 @@
+# Production overlay.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Always list both -f flags explicitly. Docker Compose also auto-loads
+# `docker-compose.override.yml`, and relying on that would make production depend
+# on a file intended for development -- so the production command names its files
+# and the development command names its own. The two never mix by accident.
+#
+# ---------------------------------------------------------------------------
+# What production changes, and why each difference exists
+# ---------------------------------------------------------------------------
+#
+#   dual slot      two services from the same image, so a release can be started
+#                  and health-checked beside the running one before any traffic
+#                  moves. This is what makes a rollback a config change rather
+#                  than a redeploy.
+#   no build       production runs a pulled, immutable tag. A host that builds
+#                  its own images cannot tell you which commit is serving.
+#   mysql closed   3307 is bound to the loopback in the base file for local
+#                  convenience; production removes the mapping entirely.
+#   log rotation   an unbounded json-file log is a slow-motion disk-full
+#                  incident, and the disk-full alert would fire long after the
+#                  cause was obvious.
+#   resource caps  a container with no memory limit can take the host down with
+#                  it, and the OOM killer does not consult anyone first.
+
+services:
+  # ---------------------------------------------------------------------------
+  # The two slots. Identical except for their name.
+  #
+  # Both run at all times, and only one receives traffic -- the upstream file
+  # decides which. The idle slot is not waste: it is the rollback target, already
+  # running and already warm, which is why recovery is a reload rather than a
+  # cold start.
+  # ---------------------------------------------------------------------------
+
+  web-blue:
+    image: ${WEB_IMAGE:?WEB_IMAGE must be set to the registry image, e.g. user/voting-web}
+    restart: unless-stopped
+    environment:
+      # Written explicitly rather than left to the image default. Both slots must
+      # have it off: the indexer is a single cursor over one chain, and three
+      # processes advancing it independently would interleave writes and corrupt
+      # the index. In production exactly one `indexer` service owns that cursor.
+      INDEXER_ENABLED: "false"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    mem_limit: 768m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - backend
+      - edge
+
+  web-green:
+    image: ${WEB_IMAGE:?WEB_IMAGE must be set to the registry image, e.g. user/voting-web}
+    restart: unless-stopped
+    environment:
+      INDEXER_ENABLED: "false"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    mem_limit: 768m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - backend
+      - edge
+
+  # ---------------------------------------------------------------------------
+  # The single `web` service from the base file is replaced entirely by the two
+  # slots. Compose merges by service name, so the base `web` service would still
+  # be started alongside them -- and with no published port it would simply run,
+  # unused, competing for the same database. It is removed here so that "which
+  # process is serving" has exactly one answer.
+  #
+  # Setting `deploy.replicas: 0` is not used because it is a Swarm-era key with
+  # inconsistent local behaviour; omitting the service would require splitting the
+  # base file. `profiles` is the supported way to keep a service defined but not
+  # started: assigning it a profile that is never activated leaves it inert.
+  # ---------------------------------------------------------------------------
+  web:
+    profiles: ["disabled-in-production"]
+
+  # ---------------------------------------------------------------------------
+  # nginx terminates TLS and owns the upstream.
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./ops/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ops/nginx/conf.d:/etc/nginx/conf.d:ro
+      # The generated upstream. Its directory is mounted (not the file) because
+      # the file is replaced by rename on every deploy -- bind-mounting a single
+      # file would pin the old inode and nginx would keep reading a file that no
+      # longer exists at that path.
+      - /srv/voting/nginx/upstream:/etc/nginx/upstream:ro
+      - /srv/voting/certs:/etc/nginx/certs:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    depends_on:
+      # `service_started`, not `service_healthy`: nginx only proxies, and the
+      # upstream file decides which slot it talks to. Requiring both slots to be
+      # healthy before nginx starts would mean a failing canary blocks the front
+      # end from starting at all -- turning a bad deploy into an outage.
+      - web-blue
+      - web-green
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - edge
+
+  # ---------------------------------------------------------------------------
+  # MySQL is not reachable from outside in production.
+  #
+  # The base file publishes 127.0.0.1:3307 so that `mysql -h 127.0.0.1 -P 3307`
+  # keeps working during development. That convenience has no place on a server:
+  # nothing outside the compose network has any reason to open a database
+  # connection, and every service that needs one is already on `backend`.
+  #
+  # `ports: !reset []` clears the inherited list rather than adding to it. Without
+  # the explicit reset, the base mapping would remain and the database would still
+  # listen on the host.
+  # ---------------------------------------------------------------------------
+  mysql:
+    ports: !reset []
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+# ---------------------------------------------------------------------------
+# `edge` is where the published ports live. It is a normal bridge network with a
+# route out, as opposed to `backend`, which is internal.
+#
+# nginx joins `edge` only -- it reaches the slots because they are on `edge` too.
+# The slots join both: `edge` for nginx, `backend` for MySQL and the indexer. The
+# database stays reachable only from `backend`, so the property that MySQL cannot
+# be reached from outside survives the addition of a second network.
+# ---------------------------------------------------------------------------
+networks:
+  edge:
