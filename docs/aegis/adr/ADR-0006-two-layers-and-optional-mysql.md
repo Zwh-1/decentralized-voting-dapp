@@ -48,3 +48,50 @@ indexer/ 18 个文件、packages/ 5 个文件、Vite 版 web/ 6 个文件共 29 
 ## Boundary
 
 This ADR is an advisory Aegis Method Pack record. It does not grant completion authority or replace project-authoritative architecture sources.
+
+## Amendment - 2026-09-22 - 生产拓扑收窄：web 侧 INDEXER_ENABLED=false，索引器成为独立容器（见 ADR-0045）
+
+- Status: amended
+
+### Source Evidence
+
+- `docker-compose.yml`：`migrate` / `indexer` / `web` 三个服务都显式设 `INDEXER_ENABLED: "false"`；`web` 服务的注释写明「Indexing belongs to the indexer service. Two drains on one cursor is a race, and the loser's work is silently discarded.」
+- `docker-compose.yml` 的 `indexer` 服务：`command: ["/app/ops/indexer/entrypoint.sh"]`、`restart: unless-stopped`、`depends_on` 为 `mysql: service_healthy` 与 `migrate: service_completed_successfully`；注释写明「Its own service rather than the app's in-process loop: two processes draining the same cursor would race, and the loop inside the server is a development convenience that does not survive a restart.」
+- `docker-compose.prod.yml`：`web-blue` 与 `web-green` 都显式设 `INDEXER_ENABLED: "false"`，注释写明「the indexer is a single cursor over one chain, and three processes advancing it independently would interleave writes and corrupt the index. In production exactly one `indexer` service owns that cursor.」
+- 实测（计划 §14.8 验证表）：`docker compose config --quiet` 退出码 **0**；四服务清单与依赖条件（`service_healthy` / `service_completed_successfully`）符合预期
+- 实测（计划 §14.11）：叠加 `docker-compose.prod.yml` 后 `docker compose -f … -f … config --quiet` 退出码 **0**；生产服务清单为 `mysql, migrate, web-blue, web-green, nginx, indexer`，单槽 `web` 被 profile 正确停用
+- 规格 §3.1 与 §9.4 已登记这条口径：`voting_indexer_loop_enabled` 在容器化后 web 侧恒为 0，指标本身正确，但需要文档解释拓扑，否则读者会以为「索引循环坏了」
+- 边界：容器**从未真正起来过**（Docker 引擎本阶段不可用），因此「索引器确实在推进游标」只有配置层面的依据；计划 §14.8 把「indexer 循环是否在跑而不退出」明确列为未验证
+
+### Change Summary
+
+生产拓扑收窄：web 侧 INDEXER_ENABLED=false，索引器成为独立容器（见 ADR-0045）
+
+### Compatibility Boundary
+
+开发路径完全不变：`instrumentation.ts` 的后台循环代码一个字未改，`pnpm dev`、`pnpm indexer:drain`、`pnpm indexer:migrate` 与 `POST /api/index/sync` 的语义均不受影响。变化只发生在容器拓扑：容器内 `INDEXER_ENABLED` 一律为 `false`，因此 `/api/health` 的 `indexerLoopEnabled` 在容器内为 `false`。这是一个**可观察**的变化，规格 §9.4 已经登记了它的口径，指标 `voting_indexer_loop_enabled` 会显示 0。ADR-0006 原有的其余边界（无 `DATABASE_URL` 时全部读取回退为直接读链、`/api/results` 报告 `mode: chain-only`）不变。
+
+### Retirement Impact
+
+进程内后台循环在容器拓扑下已不再承担实际驱动作用，退化为**开发便利**。若将来确认无人依赖它（本地开发也改用 `pnpm indexer:drain` 或独立 worker），应整体退役，而不是保留一个在容器里恒为 `false` 的开关——那会让「索引器为什么不动」这个问题多一个需要排除的假设。若将来引入第二个索引器实例或分片索引，`indexer` 服务的单实例假设（单一游标）必须先改，否则交错写入会污染投影；ADR-0001 关于「索引是可重建投影」的结论在那时是恢复路径，而不是并发许可。
+
+### Baseline Sync
+
+- Needed: needed
+- Target: docs/aegis/baseline/2026-09-22-containerization-and-delivery.md
+- Action: create snapshot
+- Reason: ADR-0006 原基线同步记的是「基线 §2/§5.1/§6/§9 描述的是四层结构与强制 MySQL，必须在基线修订表中登记为已被取代」。本次收窄的是**索引器的驱动方式**：ADR-0006 决定它由 `instrumentation.ts` 的后台循环驱动，本阶段决定生产里该循环关闭、索引器成为独立容器。既有基线里没有任何条目描述容器拓扑，因此由本阶段的新基线快照登记这一收窄，并同时登记「容器从未真正起来过」这一未验证边界。
+
+### Evidence References
+
+- docker-compose.yml
+- docker-compose.prod.yml
+- ops/indexer/entrypoint.sh
+- web/src/instrumentation.ts
+- docs/aegis/adr/ADR-0045-one-image-carries-three-process-roles.md
+- docs/aegis/specs/2026-09-22-containerization-cicd-and-observability-design.md
+- docs/aegis/plans/2026-09-22-containerization-cicd-and-observability.md
+
+### Boundary
+
+This amendment is an advisory Aegis Method Pack record. It does not grant completion authority or replace project-authoritative architecture sources.

@@ -20,6 +20,7 @@
 - [快速开始](#快速开始)
 - [验证与复现](#验证与复现)
 - [Sepolia 部署与验证（M4）](#sepolia-部署与验证m4)
+- [部署与运维](#部署与运维)
 - [设计取舍与已知局限](#设计取舍与已知局限)
 - [安全说明](#安全说明)
 - [仓库结构](#仓库结构)
@@ -199,7 +200,30 @@ flowchart LR
 | M-6g | 浏览器端链身份     | `CHAIN_ID=11155111` 且无钱包：`阶段` **投票中**（不再是 `未知`）、`合约地址` 指向**部署配置的工厂**（不再是本地合约）、控制台 **0 条消息**；屏蔽浏览器所用 RPC 后 `阶段` **读取失败**，服务端读到的各行不变                                                                                                                                                                                                                                                                                                                                                                   | 见 [M-6g](#m-6g浏览器读的是部署配置的那条链)           |
 | M-6h | 选项元数据         | 三份文档 pin 到公共 IPFS：服务返回的 CID 与本地计算**逐字符相同**，网关回读逐字节一致；真实浏览器三张选项卡片全部 `已解析`，控制台 **0 条消息**                                                                                                                                                                                                                                                                                                                                                                                                                               | `pnpm pin:metadata` + `pnpm ui:drill`                  |
 | M-7  | Next.js 生产构建   | 构建成功，投票列表 / 单投票 / 我的投票 页面与全部动态 Route Handler 均产出                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | `pnpm build:web`                                       |
-| —    | 测试总数           | **504 个**（合约 177 = 114 Solidity + 63 TypeScript；web 327）——改造前的旧基线 274 保留在下方"多租户改造"小节以便对照                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `pnpm test`                                            |
+| —    | 测试总数           | **711 passed / 0 failed**（2026-09-22 记录）。**口径说明**：该数字的记录来源是本阶段计划 §14.5（记为「web 全量 711，含 140 个 suite」），而本 README 上方若干行仍写着旧的 `合约 177 + web 327 = 504`——**这两组数字本轮都没有重跑，也没有互相核对**，因此这里只如实转述，不声称一个精确的合约 / web 拆分。旧基线 274 保留在下方"多租户改造"小节以便对照                                                                                                                                                                                                                        | `pnpm test`                                            |
+
+### 容器化、CI/CD 与可观测性（2026-09-22）实测
+
+下面每一行的命令都**不依赖 Docker**，都在本机实跑过。**本阶段 Docker 从未跑起来**，所以这张表里没有一项来自容器内——镜像体积、容器启动、零停机探测、告警投递全部**未实测**，它们不在表内，而在[部署与运维](#部署与运维)的未实测表与[基线记录](docs/aegis/baseline/2026-09-22-containerization-and-delivery.md)的完整清单里。
+
+| 指标                               | 实测结果                                                                                                                                                                                                                                                                    | 复现命令                                                         |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| shell 脚本语法                     | `ops/` 下 **10 个** `.sh` 全部通过 `bash -n`，**0 失败**                                                                                                                                                                                                                    | `bash -n ops/**/*.sh`                                            |
+| 部署脚本顺序性质（桩化）           | **80 项全过 / 0 失败**，退出码 0。断言的是外部看不见的性质：目标槽健康门通过**之前**没有 `nginx -s reload`；成功部署**之后**没有 `stop` 旧槽；migrate 只在起槽**之前**跑一次                                                                                                | `bash ops/deploy/selftest.sh`                                    |
+| 上面 80 项**会失败**（负向对照）   | **7 项全过**：干净副本通过；4 组注入故障各被抓住——把流量切换提到健康门之前（2 条断言抓到）、成功部署后停掉旧槽（**1 条**）、把 migrate 挪到起槽之后（**7 条**）、健康门失败仍记录成功（**6 条**）；还原后再次通过                                                           | `python ops/deploy/selftest-controls.py`                         |
+| compose 可解析性（基础 / 生产）    | 两种 profile **退出码均为 0**；生产服务为 `mysql, migrate, web-blue, web-green, nginx, indexer`（单槽 `web` 被 profile 正确停用）；生产配置里 `3307` 出现 **0 次**                                                                                                          | `docker compose config --quiet`（不需引擎）                      |
+| 健康门（真实 HTTP 服务器）         | 200 → 退出 **0**；死端口 → 退出 **1**（`status 000`）；404 → 退出 **1**（`status 404`）                                                                                                                                                                                     | `bash ops/deploy/health-gate.sh <url> <budget>`                  |
+| 健康门预算精度（真实计时）         | 1s → **1.4s**、3s → **3.4s**、5s → **5.2s**（超出部分是最后一次响应自身的延迟，受 1s 下限约束；**Linux 上的精确数值未测**）                                                                                                                                                 | 同上，三种预算                                                   |
+| 零停机探测**仪器**本身             | 全成功 6s → `{"total":5,"succeeded":5,"failed":0,"maxConsecutiveFailures":0}` 退出 **0**；全失败 → `{"total":3,"failed":3,"maxConsecutiveFailures":3,"firstFailureAtSeconds":0}` 退出 **1**                                                                                 | `bash ops/deploy/probe-loop.sh <url> <duration> <interval>`      |
+| CI workflow 不变量                 | 退出码 **0**（3 个 workflow）；负向对照 **9 项全过**——8 个故意破坏各自被抓住 + 干净树通过                                                                                                                                                                                   | `python ops/ci/check-workflows.py` + `python ops/ci/selftest.py` |
+| 指标出处校验                       | 退出码 **0**：**23** 条序列 / **9** 条规则 / **3** 块看板 **14** 个面板 / 4 个静态抓取目标全部有出处；负向对照（把 `probe_success` 改成 `probe_success_total`）→ 退出码 **1** 并指名规则与序列                                                                              | `python ops/prometheus/check-rules.py`                           |
+| 开发/生产 compose 隔离             | 退出码 **0**：6 项隔离断言 + **检测器自测 6 项**（对 host-gateway / 3000 / 3307 / 命名 override 各报警，对 8080 与普通配置不报警）。另外做了**真树注入验证**：往 `docker-compose.prod.yml` 注入 `extra_hosts` → 退出 **1** 并指名「production references the host gateway」 | `python ops/ci/check-compose.py`                                 |
+| base + override 可解析             | `docker compose config --quiet` 退出码 **0**（override 存在时自动叠加）                                                                                                                                                                                                     | `docker compose config --quiet`                                  |
+| CI job 数                          | **9** 个：`contracts`、`abi-drift`、`web`、`indexer-e2e`、`format`、`deploy-scripts`、`compose-isolation`、`observability-config`、`workflow-invariants`                                                                                                                    | 读 `.github/workflows/ci.yml`                                    |
+| `/api/metrics`（Task 2.1）         | 新增 **24** 个测试全过；全仓 **711 passed / 0 failed**；生产构建含 `ƒ /api/metrics`；端到端 HTTP **200**、`content-type: text/plain; version=0.0.4; charset=utf-8` 正确、**10** 条序列                                                                                      | `pnpm test` + `pnpm build:web`                                   |
+| `null` 就是 absent（真实数据）     | 阻断共享 `getHealth()` 的数据源后：`voting_index_lag_blocks` **整条缺席**（连 HELP/TYPE 都没有）、`voting_index_last_block` 同样缺席、**`voting_index_configured 1` 仍在**、`voting_index_errors_total` **0 → 1**                                                           | 读 `/api/metrics`                                                |
+| `null` 改成 `0` 会怎样（负向对照） | **恰好 2 个守护测试变红**（22 通过 / 2 失败）——证明测试真的在保护 ADR-0015，而不是摆设                                                                                                                                                                                      | 手动变异后 `pnpm test`                                           |
+| 格式门禁                           | `pnpm format:check` 退出码 **0**                                                                                                                                                                                                                                            | `pnpm format:check`                                              |
 
 ### 前端重设计与信任改造（2026-09-21）实测
 
@@ -298,7 +322,16 @@ docker compose up -d mysql
 CREATE DATABASE voting CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-> **这条 Docker 路径的实测程度**：`docker compose config` 校验通过（YAML、compose schema、`3307:3306` 端口映射与环境变量均正确），但**容器本身没有真正跑起来**——本机 Docker 引擎始终未就绪（API 持续返回 500）。因此本文档中所有 M-1…M-6b 的实测数据都是在**本机已装的 MySQL 8.4.4**（3306）上跑出来的，不是这个容器。用你自己的 MySQL 走的是同一条已验证路径。
+> **这条 Docker 路径的实测程度（2026-09-22 更新，措辞已收窄）。** 准确的表述是：**容器化配置与部署脚本已完成，并且有一批不依赖 Docker 的桩化验证；但镜像从未构建、容器从未启动、`compose up` 从未跑过。**
+>
+> - **已完成并有实测支撑的**：`docker compose config --quiet` 在基础与生产两种 profile 下**退出码均为 0**（即这些文件确实能被真实的 compose CLI 解析，而不是"看起来像 YAML"）；`bash -n` 覆盖 `ops/` 下 **10 个** shell 脚本、**0 失败**；部署脚本桩化自测 **80 项全过**，其负向对照 **7 项全过**；健康门与探测循环打过**真实 HTTP 服务器**。详见[部署与运维](#部署与运维)与[基线记录](docs/aegis/baseline/2026-09-22-containerization-and-delivery.md)。
+> - **未实测的**：镜像体积、镜像内 `mysql2/promise` 能否解析、容器能否起来、`migrate` 在容器内是否幂等、`nginx -t` 与 `nginx -s reload`、两个槽同时运行、零停机探测、告警投递——**全部未测**。
+> - **原因是环境事实，不是取舍**：本机 Docker 引擎不可用，根因是 Windows 可选功能 `VirtualMachinePlatform` 未启用（WSL2 因此无法创建虚拟机），解除需管理员提权**并重启**，本会话暂缓。`docker version` 报的是 `failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine`。
+> - **因此本文档中所有 M-1…M-6h 的实测数据都是在宿主机上跑出来的**（MySQL 8.4.4，3306），不是这个容器。用你自己的 MySQL 走的是同一条已验证路径——**但"同一路径在容器内也成立"这件事本身，没有被验证过**。
+>
+> **能被工具解析 ≠ 能运行。** 这一条在下面反复出现，因为它是本项目里最容易把"配置写好了"误读成"已验证"的地方。
+>
+> 端口映射另有为兼容而做的一处改动：改为绑定回环 `127.0.0.1:3307:3306`。README 与既有用法都走 `127.0.0.1:3307`，因此兼容边界逐字保住，同时数据库不再暴露到任何网络接口——这是更安全的方向。
 
 ### 3. 配置应用
 
@@ -992,6 +1025,122 @@ CONFIRMATIONS=5
 
 ---
 
+## 部署与运维
+
+本阶段把交付形态做成了可发布的样子：**一个镜像承载三个进程角色**（web / migrate / indexer），双槽零停机发布，nginx 切换上游，Prometheus + Grafana + Alertmanager 观测。
+
+运维文档在 `ops/` 下，不在本节重复：
+
+| 文档                                                     | 内容                                                                                                   |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| [`ops/README.md`](ops/README.md)                         | 目录职责、三种启动方式、为什么生产必须设 `WEB_IMAGE`                                                   |
+| [`ops/runbook/deploy.md`](ops/runbook/deploy.md)         | **出事时照着做**：查到在跑哪个版本、发布失败了怎么办、怎么回滚、站点挂了怎么定位、零停机演练、迁移约束 |
+| [`ops/runbook/migrations.md`](ops/runbook/migrations.md) | expand-contract 的完整约束                                                                             |
+| [`ops/server/README.md`](ops/server/README.md)           | 一次性主机准备：Docker、`envsubst`、`deploy` 用户、目录、`.env`、证书、只读监控账号、防火墙            |
+| [`ops/nginx/README.md`](ops/nginx/README.md)             | 上游为什么是**派生物**、为什么只 `reload` 不 `restart`、`/api/metrics` 为什么显式 403                  |
+
+### 一键拉起
+
+```bash
+docker compose up -d --wait          # 本地：单个 web 槽
+```
+
+`--wait` 不是装饰：没有它，"一键拉起"只是"一键启动进程"，与"环境已就绪"是两回事。依赖全部用 `service_healthy` / `service_completed_successfully` 表达，**没有一处 `sleep`**——`sleep` 是猜，healthcheck 是知道。
+
+加上可观测性（7 个观测服务在 `observability` profile 后面，**不在应用启动路径上**）：
+
+```bash
+docker compose --profile observability up -d --wait
+```
+
+这是 ADR-0006 的落地：**监控全挂，DApp 照常服务**。一个会因看板坏掉而停服的系统，等于把故障从观测层传导到了应用层。
+
+### 本地开发回路（`docker-compose.override.yml`）
+
+`docker compose up` 会自动加载 `docker-compose.override.yml`，所以开发者拿到的是一个能用的栈，而不需要知道这个文件存在。它做三件事：给 `web` 发布 `127.0.0.1:3000`（base 刻意不发布任何端口）、把服务端 `RPC_URL` 指向 `host.docker.internal:8545`、给 `migrate`/`indexer` 只读挂载源码。
+
+**`-f` 一旦被显式点名，默认文件集就被替换**，因此生产永远不会从 override 继承任何东西——这正是那些"开发便利"可以无条件写下的理由，而不是靠"生产记得别加载它"。这条性质有机械守卫：`ops/ci/check-compose.py` 断言生产配置里 `host-gateway` / 端口 `3000` / `3307` **各出现 0 次**，生产服务必须**恰为** `{mysql, migrate, web-blue, web-green, nginx, indexer}`，且单槽 `web` 必须已被 profile 停用。
+
+它失败的形态全是静默的：发布的 3000 端口绕过 nginx（连带绕过拒绝 `/api/metrics` 的那条规则），而 `host.docker.internal` 的 `RPC_URL` 在云主机上不存在，表现为**页面能渲染、投票数为 0**。
+
+**源码挂载刻意不给 `web`。** 运行时阶段是 Next.js 的 `standalone` 产物，镜像跑的是 `node web/server.js`，服务的是构建期内嵌的 `.next`——镜像里既没有 watcher 也没有构建步骤，挂源码**不会改变服务内容**；更糟的是服务的 bundle 来自镜像而可见的源码来自工作区，两者一有未提交改动就不一致，排查成本高于收益。**把"看起来在做热更新、其实没有"的配置写进仓库，比不写更坏**——它会让下一个人以为改了源码就生效。UI 的真实回路是宿主机 `pnpm dev` 或 `docker compose up -d --build web`；`migrate` / `indexer` 不同，它们用 `tsx` 直接执行 TypeScript，挂载确实立即生效。
+
+### 生产发布
+
+```bash
+export WEB_IMAGE=<registry>/voting-web
+export WEB_IMAGE_TAG=sha-<12 hex>          # 不可变；部署命令里出现 latest 会被检查器拒绝
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+**两个 `-f` 都要，且顺序固定。** compose 会自动加载 `docker-compose.override.yml`；生产不能依赖一个为开发准备的文件，所以每种环境显式点名自己那一组，而不是靠"那个文件恰好不存在"。
+
+生产服务清单是 `mysql, migrate, web-blue, web-green, nginx, indexer`——单槽 `web` 被 profile 正确停用。**两个槽同时运行是正确的，不是泄漏**：闲置的那个是回滚目标。
+
+发布的顺序性质写在 `ops/deploy/deploy.sh` 里，且**这个顺序是本设计最重要的一条**：
+
+```
+pull → migrate → 起目标槽 → 直连目标槽的健康门 → 切上游 → 观察窗 → 记录
+```
+
+不可颠倒的两处：**新 schema 必须先于新代码**（否则新版本对着还没有表的库启动）；**流量必须只在目标槽通过它自己的健康门之后才切**。健康门经 `PROBE_VIA=<svc>` 在目标容器**内部**执行——槽名 `web-blue`/`web-green` 只在 compose 网络内解析，宿主机 `curl` 根本够不到；若经 nginx 探测，测的就是**旧槽**，无论新槽多坏都会通过。
+
+### 回滚
+
+```bash
+ssh deploy@<server> 'cd /srv/voting && ./ops/deploy/rollback.sh'          # 回到 previous-tag
+ssh deploy@<server> 'cd /srv/voting && ./ops/deploy/rollback.sh <tag>'    # 或指定 tag
+```
+
+**为什么快**：上一个槽仍在运行，所以回滚是改写上游文件并 reload nginx——不拉镜像、不起容器、不预热。这正是"成功发布后不停掉旧槽"的理由，而这条性质由桩化自测的一条**专门断言**保护（见下）。
+
+**回滚不含 schema。** 迁移按 expand-contract 写，保证上一个 release 能在当前 schema 上运行。破坏性变更拆成两次发布。详细约束见 [`ops/runbook/migrations.md`](ops/runbook/migrations.md)。
+
+### 监控入口
+
+**观测栈不发布任何端口。** Grafana 经 SSH 隧道访问：
+
+```bash
+ssh -L 3000:localhost:3000 deploy@<server>
+# 然后打开 http://localhost:3000
+```
+
+端口根本没有映射到宿主机，所以**不存在一个"从公网能看到看板"的地址**——这是网络拓扑的性质，而不是一条以后可能被人改掉的防火墙规则。
+
+`/api/metrics` 由 nginx **显式 403**（`location = /api/metrics { return 403; }`）。这不是多余的一道保险：这个代理把 `/` 下的一切转发给应用，没有这条规则，metrics 端点默认就对公网可达。Prometheus 走内部网络读它，所以在这里拒绝它不花任何代价，却关掉了一处真实暴露。
+
+### 这一节的实测程度（**必读**）
+
+沿用本 README 一贯的标准：**没跑通的不写成"验证过"**。
+
+| 面                                                                   | 状态                                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docker compose config --quiet`（基础 / 生产）                       | **已实测**：两种 profile 退出码均为 **0**；生产服务清单正确；生产配置里 `3307` 出现 **0** 次                                                                                                                                              |
+| `bash -n` 全部 shell 脚本                                            | **已实测**：`ops/` 下 **10 个**脚本、**0 失败**                                                                                                                                                                                           |
+| 部署脚本的顺序性质（桩化）                                           | **已实测**：`ops/deploy/selftest.sh` **80 项全过**                                                                                                                                                                                        |
+| 上面那 80 项**会失败**                                               | **已实测**：`ops/deploy/selftest-controls.py` **7 项全过**——4 组注入故障各被抓住，改回后再次通过                                                                                                                                          |
+| 健康门 / 探测循环打**真实 HTTP 服务器**                              | **已实测**：200→退出 0；死端口→退出 1（`status 000`）；404→退出 1（`status 404`）；预算精度 1s→**1.4s**、3s→**3.4s**、5s→**5.2s**                                                                                                         |
+| 探测循环计数                                                         | **已实测**：全成功 `{"total":5,"succeeded":5,"failed":0,"maxConsecutiveFailures":0}` 退出 0；全失败 `{"total":3,"failed":3,"maxConsecutiveFailures":3,"firstFailureAtSeconds":0}` 退出 1                                                  |
+| CI workflow 不变量 / 指标出处校验 / compose 隔离                     | **已实测**：三个检查器退出码 0，且各自的负向对照**都真的会失败**（8 个 workflow 破坏用例 / 改写序列名 / 注入 host-gateway）                                                                                                               |
+| **镜像构建与体积**                                                   | **未实测：Docker 未运行，镜像从未构建。** 不提供任何体积数字                                                                                                                                                                              |
+| **容器启动 / `compose up` / `--wait` 全 healthy**                    | **未实测：容器从未启动过。**                                                                                                                                                                                                              |
+| **`nginx -t` 与 `nginx -s reload`**                                  | **未实测**：从未真正执行；graceful 行为未观察                                                                                                                                                                                             |
+| **两个槽同时运行**                                                   | **未实测**：从未同时启动过                                                                                                                                                                                                                |
+| **零停机发布（实验组与对照组）**                                     | **未实测**：两组都没做；「秒级回滚」这个具体数字也未测                                                                                                                                                                                    |
+| **`migrate` 在容器内幂等**                                           | **未实测**：容器从未运行（宿主机上的 `pnpm indexer:migrate` 幂等是另一件事，已实测）                                                                                                                                                      |
+| **告警到达 / 监控栈启动 / 看板渲染 / 四个 exporter**                 | **未实测**：监控栈从未启动过，告警从未真实触发过，无 SMTP 凭据                                                                                                                                                                            |
+| **流水线耗时 / GitHub Actions 触发 / 推送镜像 / Trivy 与 SBOM 产物** | **未实测**：`git remote -v` 为空，仓库未推到 GitHub                                                                                                                                                                                       |
+| **服务器部署 / 域名 / TLS / SSH 部署 job**                           | **未实测**：无服务器、无域名、无 TLS                                                                                                                                                                                                      |
+| **arm64**                                                            | **未覆盖**：服务器架构未知，构建只打算做 `linux/amd64`；这也是"用 QEMU 多平台构建会把流水线拖慢数倍"这一取舍的前提，而该前提未验证                                                                                                        |
+| **`render-upstream.sh` 的 `envsubst` 渲染**                          | **未在 Linux 上跑过**（自测里跑的是受控输入）                                                                                                                                                                                             |
+| **容器能否连到宿主机链（`host.docker.internal`）**                   | **未实测**：需引擎；Task 1.6 的验收要求 `chainId` 为 31337 且 `chainHead` 非 null                                                                                                                                                         |
+| **UI 在容器里的开发回路**                                            | **未验证**：运行时是 standalone 产物，挂源码不会热更新；真实回路是宿主机 `pnpm dev` 或 `docker compose up -d --build web`                                                                                                                 |
+| **仓库面密钥扫描**                                                   | **已实测**：`ops/`、`contracts/`、`.github/`、`docs/` 及根文件共 **228 个文件**无真实密钥值（8 处命中全为 `<password>` 占位符或文档里的截断示例）；**但镜像层扫描未测**（镜像不存在），且"故意注入密钥、检查必须抓到"这条负向对照**未做** |
+
+一句话总结这一节：**配置与脚本已完成，并有一批不依赖 Docker 的桩化验证；但镜像从未构建、容器从未启动。** 完整的未实测清单见 [`docs/aegis/baseline/2026-09-22-containerization-and-delivery.md`](docs/aegis/baseline/2026-09-22-containerization-and-delivery.md)，截图清单见 [`docs/aegis/work/2026-09-22-delivery-evidence/90-evidence.md`](docs/aegis/work/2026-09-22-delivery-evidence/90-evidence.md)（全部为**待采集**）。
+
+---
+
 ## 设计取舍与已知局限
 
 这一节是刻意保留的。一个 demo 如果隐藏自己的信任模型，比没有信任模型更糟。
@@ -1125,6 +1274,13 @@ CONFIRMATIONS=5
 - **`rulesHash` 只回答"有没有改"，不回答"改成了什么"。** 要还原具体改动仍需回溯事件。指纹覆盖发起人、问题、截止时间、准入方式、选项列表（含 ID）与白名单；**票数不在其中**——投票不是规则，否则每个收到过票的投票都会显示成"被改过"。
 - **`currentRulesHash()` 是 O(n log n)**，n 为白名单规模（种子数据为 200）。它是 `view`，只在链下调用、不消耗交易 gas，但白名单极大时读取会变慢。合约另新增 `_whitelistKeys` 与索引 mapping，每个不同地址多占两个 slot。
 - **因 ABI 变更（新增 `rulesHash` / `currentRulesHash`），Sepolia 尚未用本轮代码重新部署。** 规则承诺的端到端验证全部在本地链（31337）完成；Sepolia 上现有部署**没有**这两个函数，页面因此会显示 `unknown`——这是正确行为，不是缺陷。
+- **Sepolia 上还没有任何投票，因此现在打不开演示。** 2026-09-22 用只读调用核对过：工厂 `0xcf01c9d5…bf92` 有代码（1933 字节），但 **`pollCount()` 为 0**；`currentRulesHash()` 连续三次调用均 revert、`rulesHash(address)` 同样 revert——即链上那份实现**早于**规则承诺的 ABI 变更。同时实现合约字节数为 **9127**，而当前构建是 **9125**，**差 2 字节**，所以部署的确实不是当前这份字节。
+  **后果要说清楚**：如果现在把面试官领到页面上，他会看到一片 `unknown` 加零个投票——**方案再完整也演示不出来**。这不是"数据少"，是"演示路径不通"。修复动作是重新部署工厂 + 创建一份演示投票（Task 0.4），**本轮未做**。
+- **容器化与 CI/CD 的运行时证据为零。** 镜像从未构建、容器从未启动、`compose up` 从未跑过；`nginx -t` 与 `nginx -s reload` 从未执行；两个槽从未同时运行；零停机的实验组与对照组都没做；监控栈从未启动、告警从未真实触发；GitHub Actions 从未触发（`git remote -v` 为空）；未推送镜像、未产出 Trivy/SBOM；无服务器、无域名、无 TLS、无 SMTP 凭据；**arm64 未覆盖**。已实测的只有配置层面的可解析性、脚本的桩化顺序性质与负向对照、以及打过真实 HTTP 服务器的健康门与探测循环——**能被工具解析 ≠ 能运行**。完整清单见[基线记录](docs/aegis/baseline/2026-09-22-containerization-and-delivery.md)。
+- **`node:24-bookworm-slim` 与"不用 alpine"这两条取舍的前提没有被验证。** 理由（`mysql2` 是 native-ish，musl 下需要额外构建步骤）是推断，不是实测：因为镜像从未构建，**没有任何一次构建证明过它在 debian-slim 上顺利、或在 alpine 上不顺利**。这条写在这里，是为了避免下一个人把它当成已验证的经验。
+- **规格 §13.1 第 11 项（密钥不泄漏）只关掉了一半。** 仓库面已实测：`ops/`、`contracts/`、`.github/`、`docs/` 及根文件共 228 个文件扫描无真实密钥值（8 处命中全为 `<password>` 占位符或文档里的截断示例）。**但镜像层扫描未测**（镜像不存在），且"故意注入一个密钥、检查必须能抓到"这条负向对照**未做**——缺少它，就等于"检查通过"这句话本身没有被检验过。
+- **`.env` 曾被 `next build` 复制进 standalone 产物。** 实测：`.next/standalone/web/.env` 存在（909 字节，与仓库那份同大小），而 `.dockerignore` **挡不住**它——`.dockerignore` 只作用于构建上下文，这一份是构建阶段自己生成的。当前内容只是本地回环地址，风险有限；但只要构建机上有生产 `.env`（带 apiKey 的 RPC、生产库口令），**一次 `docker push` 就等于公开凭据**。Dockerfile 已加 `RUN rm -f /app/web/.env /app/web/.env.*`，**未执行过**。
+- **Windows 上用 pnpm + Next standalone 产出的目录既不自包含也不可移植。** 实测：`mysql2` 的 92 个文件确实被追踪进 `standalone/node_modules/.pnpm/`，但**顶层链接不存在**；`standalone/web/node_modules/next` 是指回仓库绝对路径的 **Junction**；副本移到仓库外后 `require.resolve("mysql2/promise")` → **`MODULE_NOT_FOUND`**。在仓库内之所以能跑，是因为 Node 沿目录向上逃逸到了**仓库根**的 `node_modules`；镜像里代码放在 `/app` 之后这条逃逸路径不存在，**会在运行时崩**。已加构建期自检让它在**构建时**失败，但该自检本身也没有被镜像构建验证过。**Linux 上是否会同样失败未测**（推断是不会，但那是推断）。
 - 合约未审计。**不要用于任何真实选举。**
 
 ---

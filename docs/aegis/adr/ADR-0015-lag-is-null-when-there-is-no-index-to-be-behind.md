@@ -87,3 +87,48 @@ ADR-0011（索引缺失时回退到链）与 ADR-0014（失败不得渲染成具
 ## Boundary
 
 This ADR is an advisory Aegis Method Pack record. It does not grant completion authority or replace project-authoritative architecture sources.
+
+## Amendment - 2026-09-22 - 同一条规则现已延伸到 /api/metrics 暴露面与告警层（见 ADR-0048）
+
+- Status: amended
+
+### Source Evidence
+
+- 实测（计划 §14.5，`DATABASE_URL` 指向不可达端口）：`/api/metrics` 中 `voting_index_lag_blocks` **整条缺席（连 HELP/TYPE 都没有）**，`voting_index_last_block` 同样缺席，而 `voting_index_configured 1` 仍在；`voting_index_errors_total` 由 0 变为 1；`voting_chain_head_block 1662` 与 `voting_poll_count 2` 仍在
+- 实测（计划 §14.5，正常路径）：同一端点在本地链上返回 `voting_index_lag_blocks 0`，是**真实测得的 0**，与缺席在输出上完全不同
+- 实测（计划 §14.5 负向对照）：把 `web/src/lib/metrics.ts` 的 null 分支改成输出 0，**恰好 2 个守护测试变红**（22 通过 / 2 失败）
+- `ops/prometheus/rules/voting.yml` 第 44–57 行：`VotingIndexLagUnknown` = `absent(voting_index_lag_blocks) and on() (voting_index_configured == 1)`，`for: 10m`，`severity: critical`
+- `web/src/lib/metrics.ts`：`family()` 在无样本时返回 `[]`，因此缺席时连 `# HELP` / `# TYPE` 都不出现——`absent()` 匹配序列而不匹配注释，保留元数据会让告警**仍然不触发**
+- 边界：该规则**从未在真实 Prometheus 里触发过**；`promtool check config/rules` 本机未跑；`/api/metrics` 在 `getHealth()` 抛异常时返回 503 的分支**只有代码审查、未实测**（计划 §14.5 末尾）
+
+### Change Summary
+
+同一条规则现已延伸到 /api/metrics 暴露面与告警层（见 ADR-0048）
+
+### Compatibility Boundary
+
+`/api/health` 的字段集合、HTTP 状态码与 `lagBlocks` 的取值规则**一个字未改**，因此本条原有的兼容边界（ADR-0015 的 Compatibility Boundary）原样成立，「索引正常且已同步」的部署返回值仍为 `"0"`。本次修正新增的只是 `/api/metrics` 这一暴露面与一条 `absent()` 告警规则。
+
+### Retirement Impact
+
+若 `/api/metrics` 将来被拆成多个端点，`voting_index_lag_blocks` 的缺席语义必须跟着走，不能在其中之一上退化成 0。若 `lagBlocks` 换成足以承载「不适用 / 未知 / 具体值」三态的显式类型（本条 Retirement Impact 已预告这一方向），指标层的缺席判定应改为从该类型的显式成员渲染，而不是继续从 `null` 推断。若引入多实例部署，`voting_index_errors_total` 的单进程口径必须先改。
+
+### Baseline Sync
+
+- Needed: needed
+- Target: docs/aegis/baseline/2026-09-22-containerization-and-delivery.md
+- Action: create snapshot
+- Reason: 本条原基线同步记的是「基线 §4.3 与 §14 均未把 `lagBlocks` 在无索引/不可达时的语义列为被验证对象」，并已补记一行漂移。本次延伸发生在**新的暴露面**上，既有基线中不存在任何描述它的条目，因此由本阶段的新基线快照登记，并同时登记「规则从未真正触发过」这一未验证边界。
+
+### Evidence References
+
+- web/src/lib/metrics.ts
+- web/src/app/api/metrics/route.ts
+- web/test/metrics.test.ts
+- ops/prometheus/rules/voting.yml
+- docs/aegis/adr/ADR-0048-unreadable-lag-is-absent-not-zero.md
+- docs/aegis/plans/2026-09-22-containerization-cicd-and-observability.md
+
+### Boundary
+
+This amendment is an advisory Aegis Method Pack record. It does not grant completion authority or replace project-authoritative architecture sources.

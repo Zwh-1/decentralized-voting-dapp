@@ -1,0 +1,57 @@
+# Host firewall: the allowlist, for review and for re-application.
+#
+#   sudo bash ops/server/ufw.rules
+#
+# Produces the state below. The interesting part is what is absent.
+#
+#   sudo ufw status verbose
+#   Status: active
+#   Logging: on (low)
+#   Default: deny (incoming), allow (outgoing), disabled (routed)
+#   To                         Action      From
+#   --                         ------      ----
+#   22/tcp                     ALLOW IN    Anywhere
+#   80/tcp                     ALLOW IN    Anywhere
+#   443/tcp                    ALLOW IN    Anywhere
+#
+# Why only these three
+# --------------------
+#
+# SSH, HTTP, HTTPS. Nothing else is reachable from the internet, and in
+# particular these three are deliberately NOT opened:
+#
+#   3306 / 3307   MySQL. Reached only over the compose `backend` network, which
+#                 is `internal: true` and therefore has no route out or in.
+#                 The production compose file also resets the base file's
+#                 `127.0.0.1:3307:3306` mapping to empty, so there is no host
+#                 port to reach even if this rule were absent.
+#
+#   9090          Prometheus.
+#   3001 / 3000   Grafana. Reached through an SSH tunnel:
+#                   ssh -L 3000:localhost:3000 deploy@<server>
+#                 A tunnel is authenticated and encrypted; a published port with
+#                 a login form is a different risk profile for the same access.
+#
+#   9093          Alertmanager.
+#
+#   /api/metrics  Not a port, but the same idea: nginx answers 403 for it, so it
+#                 is not publicly readable even though it is served on 443.
+#
+# The default-deny is the load-bearing line. Each `allow` below is a decision
+# someone made; the default is what protects the ports nobody thought about.
+
+set -eu
+
+ufw --force reset
+ufw default deny incoming
+ufw default allow outgoing
+
+ufw allow 22/tcp comment 'SSH'
+ufw allow 80/tcp comment 'HTTP, redirects to HTTPS and serves ACME challenges'
+ufw allow 443/tcp comment 'HTTPS'
+
+ufw --force enable
+
+echo
+echo 'Expected: only 22, 80 and 443 are ALLOW IN.'
+ufw status verbose
