@@ -125,7 +125,19 @@ case "$*" in
   # running container holds. The fast rollback path keys off this exactly.
   *"inspect"*)           [ -n "${FAKE_RUNNING_IMAGE:-}" ] && printf '%s\n' "$FAKE_RUNNING_IMAGE"; exit 0 ;;
   # `nginx -t` inside the nginx container.
-  *"nginx -t"*)          [ "${FAKE_NGINX_TEST_FAIL:-0}" = "1" ] && exit 1 || exit 0 ;;
+  # `nginx -t` inside the nginx container. When it fails it prints a reason, the
+  # way nginx does: the render script is expected to show that reason rather than
+  # collapse every failure into "nginx rejected the rendered upstream", which
+  # cannot be acted on (a log format used before it is declared and an
+  # unresolvable upstream need opposite fixes).
+  *"nginx -t"*)
+    if [ "${FAKE_NGINX_TEST_FAIL:-0}" = "1" ]; then
+      printf '[emerg] 1#1: fake failure in /etc/nginx/nginx.conf:35\n' >&2
+      printf 'nginx: configuration file /etc/nginx/nginx.conf test failed\n' >&2
+      exit 1
+    fi
+    exit 0
+    ;;
   *"nginx -s reload"*)   [ "${FAKE_NGINX_RELOAD_FAIL:-0}" = "1" ] && exit 1 || exit 0 ;;
   # `docker compose exec -T <slot> node -e ...`, the in-network health probe. It
   # prints the HTTP status the way the node one-liner does.
@@ -309,6 +321,10 @@ unset FAKE_NGINX_TEST_FAIL
 [ "$RC" -ne 0 ] && ok "render-upstream exits non-zero" || bad "a rejected config should fail"
 if upstream_points_at blue; then ok "the previous upstream was restored"; else bad "the previous upstream was not restored"; fi
 assert_lacks "nginx was not reloaded with a config it rejected" "nginx -s reload" "$FAKE_LOG"
+# The rejected config's reason has to reach the operator. Redirecting nginx's
+# output to /dev/null (as this script did at first) leaves only "nginx rejected
+# the rendered upstream", which is true, urgent, and tells you nothing.
+assert_contains "nginx's own reason is shown" "fake failure in /etc/nginx/nginx.conf" "$OUT"
 
 # ---------------------------------------------------------------------------
 printf '\ncase 8: render-upstream refuses an unknown slot\n'
@@ -333,6 +349,13 @@ assert_eq "it exits 0 with no nginx running" "0" "$RC"
 if upstream_points_at blue; then ok "the upstream was written for web-blue"; else bad "the upstream was not written"; fi
 assert_has "the config was still validated, in a throwaway container" "nginx -t" "$FAKE_LOG"
 assert_has "it validated via run, not by exec into a live server" "run --rm --no-deps" "$FAKE_LOG"
+# `nginx -t` resolves the upstream names while parsing, and on a host that has
+# never started there is no container for Docker's DNS to answer with -- so the
+# validation container is handed the two slot names in its own /etc/hosts. Without
+# this the first render fails with "host not found in upstream", which is about
+# DNS and not about the file that was just rendered.
+assert_has "the validation container is told where the slots are" \
+  "127.0.0.1 web-blue web-green" "$FAKE_LOG"
 assert_lacks "it did not reload a server that is not running" "nginx -s reload" "$FAKE_LOG"
 assert_contains "it says so instead of pretending" "not running yet" "$OUT"
 

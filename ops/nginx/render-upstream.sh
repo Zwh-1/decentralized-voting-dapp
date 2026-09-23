@@ -98,6 +98,17 @@ fi
 # A throwaway container gets the same image and the same mounts, so it reads the
 # same rendered configuration: the check is exactly as strong, and it works
 # whether or not the stack has been started yet.
+#
+# `nginx -t` resolves the names in the upstream block while parsing it, and on a
+# host whose stack has never started there is no container called web-blue for
+# Docker's DNS to answer with. The check then failed with
+#   [emerg] host not found in upstream "web-blue:3000"
+# which says nothing about the file being wrong -- the file is fine, nobody is
+# running yet. So the validation container gets the two slot names in its own
+# /etc/hosts. Exactly the names, and only inside the throwaway container: what is
+# being tested is still the real rendered file read from the real mount path, and
+# whether the slot actually answers is what the health gate and the observation
+# window are for.
 backup=""
 if [ -f "$UPSTREAM_FILE" ]; then
   backup="$(mktemp)"
@@ -109,7 +120,10 @@ chmod 0644 "$UPSTREAM_FILE"
 
 log "rendered upstream -> web-$slot"
 
-if ! docker compose $COMPOSE_FILES run --rm --no-deps -T "$NGINX_SERVICE" nginx -t >/dev/null 2>&1; then
+validation_log=$(mktemp)
+if ! docker compose $COMPOSE_FILES run --rm --no-deps -T "$NGINX_SERVICE" \
+  sh -c "printf '127.0.0.1 web-blue web-green\n' >>/etc/hosts && nginx -t" \
+  >"$validation_log" 2>&1; then
   if [ -n "$backup" ]; then
     cp "$backup" "$UPSTREAM_FILE"
     log "nginx rejected the rendered upstream; restored the previous one"
@@ -118,8 +132,16 @@ if ! docker compose $COMPOSE_FILES run --rm --no-deps -T "$NGINX_SERVICE" nginx 
     log "nginx rejected the rendered upstream; removed it (there was no previous one)"
   fi
   [ -n "$backup" ] && rm -f "$backup"
+  # The reason, on stderr, before the summary. Discarding it (the first version of
+  # this script redirected to /dev/null) turns every failure into the same
+  # unactionable sentence, and the two failures seen so far -- a log format used
+  # before it was declared, and an unresolvable upstream -- need opposite fixes.
+  printf '  nginx said:\n' >&2
+  tail -5 "$validation_log" | sed 's/^/    /' >&2
+  rm -f "$validation_log"
   die "nginx -t failed after rendering the upstream for web-$slot; traffic was not moved"
 fi
+rm -f "$validation_log"
 [ -n "$backup" ] && rm -f "$backup"
 
 # --- reload -----------------------------------------------------------------

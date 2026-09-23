@@ -42,12 +42,29 @@ a startup failure. So:
 - the upstream file is written by `render-upstream.sh`.
 
 For the render to be runnable first, it validates the rendered file in a
-**throwaway container** (`docker compose run --rm --no-deps nginx nginx -t`)
-rather than by `exec`ing into the running one. That is not a style choice: with
-`exec`, the first `deploy.sh` on a fresh host failed at the switch step -- every
-time -- because there was no running nginx to exec into, and there could not be
-one. The reload is skipped, with a line saying so, when nothing is running yet;
-nginx reads the file when it starts.
+**throwaway container**
+(`docker compose run --rm --no-deps nginx sh -c '… nginx -t'`) rather than by
+`exec`ing into the running one. That is not a style choice: with `exec`, the
+first `deploy.sh` on a fresh host failed at the switch step -- every time --
+because there was no running nginx to exec into, and there could not be one. The
+reload is skipped, with a line saying so, when nothing is running yet; nginx reads
+the file when it starts.
+
+That throwaway container gets one addition: `127.0.0.1 web-blue web-green` in its
+own `/etc/hosts`. `nginx -t` resolves the names in the `upstream` block while
+parsing it, and on a host that has never started there is no container called
+`web-blue` for Docker's DNS to answer with — so the first render failed with
+`[emerg] host not found in upstream "web-blue:3000"`, which is true, about DNS,
+and not about the file that was just rendered. Only the two real slot names are
+stubbed, so a typo in the rendered file still fails the check, and the file being
+read is still the real one from the real mount path. Whether the slot actually
+answers is the health gate's and the observation window's job.
+
+When the check does reject a config, the script now prints what nginx said before
+its own summary. Both failures seen so far came from a real first render — a
+`log_format` declared after the `access_log` that names it, and the unresolvable
+upstream above — and they need opposite fixes, so "nginx rejected the rendered
+upstream" on its own is not enough to act on.
 
 Bootstrap order on a new host (full sequence in `ops/server/README.md`):
 
