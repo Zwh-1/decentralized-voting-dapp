@@ -149,7 +149,23 @@ COPY --from=builder /app/web/tsconfig.json ./web/tsconfig.json
 # with a Go that has those fixed. Both are already resolved in pnpm-lock.yaml,
 # so this moves the image onto a tree the lockfile already describes rather than
 # introducing anything new.
-RUN npm install --prefix /app --no-save --no-audit --no-fund tsx@4.23.13
+#
+# npm itself is upgraded first, and it is the last scanner finding this image can
+# fix. The four remaining HIGH entries -- brace-expansion, ip-address, tar and
+# undici -- are all bundled dependencies of npm 11.19.0, which is what the base
+# image ships: they live under /usr/local/lib/node_modules/npm/node_modules, and
+# none of them is in our own tree. npm 12.1.0 depends on tar ^7.5.22 and carries
+# the newer versions of the rest, so upgrading npm removes them.
+#
+# `npm install -g npm@12.1.0` rather than `@latest`: 12.1.0 declares
+# engines.node "^22.22.2 || ^24.15.0 || >=26.0.0", and the base image resolves to
+# node 24.21.0, which satisfies it. Pinning keeps the upgrade reviewable instead
+# of letting it drift with whatever latest happens to be.
+#
+# This runs before the tsx install so that install uses the new npm, which also
+# keeps the two in one layer.
+RUN npm install -g npm@12.1.0 --no-audit --no-fund \
+ && npm install --prefix /app --no-save --no-audit --no-fund tsx@4.23.13
 
 COPY ops/indexer/entrypoint.sh /app/ops/indexer/entrypoint.sh
 RUN chmod +x /app/ops/indexer/entrypoint.sh
