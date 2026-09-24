@@ -140,7 +140,16 @@ COPY --from=builder /app/web/tsconfig.json ./web/tsconfig.json
 #
 # This is the price of one image serving three roles, and it is recorded in the
 # ADR that covers the tsx decision.
-RUN npm install --prefix /app --no-save --no-audit --no-fund tsx@4.20.6
+#
+# Keep this version identical to the `tsx` devDependency in web/package.json.
+# It is a second place the same version is written, so it can drift -- and it
+# did: at 4.20.6 this pulled esbuild 0.25.12, whose embedded Go runtime
+# (go1.23.12) carries roughly two dozen HIGH/CRITICAL Go standard library CVEs
+# that the image scanner reports. 4.23.13 pulls esbuild 0.28.2, which is built
+# with a Go that has those fixed. Both are already resolved in pnpm-lock.yaml,
+# so this moves the image onto a tree the lockfile already describes rather than
+# introducing anything new.
+RUN npm install --prefix /app --no-save --no-audit --no-fund tsx@4.23.13
 
 COPY ops/indexer/entrypoint.sh /app/ops/indexer/entrypoint.sh
 RUN chmod +x /app/ops/indexer/entrypoint.sh
