@@ -169,6 +169,63 @@ jobs:
           sarif_file: trivy.sarif
           category: trivy
 
+      # The SARIF upload is where the findings *live*, but a failed release has
+      # to say out loud what failed it. Without this, "Trivy exited 1" is all the
+      # log shows, and the answer to "blocked by what?" is one authenticated
+      # click away in a tab most people reading a failed job will not open.
+      #
+      # Reads the SARIF that was just produced rather than re-running the scan:
+      # a second scan would be a second vulnerability database, and the table
+      # could then disagree with the gate that actually failed.
+      - name: Summarise the findings
+        if: always()
+        run: |
+          node -e '
+            const fs = require("fs");
+            if (!fs.existsSync("trivy.sarif")) {
+              console.log("no trivy.sarif produced -- the scan did not run");
+              process.exit(0);
+            }
+            const sarif = JSON.parse(fs.readFileSync("trivy.sarif", "utf8"));
+            const rows = [];
+            for (const run of sarif.runs ?? []) {
+              for (const result of run.results ?? []) {
+                const rule = (run.tool?.driver?.rules ?? [])
+                  .find(r => r.id === result.ruleId);
+                const tags = rule?.properties?.tags ?? [];
+                const severity = tags
+                  .map(t => String(t).toUpperCase())
+                  .find(t => t === "CRITICAL" || t === "HIGH") ?? "UNKNOWN";
+                const loc = result.locations?.[0]?.physicalLocation?.artifactLocation;
+                rows.push({
+                  severity,
+                  id: result.ruleId ?? "?",
+                  pkg: rule?.shortDescription?.text ?? result.message?.text ?? "?",
+                  target: loc?.uri ?? "?",
+                });
+              }
+            }
+            if (rows.length === 0) {
+              console.log("no HIGH or CRITICAL findings");
+              process.exit(0);
+            }
+            const rank = { CRITICAL: 0, HIGH: 1, UNKNOWN: 2 };
+            rows.sort((a, b) => (rank[a.severity] - rank[b.severity])
+              || a.pkg.localeCompare(b.pkg));
+            const counts = rows.reduce((acc, r) => {
+              acc[r.severity] = (acc[r.severity] ?? 0) + 1; return acc;
+            }, {});
+            console.log(`${rows.length} HIGH/CRITICAL finding(s):`,
+              JSON.stringify(counts));
+            console.log("");
+            console.log("severity | package | vulnerability | target");
+            console.log("---|---|---|---");
+            for (const r of rows) {
+              const pkg = r.pkg.replace(/\|/g, "\\|").slice(0, 80);
+              console.log(`${r.severity} | ${pkg} | ${r.id} | ${r.target}`);
+            }
+          ' 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: SBOM
         uses: anchore/sbom-action@v0
         with:
