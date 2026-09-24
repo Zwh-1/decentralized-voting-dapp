@@ -37,7 +37,7 @@ importers:
         version: 22.20.4
       forge-std:
         specifier: github:foundry-rs/forge-std#v1.16.2
-        version: git+ssh://git@github.com/foundry-rs/forge-std.git#bf647bd6046f2f7da30d0c2bf435e5c76a780c1b
+        version: https://codeload.github.com/foundry-rs/forge-std/tar.gz/bf647bd6046f2f7da30d0c2bf435e5c76a780c1b
       hardhat:
         specifier: 3.17.0
         version: 3.17.0
@@ -1935,8 +1935,8 @@ packages:
       debug:
         optional: true
 
-  forge-std@git+ssh://git@github.com/foundry-rs/forge-std.git#bf647bd6046f2f7da30d0c2bf435e5c76a780c1b:
-    resolution: {commit: bf647bd6046f2f7da30d0c2bf435e5c76a780c1b, repo: git@github.com:foundry-rs/forge-std.git, type: git}
+  forge-std@https://codeload.github.com/foundry-rs/forge-std/tar.gz/bf647bd6046f2f7da30d0c2bf435e5c76a780c1b:
+    resolution: {gitHosted: true, integrity: sha512-oHf+awjQrrLSzWgSdQv6exE1+0cmCHIxGGmzQJ9pX5F/pEQq1yHGwfkd++cC1lF7z9edarEX8GgHL5nq3MaF8A==, tarball: https://codeload.github.com/foundry-rs/forge-std/tar.gz/bf647bd6046f2f7da30d0c2bf435e5c76a780c1b}
     version: 1.16.2
 
   form-data@4.0.6:
@@ -5301,7 +5301,7 @@ snapshots:
       debug: 4.4.3(supports-color@7.2.0)
     optional: true
 
-  forge-std@git+ssh://git@github.com/foundry-rs/forge-std.git#bf647bd6046f2f7da30d0c2bf435e5c76a780c1b: {}
+  forge-std@https://codeload.github.com/foundry-rs/forge-std/tar.gz/bf647bd6046f2f7da30d0c2bf435e5c76a780c1b: {}
 
   form-data@4.0.6:
     dependencies:
