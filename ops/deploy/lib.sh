@@ -63,7 +63,17 @@ state_dir() {
 read_state() {
   local file
   file="$(state_dir)/$1"
-  [ -f "$file" ] && cat "$file" || true
+  # `if` rather than `[ -f "$file" ] && cat "$file" || true`. The one-liner reads
+  # as "cat it if it is there, otherwise nothing", but `&&`/`||` do not mean that:
+  # `|| true` also runs when cat EXISTED and then failed, which is a different
+  # case that happens to be harmless here -- and shellcheck flags the pattern
+  # (SC2015) on every version, for exactly that reason. The explicit form says
+  # what it means and returns 0 either way, which is what callers rely on: a
+  # never-written state file is the normal first-deploy case, not an error.
+  if [ -f "$file" ]; then
+    cat "$file"
+  fi
+  return 0
 }
 
 # Written atomically, because the readers run at arbitrary moments: nginx reads
