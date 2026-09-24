@@ -109,6 +109,26 @@ ENV HOSTNAME=0.0.0.0
 
 WORKDIR /app
 
+# Apply the base image's pending security updates.
+#
+# The last finding the scanner reports on this image is tzdata at
+# 2026b-0+deb12u1, flagged by the Debian LTS advisory DLA-4792-1. It is a package
+# the base image ships and Debian has already published a fixed version for, so
+# it is a finding we can clear rather than one we have to live with.
+#
+# `upgrade` rather than `install tzdata`: apt will not move an already-installed
+# package forward on install alone, and doing only tzdata would leave the next
+# advisory to be handled the same way, one package at a time. Upgrading the whole
+# set is the same command and removes that whole class of follow-up.
+#
+# DEBIAN_FRONTEND because tzdata's postinst asks for a timezone interactively and
+# would otherwise hang the build with no output. The lists are removed in the
+# same layer so they do not end up in the image.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
 # Runtime dependencies, with pnpm's relative symlinks intact.
 COPY --from=runtime-deps /app/node_modules ./node_modules
 COPY --from=runtime-deps /app/web/node_modules ./web/node_modules
