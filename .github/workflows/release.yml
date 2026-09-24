@@ -137,7 +137,10 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Trivy (fails the release on HIGH or CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
+        # The tag is `v0.28.0`, not `0.28.0`. An unresolvable ref does not fail
+        # this step -- it fails "Set up job" two seconds in, with no executed
+        # step and no log line naming the action that could not be resolved.
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: ${{ env.IMAGE }}@${{ needs.build.outputs.digest }}
           format: sarif
