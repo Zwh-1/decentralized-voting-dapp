@@ -137,10 +137,21 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Trivy (fails the release on HIGH or CRITICAL)
-        # The tag is `v0.28.0`, not `0.28.0`. An unresolvable ref does not fail
-        # this step -- it fails "Set up job" two seconds in, with no executed
-        # step and no log line naming the action that could not be resolved.
-        uses: aquasecurity/trivy-action@v0.28.0
+        # Two separate traps, both of which surface as the same two-second
+        # "Set up job" failure, with no executed step and no log line naming the
+        # action that could not be resolved.
+        #
+        #   1. The tag is `v0.36.0`, not `0.36.0` -- every tag in this action's
+        #      repository carries the `v` prefix.
+        #   2. The version matters, not just the prefix. Up to v0.30.0 this action
+        #      pinned its own dependency on a *mutable* tag
+        #      (`aquasecurity/setup-trivy@v0.2.1`, then `@v0.2.2`). Those tags no
+        #      longer exist upstream, which makes every older release of this
+        #      action permanently unresolvable -- a release that worked when it
+        #      was written stops working later, with no change on our side.
+        #      From v0.33.1 on, the dependency is pinned to a commit SHA, which
+        #      cannot be deleted out from under a build.
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}@${{ needs.build.outputs.digest }}
           format: sarif
