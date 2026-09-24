@@ -238,6 +238,21 @@ jobs:
         # projection that mixed two polls' votes would double-count here.
         run: pnpm run seed:local
 
+      - name: Publish the seeded address to the app
+        # `seed-local.ts` deploys a NEW factory on this fresh chain and writes the
+        # deployment to contracts/deployments/31337.json -- but the app does not
+        # read that file. It reads web/src/lib/contracts/deployments.ts, which is
+        # GENERATED from it by `export-abi`. The seed script's own docstring says
+        # so: it writes the record "so `export-abi` publishes it to
+        # web/src/lib/contracts".
+        #
+        # Without this step the app kept the previous chain's address: the drain
+        # scanned for a factory this chain never had, and the consistency check
+        # called `allPolls()` on an address with no code --
+        #   ContractFunctionExecutionError: "allPolls" returned no data ("0x")
+        # which reads like a broken contract and is really a missing step.
+        run: pnpm run export-abi
+
       - name: Index the chain
         run: pnpm run indexer:drain
 
