@@ -34,6 +34,7 @@ needs no modification to run.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import shutil
 import subprocess
@@ -42,8 +43,17 @@ import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
-# `bash` from Git for Windows; the scripts are POSIX bash.
-BASH = r"C:\Program Files\Git\bin\bash.exe"
+# The `bash` that runs the copied self-test.
+#
+# Git for Windows ships bash at a fixed path that is not on PATH; everywhere else
+# (which includes the Linux runner CI uses) it is just `bash`.
+#
+# This was hardcoded to the Windows path, so on Linux the step that runs this file
+# died with FileNotFoundError before it checked anything -- a control that could
+# never pass where it ran, reporting nothing about the self-test. It stayed hidden
+# because the step before it in the job, shellcheck, failed first and the rest were
+# skipped.
+BASH = r"C:\Program Files\Git\bin\bash.exe" if os.name == "nt" else "bash"
 
 
 def run_in(root: pathlib.Path) -> tuple[int, str]:
