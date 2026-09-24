@@ -94,9 +94,11 @@ jobs:
           --health-retries=20
 
     env:
-      # Only DATABASE_URL is consumed here, by `indexer:migrate`. The other two
-      # are kept so the schema step runs under the same environment the app uses
-      # locally, but no step in this job talks to a chain.
+      # `DATABASE_URL` is consumed by `indexer:migrate` and by the derivation
+      # suite's SQL leg; the unit-test step clears it for itself because it runs
+      # before the schema exists. `RPC_URL` / `CHAIN_ID` / `CONFIRMATIONS` keep
+      # this job under the same environment the app uses locally, but no step here
+      # talks to a chain.
       #
       # Boundary: this job does NOT exercise the indexer end to end. Nothing here
       # starts a node, seeds, drains or runs the consistency check — the unit
@@ -124,8 +126,21 @@ jobs:
         run: pnpm run typecheck
 
       - name: Unit tests
-        # The indexer's decision logic and log decoding, tested with fakes and
-        # no chain or database in play.
+        # The indexer's decision logic and log decoding, tested with fakes.
+        #
+        # The derivation suite has a second leg that runs the same rows through
+        # the REAL MySQL views, and `connectTestDatabase` takes it only when
+        # DATABASE_URL is set and non-empty (`url === undefined || url.length === 0`
+        # means "none configured"). At this point in the job the schema does not
+        # exist yet, so the variable is cleared for this step on purpose; the
+        # real-views leg runs further down, after the migration.
+        #
+        # Without this, the job-level DATABASE_URL leaked in, the SQL leg ran
+        # against an empty database, and the suite failed with 17 x
+        #   Table 'voting.polls' doesn't exist
+        # which reads like 17 broken tests and is really one broken order.
+        env:
+          DATABASE_URL: ""
         run: pnpm run test:indexer
 
       - name: Apply the schema to a real MySQL
