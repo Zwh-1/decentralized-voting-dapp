@@ -224,6 +224,31 @@ jobs:
               const pkg = r.pkg.replace(/\|/g, "\\|").slice(0, 80);
               console.log(`${r.severity} | ${pkg} | ${r.id} | ${r.target}`);
             }
+
+            // Also emit the list as a workflow annotation.
+            //
+            // The step summary and the SARIF upload are the durable places for
+            // this, but both are behind repository read access. A release that
+            // failed has to be diagnosable from the run alone, without signing
+            // in, and annotations are the one channel that survives that --
+            // they are readable through the public check-runs API.
+            //
+            // GitHub needs newlines as %0A inside an annotation message, and a
+            // literal "::" would end the command early, so both are escaped.
+            const esc = (s) => String(s)
+              .replace(/%/g, "%25")
+              .replace(/\r?\n/g, "%0A")
+              .replace(/::/g, "%3A%3A");
+            const compact = rows
+              .slice(0, 60)
+              .map(r => `${r.severity} ${r.id} ${r.pkg}`)
+              .join("\n");
+            const more = rows.length > 60
+              ? `\n... and ${rows.length - 60} more (see the job summary)`
+              : "";
+            console.log(`::error title=${esc(
+              `${rows.length} HIGH/CRITICAL finding(s) ${JSON.stringify(counts)}`
+            )}::${esc(compact + more)}`);
           ' 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: SBOM
