@@ -39,11 +39,10 @@
 
 set -euo pipefail
 
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-# shellcheck source=lib.sh
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# shellcheck source=ops/deploy/lib.sh
 . "$here/lib.sh"
 
-nginx_service=${NGINX_SERVICE:-nginx}
 compose_files=${COMPOSE_FILES:--f docker-compose.yml -f docker-compose.prod.yml}
 health_timeout=${HEALTH_TIMEOUT:-60}
 observe_seconds=${OBSERVE_SECONDS:-30}

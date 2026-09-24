@@ -368,9 +368,30 @@ jobs:
 
       - name: Validate Alertmanager configuration
         run: |
-          docker run --rm -v "$PWD/ops/alertmanager:/p:ro" \
+          # amtool validates the configuration it is HANDED. What ships here is a
+          # template: ops/alertmanager/entrypoint.sh substitutes five SMTP values
+          # into it at container start. Handing over the template directly means
+          # validating a file whose smtp_from is the literal text `${SMTP_FROM}`,
+          # which is not an email address -- so the check failed on the
+          # placeholder rather than on the configuration, and could never pass
+          # whatever the configuration said. The failure named no real problem.
+          #
+          # Render it exactly the way the entrypoint does -- same five names, same
+          # envsubst whitelist -- and validate the result. The values are obvious
+          # fakes on purpose: a check must not depend on a real mailbox, and
+          # `.example.com` is reserved for exactly this.
+          sudo apt-get install -y gettext-base
+          mkdir -p /tmp/amcheck
+          SMTP_SMARTHOST=smtp.example.com:587 \
+            SMTP_FROM=alerts@example.com \
+            SMTP_USERNAME=alerts@example.com \
+            SMTP_PASSWORD=not-a-real-password \
+            ALERT_EMAIL_TO=oncall@example.com \
+            envsubst '${SMTP_SMARTHOST} ${SMTP_FROM} ${SMTP_USERNAME} ${SMTP_PASSWORD} ${ALERT_EMAIL_TO}' \
+            < ops/alertmanager/alertmanager.yml.tmpl > /tmp/amcheck/alertmanager.yml
+          docker run --rm -v /tmp/amcheck:/p:ro \
             --entrypoint amtool prom/alertmanager:v0.28.0 \
-            check-config /p/alertmanager.yml.tmpl
+            check-config /p/alertmanager.yml
 
   # Repository-specific workflow invariants: no ssh-keyscan, no
   # pull_request_target, no mutable tag as a deploy input, and the deploy lock

@@ -36,8 +36,9 @@
 
 set -euo pipefail
 
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-# shellcheck source=lib.sh
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# shellcheck source=ops/deploy/lib.sh
+# shellcheck source=ops/deploy/lib.sh
 . "$here/lib.sh"
 
 tag=${1:-}
@@ -45,7 +46,6 @@ tag=${1:-}
 
 require_env WEB_IMAGE
 
-nginx_service=${NGINX_SERVICE:-nginx}
 compose_files=${COMPOSE_FILES:--f docker-compose.yml -f docker-compose.prod.yml}
 health_timeout=${HEALTH_TIMEOUT:-60}
 observe_seconds=${OBSERVE_SECONDS:-30}
@@ -61,7 +61,6 @@ compose() { docker compose $compose_files "$@"; }
 # question worth leaving to that.
 export WEB_IMAGE_TAG="$tag"
 
-now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # --- which slot are we on, and which one is the target ----------------------
 #

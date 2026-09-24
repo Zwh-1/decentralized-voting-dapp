@@ -33,8 +33,8 @@
 
 set -euo pipefail
 
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-# shellcheck source=lib.sh
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# shellcheck source=ops/deploy/lib.sh
 . "$here/lib.sh"
 
 mode=running

@@ -38,9 +38,17 @@
 # only says "deploy succeeded" -- and a deploy that moved traffic early would look
 # identical from the outside until the day it mattered.
 
+# [ cond ] && ok || bad is this harness's idiom, and it is safe here: ok always
+# returns 0, so bad cannot run when the condition was true. The directive has to
+# be above every command in the file to apply to all of them.
+# shellcheck disable=SC2015
 set -euo pipefail
 
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# [ cond ] && ok || bad is this harness's idiom, and it is safe here: ok always
+# returns 0, so ad cannot run when the condition was true.
+# shellcheck disable=SC2015
+
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 ORIGINAL_PATH=$PATH
 
 pass=0

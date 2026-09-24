@@ -38,6 +38,7 @@ set -eu
 template=/etc/alertmanager/alertmanager.yml.tmpl
 rendered=/tmp/alertmanager.yml
 
+# shellcheck disable=SC2016 # envsubst must receive the literal ${...} names, not their values
 SUBST_VARS='${SMTP_SMARTHOST} ${SMTP_FROM} ${SMTP_USERNAME} ${SMTP_PASSWORD} ${ALERT_EMAIL_TO}'
 
 # Fail before rendering rather than after: an empty password produces a config

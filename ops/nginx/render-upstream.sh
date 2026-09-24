@@ -24,6 +24,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=ops/deploy/lib.sh
 . "$here/../deploy/lib.sh"
 
 # --- where things live ------------------------------------------------------
@@ -70,11 +71,13 @@ tmp="$UPSTREAM_FILE.$$"
 # The template contains exactly one substitution. envsubst without a variable
 # list would also replace any `$` that appears in the file's own comments, so the
 # variable is named explicitly.
+# shellcheck disable=SC2016 # single quotes are the point: envsubst must see the literal ${ACTIVE_SLOT}
 ACTIVE_SLOT="web-$slot" envsubst '${ACTIVE_SLOT}' <"$TEMPLATE" >"$tmp"
 
 # A generated file that failed to substitute would contain the literal
 # `${ACTIVE_SLOT}`, and nginx would treat it as a hostname. Checking for it turns
 # a substitution bug into a clear failure instead of a 502 much later.
+# shellcheck disable=SC2016 # ditto: this greps for the literal text
 if grep -q '\${ACTIVE_SLOT}' "$tmp"; then
   rm -f "$tmp"
   die "the template still contains an unsubstituted \${ACTIVE_SLOT}"
@@ -121,6 +124,7 @@ chmod 0644 "$UPSTREAM_FILE"
 log "rendered upstream -> web-$slot"
 
 validation_log=$(mktemp)
+# shellcheck disable=SC2086 # deliberately split into separate -f arguments
 if ! docker compose $COMPOSE_FILES run --rm --no-deps -T "$NGINX_SERVICE" \
   sh -c "printf '127.0.0.1 web-blue web-green\n' >>/etc/hosts && nginx -t" \
   >"$validation_log" 2>&1; then
@@ -153,8 +157,10 @@ rm -f "$validation_log"
 # step that has to ask. On a host's first render there is no nginx process yet:
 # the file written above is what lets it start. Failing there would put the
 # deadlock back, one step later.
+# shellcheck disable=SC2086 # deliberately split into separate -f arguments
 if docker compose $COMPOSE_FILES ps --status running --services 2>/dev/null |
   grep -qx "$NGINX_SERVICE"; then
+  # shellcheck disable=SC2086 # deliberately split into separate -f arguments
   if ! docker compose $COMPOSE_FILES exec -T "$NGINX_SERVICE" nginx -s reload; then
     die "nginx reload failed; the previous workers are still serving web-$(read_state active-slot)"
   fi

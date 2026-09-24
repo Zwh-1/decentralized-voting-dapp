@@ -98,5 +98,5 @@ escape_label_value() {
 # The directory this file lives in, so a caller can find its siblings without
 # caring where the repository was checked out.
 deploy_script_dir() {
-  CDPATH= cd -- "$(dirname -- "$0")" && pwd
+  CDPATH='' cd -- "$(dirname -- "$0")" && pwd
 }
