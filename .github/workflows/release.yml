@@ -128,6 +128,15 @@ jobs:
       security-events: write
       id-token: write
       packages: write
+      # Required by actions/attest-build-provenance, and the omission only shows
+      # up once the step actually runs: it failed with "Resource not accessible
+      # by integration" from POST /repos/{owner}/{repo}/attestations. The step had
+      # never executed before, because Trivy failing kept it skipped -- so the
+      # missing scope was invisible for as long as the scan was broken.
+      #
+      # id-token: write alone is not enough: the OIDC token proves who is asking,
+      # and this scope is what allows the resulting attestation to be written.
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
